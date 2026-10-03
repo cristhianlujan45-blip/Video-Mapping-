@@ -131,6 +131,9 @@ Este entorno de desarrollo no tenía acceso al SDK de Android, así que:
   de render con un trapecio deformado confirmó que cada esquina del patrón cae
   exactamente en su posición.
 
+- GitHub Actions compila el proyecto completo con el SDK real (AGP, Compose, Media3),
+  pasa todos los tests y genera el APK de depuración (`lujan-mapping-debug-apk`).
+
 **Falta probarlo en un dispositivo real:** reproducción de video, salida HDMI y gestos.
 Es el siguiente paso (ver más abajo).
 
