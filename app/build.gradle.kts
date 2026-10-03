@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -27,7 +28,7 @@ android {
         // Optional release signing: create keystore.properties (see README) to enable it.
         val props = rootProject.file("keystore.properties")
         if (props.exists()) {
-            val p = java.util.Properties().apply { props.inputStream().use { load(it) } }
+            val p = Properties().apply { props.inputStream().use { load(it) } }
             create("release") {
                 storeFile = rootProject.file(p.getProperty("storeFile"))
                 storePassword = p.getProperty("storePassword")
