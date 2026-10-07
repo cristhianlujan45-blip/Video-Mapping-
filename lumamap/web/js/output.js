@@ -18,6 +18,16 @@ let project = null;
 let st = { playing: true, master: 1, blackout: false, pattern: null, guides: false, sel: null, point: -1, levels: null, muted: true };
 let timeOffset = 0;      // tiempo del editor - tiempo local (s)
 let frozenTime = 0;      // tiempo del editor cuando está en pausa
+let levelsAt = 0;        // cuándo llegaron los últimos niveles de audio
+
+/** Extrapola el ritmo entre mensajes (llegan ~30 veces/s) para que el compás no salte. */
+function liveLevels(now) {
+  const L = st.levels;
+  if (!L) return null;
+  const age = now - levelsAt, P = 60000 / (L.bpm || 120);
+  const phase = Math.min(1, (L.phase || 0) + age / P);
+  return { ...L, beat: (L.beat || 0) * Math.exp(-age / 140), phase, pos: (L.count || 0) - 1 + (1 - (1 - phase) ** 3) };
+}
 let tr = null;           // transición {fromId, start, dur}
 
 if (!webgl2Supported()) {
@@ -40,6 +50,7 @@ const link = new Link("output", async (m) => {
   } else if (m.t === "state") {
     const wasPlaying = st.playing;
     st = { ...st, ...m.state };
+    levelsAt = performance.now();
     if (typeof m.time === "number") { timeOffset = m.time - performance.now() / 1000; frozenTime = m.time; }
     if (m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - m.tr.elapsed, dur: m.tr.dur };
     if (st.playing !== wasPlaying) pool.setPlaying(st.playing);
@@ -96,7 +107,7 @@ function tick() {
   const view = { sx: 1, sy: 1, tx: 0, ty: 0 };
   if (tr && now - tr.start > tr.dur) tr = null;
   comp.frame(project, {
-    layers: sceneLayers(project, tr, now), time, levels: st.levels, view,
+    layers: sceneLayers(project, tr, now), time, levels: liveLevels(now), view,
     master: st.master, blackout: st.blackout || !!st.pattern, clear: [0, 0, 0, 1], live: st.live || null,
   });
   octx.clearRect(0, 0, W, H);

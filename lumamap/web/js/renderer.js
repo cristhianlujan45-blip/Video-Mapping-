@@ -454,7 +454,7 @@ export class Renderer {
       if (R.pulse) bri *= 1 + beat * 0.9 * k;
       if (R.zoom) zoom *= 1 + beat * 0.14 * k;
       if (R.color) hue += ((n * 0.13 * Math.min(1, k)) % 1);
-      if (R.motion) { gtime += (n - beat) * 0.45 * k; rot += beat * 0.06 * k; } // acelera en cada golpe
+      if (R.motion) { gtime += (lv.pos ?? n) * 0.5 * k; rot += beat * 0.06 * k; } // avanza al compás: empuja en cada golpe
       if (R.flash) alpha *= Math.min(1, 0.15 + beat * 1.2);
       if (border > 0) border *= 1 + beat * 1.5 * k;
     }

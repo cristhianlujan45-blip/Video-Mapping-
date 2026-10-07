@@ -17,13 +17,23 @@ android {
         applicationId = "com.lumamap.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.1.0"
+        versionCode = 4
+        versionName = "2.2.0"
     }
 
     sourceSets["main"].assets.srcDirs("../web")
 
     signingConfigs {
+        // Clave de pruebas fija (incluida en el repositorio): todas las compilaciones,
+        // locales o de GitHub Actions, se firman igual, así cada APK nuevo se instala
+        // encima del anterior sin desinstalar ni perder proyectos.
+        // Para publicar en Google Play usa tu propia clave con keystore.properties.
+        create("fixed") {
+            storeFile = file("lumamap-test.jks")
+            storePassword = "lumamap-test"
+            keyAlias = "lumamap"
+            keyPassword = "lumamap-test"
+        }
         val props = rootProject.file("keystore.properties")
         if (props.exists()) {
             val p = Properties().apply { props.inputStream().use { load(it) } }
@@ -37,16 +47,24 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("fixed")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("fixed")
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    lint {
+        // La app es web + un puente pequeño: el lint de release no aporta y alarga la compilación.
+        checkReleaseBuilds = false
     }
 
     androidResources {

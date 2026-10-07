@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -26,6 +27,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,6 +55,8 @@ import java.io.File
 class MainActivity : ComponentActivity() {
 
     private lateinit var web: WebView
+    private lateinit var root: FrameLayout
+    private var lastBack = 0L
     private lateinit var displayManager: DisplayManager
     private val main = Handler(Looper.getMainLooper())
     private var presentation: OutputPresentation? = null
@@ -118,15 +122,10 @@ class MainActivity : ComponentActivity() {
         if (0 != applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) WebView.setWebContentsDebuggingEnabled(true)
 
         displayManager = getSystemService(DisplayManager::class.java)
-        web = WebView(this)
-        configureWebView(web)
-        web.addJavascriptInterface(Bridge(isEditor = true), "LumaNative")
-        web.webChromeClient = EditorChrome()
-
-        val root = FrameLayout(this)
+        root = FrameLayout(this)
         root.setBackgroundColor(0xFF0B0D12.toInt())
-        root.addView(web, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
+        createEditor()
         // Borde a borde (Android 15): la interfaz web no debe quedar bajo las barras del sistema.
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -134,20 +133,42 @@ class MainActivity : ComponentActivity() {
             WindowInsetsCompat.CONSUMED
         }
 
-        web.loadUrl("https://appassets.androidplatform.net/index.html")
-
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 web.evaluateJavascript("window.__lumaBack ? window.__lumaBack() : false") { consumed ->
-                    if (consumed != "true") {
+                    if (consumed == "true") return@evaluateJavascript
+                    // Doble pulsación para salir: evita cerrar el show por accidente.
+                    val now = System.currentTimeMillis()
+                    if (now - lastBack < 2000) {
                         isEnabled = false
                         onBackPressedDispatcher.onBackPressed()
                         isEnabled = true
+                    } else {
+                        lastBack = now
+                        Toast.makeText(this@MainActivity, "Pulsa Atrás otra vez para salir", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
         })
         displayManager.registerDisplayListener(displayListener, main)
+    }
+
+    /** Crea (o vuelve a crear tras un fallo) la WebView del editor. */
+    private fun createEditor() {
+        val w = WebView(this)
+        configureWebView(w) { crashed ->
+            // El motor de la WebView se cerró (memoria, GPU…): se recrea y el
+            // proyecto vuelve del autoguardado, en lugar de cerrarse la app.
+            root.removeView(crashed)
+            crashed.destroy()
+            createEditor()
+            Toast.makeText(this, "LumaMap se recuperó de un error y restauró tu proyecto", Toast.LENGTH_LONG).show()
+        }
+        w.addJavascriptInterface(Bridge(isEditor = true), "LumaNative")
+        w.webChromeClient = EditorChrome()
+        root.addView(w, 0, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        web = w
+        w.loadUrl("https://appassets.androidplatform.net/index.html")
     }
 
     override fun onResume() {
@@ -173,7 +194,7 @@ class MainActivity : ComponentActivity() {
     /* ------------------------------------------------------------ WebView */
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun configureWebView(w: WebView) {
+    fun configureWebView(w: WebView, onCrash: (WebView) -> Unit = {}) {
         w.setBackgroundColor(0xFF000000.toInt())
         w.overScrollMode = View.OVER_SCROLL_NEVER
         w.settings.apply {
@@ -196,6 +217,12 @@ class MainActivity : ComponentActivity() {
                 // Enlaces externos: al navegador del sistema.
                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }
                 return true
+            }
+
+            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                android.util.Log.w("LumaMap", "WebView render process gone (crash=${detail.didCrash()})")
+                main.post { onCrash(view) }
+                return true // la app sigue viva
             }
         }
     }
@@ -378,6 +405,12 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun saveChunk(text: String) {
             saveFile?.appendText(text)
+        }
+
+        /** Trozo binario (base64) para videos e imágenes. */
+        @JavascriptInterface
+        fun saveChunkBase64(b64: String) {
+            saveFile?.appendBytes(android.util.Base64.decode(b64, android.util.Base64.DEFAULT))
         }
 
         @JavascriptInterface

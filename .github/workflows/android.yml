@@ -23,15 +23,15 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: LumaMap tests (motor, modelo, servidor)
+      - name: LumaMap tests (motor, modelo, audio, servidor)
         working-directory: lumamap
         run: npm test
 
       - name: Unit tests (core + app)
         run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
 
-      - name: Build debug APKs
-        run: ./gradlew --no-daemon :app:assembleDebug :lumamap:assembleDebug
+      - name: Build APKs
+        run: ./gradlew --no-daemon :app:assembleDebug :lumamap:assembleRelease
 
       - name: Upload LUJAN MAPPING debug APK
         uses: actions/upload-artifact@v4
@@ -40,16 +40,16 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: Upload LumaMap debug APK
+      - name: Upload LumaMap APK
         uses: actions/upload-artifact@v4
         with:
-          name: lumamap-debug-apk
-          path: lumamap/android/build/outputs/apk/debug/*.apk
+          name: lumamap-android
+          path: lumamap/android/build/outputs/apk/release/lumamap-release.apk
           if-no-files-found: error
 
   windows:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -57,17 +57,67 @@ jobs:
         with:
           node-version: 20
 
-      - name: Package LumaMap for Windows (portable zip)
+      - name: Build LumaMap Windows installer
         working-directory: lumamap/desktop
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           npm ci --no-audit --no-fund
-          npm run dist:win
+          npm run installer:win
 
-      - name: Upload LumaMap Windows zip
+      # Prueba real: instala en silencio, comprueba los archivos y abre la app.
+      - name: Install and launch on Windows
+        shell: pwsh
+        working-directory: lumamap/desktop/dist
+        run: |
+          $setup = Get-ChildItem LumaMap-Setup-*.exe | Select-Object -First 1
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/S'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\LumaMap\LumaMap.exe'
+          if (-not (Test-Path $exe)) { throw "No se instaló $exe" }
+          Write-Host "Instalado: $exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "LumaMap se cerró al arrancar (código $($p.ExitCode))" }
+          Write-Host "LumaMap sigue abierto tras 15 s"
+          Get-Process LumaMap -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Upload LumaMap Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: lumamap-windows-x64
-          path: lumamap/desktop/dist/*.zip
+          name: lumamap-windows-installer
+          path: lumamap/desktop/dist/LumaMap-Setup-*.exe
           if-no-files-found: error
+
+  # Descarga directa (sin zips): publica el instalador y el APK en una versión
+  # preliminar «lumamap-latest» de la página Releases del repositorio.
+  publish:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [build, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Rename downloads
+        run: |
+          mkdir release
+          cp out/lumamap-windows-installer/*.exe release/
+          cp out/lumamap-android/lumamap-release.apk release/LumaMap-Android.apk
+          ls -la release
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lumamap-latest
+          name: LumaMap (última versión)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Última compilación de LumaMap desde la rama `${{ github.ref_name }}` (commit ${{ github.sha }}).
+
+            - **Windows:** descarga `LumaMap-Setup-….exe`, ábrelo e instala (si aparece «Windows protegió su PC»: *Más información → Ejecutar de todas formas*).
+            - **Android:** descarga `LumaMap-Android.apk` e instálalo (permite «instalar apps desconocidas»).
+          files: release/*
+          fail_on_unmatched_files: true

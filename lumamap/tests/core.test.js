@@ -8,8 +8,9 @@ import * as M from "../web/js/model.js";
 import { History } from "../web/js/history.js";
 import { hitStroke, isAnimated, strokesSignature } from "../web/js/drawing.js";
 import { detectQuads } from "../web/js/automap.js";
-import { estimateBpm, foldBpm } from "../web/js/audio.js";
+import { estimateBpm, estimateTempo, foldBpm } from "../web/js/audio.js";
 import { test, report } from "./harness.js";
+import { keyOf, normalizeKeys, buildCommands } from "../web/js/commands.js";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 
@@ -191,6 +192,55 @@ await test("tolera golpes perdidos y lleva el tempo al rango musical", () => {
   assert.ok(Math.abs(estimateBpm(t) - 100) < 1.5, String(estimateBpm(t)));
   assert.equal(Math.round(foldBpm(60000 / 60)), 120);
   assert.equal(estimateBpm([0, 500]), null);
+});
+
+await test("bombo + caja a contratiempo: tempo y fase siguen al bombo", () => {
+  const P = 60000 / 95, t = [], w = [];
+  for (let i = 0; i < 18; i++) {
+    t.push(1000 + i * P + ((i * 7) % 5 - 2) * 6); w.push(3);           // bombo
+    t.push(1000 + i * P + P / 2 + ((i * 3) % 5 - 2) * 6); w.push(1);   // caja
+  }
+  const order = t.map((x, i) => i).sort((a, b) => t[a] - t[b]);
+  const est = estimateTempo(order.map(i => t[i]), order.map(i => w[i]));
+  assert.ok(Math.abs(est.bpm - 95) < 1, "bpm " + est.bpm);
+  const ph = (((est.ref - 1000) / P) % 1 + 1) % 1;
+  assert.ok(Math.min(ph, 1 - ph) < 0.05, "fase en el bombo: " + ph);
+});
+
+console.log("== Atajos de teclado ==");
+await test("los atajos se reconocen igual que se escriben", () => {
+  const ev = (key, o = {}) => ({ key, ctrlKey: !!o.ctrl, metaKey: false, altKey: false, shiftKey: !!o.shift });
+  assert.equal(keyOf(ev("k", { ctrl: true })), normalizeKeys("Ctrl+K"));
+  assert.equal(keyOf(ev("S", { ctrl: true, shift: true })), normalizeKeys("Ctrl+Shift+S"));
+  assert.equal(keyOf(ev(" ")), "Space");
+  assert.equal(keyOf(ev("+", { shift: true })), normalizeKeys("+"));
+  assert.equal(keyOf(ev("R", { shift: true })), normalizeKeys("Shift+R"));
+  assert.equal(keyOf(ev("r")), normalizeKeys("R"));
+  assert.equal(keyOf(ev("]", { ctrl: true })), normalizeKeys("Ctrl+]"));
+});
+await test("ningún atajo está repetido y todos los comandos tienen nombre", () => {
+  const app = { actions: new Proxy({}, { get: () => () => {} }), S: {}, audio: () => ({ bpm: 120 }), openTab() {}, setMode() {} };
+  const cmds = buildCommands(app);
+  const seen = new Map();
+  for (const c of cmds) {
+    assert.ok(c.label && typeof c.run === "function", c.id);
+    if (!c.keys) continue;
+    const k = normalizeKeys(c.keys);
+    assert.ok(!seen.has(k), `${k} repetido en ${c.id} y ${seen.get(k)}`);
+    seen.set(k, c.id);
+  }
+  assert.equal(new Set(cmds.map(c => c.id)).size, cmds.length, "ids únicos");
+  assert.ok(cmds.length > 60, "comandos: " + cmds.length);
+});
+await test("cada opción del menú de Windows ejecuta un comando que existe", async () => {
+  const fs = await import("node:fs");
+  const main = fs.readFileSync(new URL("../desktop/main.js", import.meta.url), "utf8");
+  const ids = [...main.matchAll(/cmd\("[^"]+", "([^"]+)"/g)].map(m => m[1]);
+  const app = { actions: new Proxy({}, { get: () => () => {} }), S: {}, audio: () => ({ bpm: 120 }), openTab() {}, setMode() {} };
+  const known = new Set(buildCommands(app).map(c => c.id));
+  assert.ok(ids.length > 50, "opciones de menú: " + ids.length);
+  const missing = ids.filter(id => !known.has(id));
+  assert.deepEqual(missing, []);
 });
 
 console.log("== Detección de superficies en foto (experimental) ==");

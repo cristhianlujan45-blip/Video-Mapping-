@@ -374,7 +374,8 @@ const audio = {
       beatBar.style.width = Math.round((L.beat || 0) * 100) + "%";
       lamp.style.opacity = 0.15 + (L.beat || 0) * 0.85;
       bpmOut.textContent = Math.round(L.bpm || au.bpm);
-      bpmSrc.textContent = au.active ? (au.detected ? "detectado por el micrófono" : "escuchando… pon música con golpes marcados") : "tempo manual (TAP)";
+      bpmSrc.textContent = au.active ? (L.locked ? "✓ sincronizado con la música" : au.detected ? "detectado · ajustando el compás…" : "escuchando… pon música con golpes marcados") : "tempo manual (TAP o botones)";
+      bpmSrc.style.color = L.locked ? "var(--ok)" : "";
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -401,9 +402,17 @@ const audio = {
         parts,
         stepper({ label: "Cambiar de escena cada (golpes, 0 = no)", value: R.sceneBeats, min: 0, max: 64, onChange: setR("sceneBeats") }),
         S.project.scenes.length < 2 && R.sceneBeats ? hint("Crea al menos 2 escenas para que cambien al ritmo.") : null),
-      section("Tempo manual",
+      section("Tempo",
         tap,
-        hint("Sin micrófono, toca TAP 4 veces al ritmo de la música y todo late a ese tempo.")));
+        h("div", { class: "row" },
+          btn({ label: "½×", kind: "wide", title: "Mitad de tempo", onClick: () => A.scaleTempo(0.5) }),
+          btn({ label: "−1", kind: "wide", onClick: () => A.setBpm(au.bpm - 1) }),
+          btn({ label: "+1", kind: "wide", onClick: () => A.setBpm(au.bpm + 1) }),
+          btn({ label: "2×", kind: "wide", title: "Doble de tempo", onClick: () => A.scaleTempo(2) }),
+          btn({ label: "1", kind: "wide primary", title: "Marca el primer tiempo ahora", onClick: () => au.downbeat() })),
+        hint("Sin micrófono: toca TAP 4 veces al ritmo. «1» marca el primer tiempo del compás. ½× y 2× corrigen si va al doble o a la mitad."),
+        slider({ label: "Sincronía (adelanto de la imagen)", min: -150, max: 250, step: 5, value: au.offset, def: 60, fmt: (v) => v + " ms", onInput: (v) => au.setOffset(v) }),
+        hint("Si los destellos llegan tarde respecto al sonido, sube este valor; si llegan antes, bájalo.")));
 
     const s = app.surf();
     if (s) {
@@ -443,6 +452,24 @@ const output = {
           ? "Conecta el proyector como pantalla extendida (en Windows: tecla Win + P → Extender). La salida se abre sola a pantalla completa en el proyector."
           : "Abre la salida en una ventana, llévala al proyector (pantalla extendida) y pulsa «Pantalla completa»."),
         btn({ label: S.outWin && !S.outWin.closed ? "Ventana de salida abierta" : "Abrir ventana de salida", ic: "screen", kind: "bigbtn primary", onClick: A.openWindow })));
+      if (desktop && window.LumaDesktop) {
+        // Elegir en qué pantalla sale la imagen (proyector, TV, segundo monitor).
+        const box = h("div", { class: "list" }, hint("Buscando pantallas…"));
+        wrap.append(section("Pantalla de salida", box));
+        window.LumaDesktop.displays().then((list) => {
+          box.innerHTML = "";
+          const pick = (id) => { window.LumaDesktop.setOutputDisplay(id); setTimeout(() => app.renderPanel(), 400); };
+          box.append(h("button", { class: `item ${list.some(d => d.chosen) ? "" : "on"}`, onclick: () => pick(null) },
+            h("div", { class: "badge", html: icon("wand") }), h("div", { class: "name" }, "Automática", h("small", {}, "La pantalla que no tiene el editor"))));
+          for (const d of list) {
+            box.append(h("button", { class: `item ${d.chosen ? "on" : ""}`, onclick: () => pick(d.id) },
+              h("div", { class: "badge", html: icon("screen") }),
+              h("div", { class: "name" }, `${d.label} · ${d.width}×${d.height}`,
+                h("small", {}, [d.primary ? "principal" : "secundaria", d.isOutput ? "salida actual" : ""].filter(Boolean).join(" · ")))));
+          }
+          if (list.length < 2) box.append(hint("Solo hay una pantalla. Conecta el proyector y pon Windows en modo Extender (Win + P)."));
+        });
+      }
     }
     wrap.append(section("Esta pantalla",
       hint("Para proyector en modo espejo, Chromecast o cable HDMI duplicando la pantalla. La interfaz se oculta; toca para ver los controles."),
@@ -475,6 +502,10 @@ const menu = {
         item("download", "Exportar archivo .lumamap", A.exportProject, "Incluye videos e imágenes: para copia o para otro equipo"),
         item("upload", "Importar archivo", A.importProject),
         item("screen", `Resolución · ${S.project.width}×${S.project.height}`, A.setResolution))),
+      section("Show", h("div", { class: "list" },
+        item("wand", "Todos los comandos", A.palette, "Busca cualquier acción escribiendo · Ctrl+K"),
+        item("camera", S.rec ? "Detener grabación" : "Grabar video de la salida", A.record, "Guarda el show en video (con la música si el micrófono está activo)"),
+        item("photo", "Capturar imagen de la salida", A.snapshot, "PNG a la resolución de salida"))),
       section("Referencia para dibujar formas",
         hint("Una foto de la pared tomada desde el proyector ayuda a trazar las formas. Solo se ve en el editor."),
         row(btn({ label: S.ref.url ? "Cambiar foto" : "Foto de la pared", ic: "photo", kind: "wide", onClick: A.refPhoto }),
@@ -484,13 +515,13 @@ const menu = {
           btn({ label: "Quitar referencia", kind: "block", onClick: A.refClear })) : null),
       section("Control", h("div", { class: "list" },
         item("midi", "Conectar controlador MIDI", A.midi, "Notas 36-51 = escenas · 60 play · 63/64 siguiente/anterior"),
-        item("help", "Ayuda y gestos", () => showHelp()),
+        item("help", "Ayuda y atajos", () => A.help()),
         item("info", "Acerca de LumaMap", () => dialog({ title: "LumaMap 2", content: h("p", {}, "Video mapping táctil para Android, tablet y navegador. Código abierto (MIT). Funciona sin internet.") })))),
     );
   },
 };
 
-export function showHelp() {
+export function showHelp(app) {
   const c = h("div", { class: "help" });
   c.innerHTML = `
   <h4>Primeros pasos</h4>
@@ -502,10 +533,15 @@ export function showHelp() {
   <ul><li>Un dedo sobre una forma: moverla.</li><li>Un dedo sobre un punto: moverlo (aparece una lupa).</li>
   <li>Dos dedos sobre la forma seleccionada: escalar y girar.</li><li>Dos dedos fuera: zoom y desplazamiento de la vista. Doble toque en vacío: encajar vista.</li>
   <li>Cruceta: mueve el punto rojo píxel a píxel (centro: siguiente punto; «fino» = ¼ px).</li></ul>
+  <h4>Ratón (PC)</h4>
+  <ul><li>Clic derecho: menú de la superficie. Rueda: zoom. En táctil, mantén pulsado para el mismo menú.</li>
+  <li><kbd>Ctrl+K</kbd>: busca y ejecuta cualquier comando escribiendo.</li></ul>
   <h4>Teclado</h4>
-  <ul><li><kbd>Espacio</kbd> reproducir · <kbd>Flechas</kbd> empujar (<kbd>Mayús</kbd> ×10) · <kbd>Tab</kbd> siguiente punto</li>
-  <li><kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> deshacer/rehacer · <kbd>Ctrl+S</kbd> guardar · <kbd>Ctrl+D</kbd> duplicar · <kbd>Supr</kbd> eliminar</li>
-  <li><kbd>1-9</kbd> escenas · <kbd>RePág</kbd>/<kbd>AvPág</kbd> anterior/siguiente · <kbd>B</kbd> apagón · <kbd>G</kbd> guías · <kbd>P</kbd> pantalla completa</li></ul>`;
+  <ul><li><kbd>Flechas</kbd> empujar el punto o la forma (<kbd>Mayús</kbd> ×10) · <kbd>Tab</kbd> siguiente punto · <kbd>1-9</kbd> escenas · <kbd>Esc</kbd> salir / deseleccionar</li></ul>`;
+  const groups = {};
+  for (const cmd of app?.commands || []) if (cmd.keys) (groups[cmd.group] ||= []).push(cmd);
+  for (const [g, list] of Object.entries(groups))
+    c.insertAdjacentHTML("beforeend", `<h4>${g}</h4><ul class="keys">${list.map(k => `<li><kbd>${k.keys}</kbd> ${k.label}</li>`).join("")}</ul>`);
   return dialog({ title: "Ayuda", content: c, wide: true });
 }
 

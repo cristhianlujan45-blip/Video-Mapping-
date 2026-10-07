@@ -13,7 +13,8 @@ import { drawGuides, drawPattern } from "./overlay.js";
 import { roundPt, newStrokeId, hitStroke } from "./drawing.js";
 import { icon } from "./icons.js";
 import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles } from "./ui.js";
-import { PANELS, TABS } from "./panels.js";
+import { PANELS, TABS, showHelp } from "./panels.js";
+import { buildCommands, keymap, keyOf, openPalette, openContextMenu, closeContextMenu } from "./commands.js";
 import {
   pointInPolygon, surfaceOutline, centroid, transformPoints, screenToUV, uvToScreen,
   simplify, bbox, gridCornerIdx, surfaceCorners, gridFromCorners, resampleGrid, surfaceAspect,
@@ -59,6 +60,7 @@ const S = {
 const history = new History();
 let renderer, pool, comp, link, audio;
 const app = { S, M, history }; // API para los paneles
+let KEYS = new Map();
 
 /* ======================================================================
    Utilidades del proyecto
@@ -621,7 +623,9 @@ A.toggleMic = async () => {
   } catch (e) { toast("Micrófono no disponible: " + e.message, "err"); }
   renderPanel();
 };
-A.tap = () => { const bpm = audio.tap(); S.project.settings.bpm = bpm; return bpm; };
+A.tap = () => { const bpm = audio.tap(); S.project.settings.bpm = bpm; changed(); return bpm; };
+A.scaleTempo = (k) => { const b = audio.scaleTempo(k); S.project.settings.bpm = Math.round(b); changed(); toast(`${Math.round(b)} BPM`); };
+A.setBpm = (v) => { S.project.settings.bpm = Math.round(audio.setBpm(Math.round(v))); changed(); toast(`${S.project.settings.bpm} BPM`); };
 A.midi = () => initMIDI({
   onStatus: (s) => toast(s),
   onAction: (a, v) => {
@@ -726,6 +730,132 @@ function showProjbar() {
 }
 
 /* ======================================================================
+   Más acciones: copiar/pegar, alinear, orden, grabar, capturar
+   ====================================================================== */
+let clipSurface = null, clipLook = null;
+A.copy = () => {
+  const s = surf();
+  if (!s) return;
+  clipSurface = { surface: JSON.parse(JSON.stringify(s)), look: JSON.parse(JSON.stringify(lookSel())) };
+  toast(`Copiado «${s.name}»`);
+};
+A.paste = () => {
+  if (!clipSurface) return toast("Nada copiado (Ctrl+C sobre una superficie)");
+  const c = JSON.parse(JSON.stringify(clipSurface.surface));
+  c.id = M.uid("surf");
+  c.name = uniqueName(c.name);
+  const off = S.project.height * 0.04;
+  c.points = c.points.map(p => ({ x: p.x + off, y: p.y + off }));
+  M.addSurface(S.project, c, clipSurface.look.source);
+  for (const sc of S.project.scenes) sc.looks[c.id] = JSON.parse(JSON.stringify(clipSurface.look));
+  select(c.id); changed({ panel: true }); commit();
+  toast("Pegado");
+};
+A.copyStyle = () => {
+  const l = lookSel();
+  if (!l) return;
+  clipLook = JSON.parse(JSON.stringify({ fx: l.fx, audio: l.audio, opacity: l.opacity, blend: l.blend }));
+  toast("Estilo copiado (efectos, mezcla y audio)");
+};
+A.pasteStyle = () => {
+  const l = lookSel();
+  if (!l || !clipLook) return toast(clipLook ? "Selecciona una superficie" : "Copia primero un estilo");
+  Object.assign(l, JSON.parse(JSON.stringify(clipLook)));
+  changed({ panel: true }); commit(); toast("Estilo pegado");
+};
+A.center = (axis = "both") => {
+  const s = surf();
+  if (!s || s.locked) return;
+  const b = bbox(s.points), P = S.project;
+  const dx = axis === "v" ? 0 : P.width / 2 - (b.x + b.w / 2), dy = axis === "h" ? 0 : P.height / 2 - (b.y + b.h / 2);
+  for (const q of s.points) { q.x += dx; q.y += dy; }
+  changed(); commit();
+};
+A.toFront = () => { const arr = S.project.surfaces, i = arr.findIndex(x => x.id === S.sel); if (i >= 0 && M.moveItem(arr, i, arr.length - 1)) { changed({ panel: true }); commit(); } };
+A.toBack = () => { const arr = S.project.surfaces, i = arr.findIndex(x => x.id === S.sel); if (i >= 0 && M.moveItem(arr, i, 0)) { changed({ panel: true }); commit(); } };
+A.selectNext = (d = 1) => {
+  const arr = S.project.surfaces;
+  if (!arr.length) return;
+  const i = arr.findIndex(x => x.id === S.sel);
+  select(arr[(i + d + arr.length) % arr.length].id);
+};
+A.zoom = (k) => { S.view.zoom = Math.max(0.3, Math.min(12, S.view.zoom * k)); };
+A.help = () => showHelp(app);
+A.palette = () => openPalette(app);
+A.toggleGuides = () => { S.guides = !S.guides; sendState(true); renderPanel(); toast(S.guides ? "Guías en el proyector" : "Guías ocultas"); };
+A.toggleMute = () => { S.muted = !S.muted; renderPanel(); toast(S.muted ? "Sonido apagado" : "Sonido activado"); };
+A.toggleReact = () => { const R = S.project.settings.react; R.enabled = !R.enabled; changed({ panel: true }); commit(); toast(R.enabled ? "Modo ritmo activado" : "Modo ritmo apagado"); };
+
+/** Guarda un archivo: selector del sistema en Android, descarga en navegador/PC. */
+async function saveBlob(name, blob) {
+  if (native?.saveBegin && native.saveChunkBase64) {
+    native.saveBegin(name, blob.type || "application/octet-stream");
+    const CH = 3 * 256 * 1024; // múltiplo de 3: cada trozo es base64 válido por sí solo
+    for (let i = 0; i < blob.size; i += CH) {
+      const du = await Store.blobToDataURL(blob.slice(i, i + CH));
+      native.saveChunkBase64(du.slice(du.indexOf(",") + 1));
+    }
+    native.saveEnd();
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+app.saveBlob = saveBlob;
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+
+/** Renderizador aparte a la resolución de salida (para grabar o capturar sin la interfaz). */
+function offscreenRenderer(preserve) {
+  const P = S.project, k = Math.min(1, 1920 / P.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(P.width * k / 2) * 2; canvas.height = Math.round(P.height * k / 2) * 2;
+  const r = new Renderer(canvas, { preserve });
+  return { canvas, r, comp: new Compositor(r, pool), view: { sx: canvas.width / P.width, sy: canvas.height / P.height, tx: 0, ty: 0 } };
+}
+function renderOff(o, now) {
+  o.comp.frame(S.project, { layers: sceneLayers(S.project, S.tr, now), time: S.clock, levels: S.levels, view: o.view, master: S.master, blackout: S.blackout, clear: [0, 0, 0, 1], live: S.live });
+}
+
+A.snapshot = () => {
+  const o = offscreenRenderer(true);
+  renderOff(o, performance.now());
+  o.canvas.toBlob((b) => { saveBlob(`lumamap-${stamp()}.png`, b); toast("Imagen guardada"); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); }, "image/png");
+};
+
+A.record = () => {
+  if (S.rec) {
+    S.rec.mr.stop();
+    return;
+  }
+  if (typeof MediaRecorder === "undefined") return toast("Este dispositivo no puede grabar video", "err");
+  const o = offscreenRenderer(false);
+  const stream = o.canvas.captureStream(30);
+  // Con el micrófono activo, el video incluye la música que se oye.
+  if (audio.stream) for (const t of audio.stream.getAudioTracks()) stream.addTrack(t);
+  const types = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+  const mime = types.find(t => MediaRecorder.isTypeSupported?.(t)) || "";
+  let mr;
+  try { mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6 }); }
+  catch (e) { return toast("No se pudo grabar: " + e.message, "err"); }
+  const chunks = [];
+  mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  mr.onstop = () => {
+    const blob = new Blob(chunks, { type: mime.split(";")[0] || "video/webm" });
+    S.rec = null;
+    o.r.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    updateChrome();
+    saveBlob(`lumamap-${stamp()}.${blob.type.includes("mp4") ? "mp4" : "webm"}`, blob);
+    toast(`Video guardado (${(blob.size / 1048576).toFixed(1)} MB)`);
+  };
+  mr.start(1000);
+  S.rec = { mr, o, start: performance.now() };
+  updateChrome();
+  toast("Grabando la salida… vuelve a pulsar Grabar para terminar");
+};
+
+/* ======================================================================
    Modos y vista
    ====================================================================== */
 function setMode(mode) {
@@ -828,7 +958,10 @@ function bindStage() {
     e.preventDefault();
     zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
   }, { passive: false });
-  ov.addEventListener("contextmenu", (e) => e.preventDefault());
+  ov.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (lastPointerType === "mouse" && !S.projecting) contextAt(e.clientX, e.clientY);
+  });
   let lastTap = 0;
   ov.addEventListener("pointerup", (e) => {
     const now = Date.now();
@@ -855,8 +988,29 @@ function twoFinger() {
   return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x) };
 }
 
+let lastPointerType = "mouse", pressTimer = 0, pressAt = null;
+/** Menú contextual sobre la superficie bajo el puntero (o general si no hay ninguna). */
+function contextAt(cx, cy) {
+  const hit = hitSurface(toProject(cx, cy));
+  if (hit && hit.id !== S.sel) select(hit.id);
+  openContextMenu(app, cx, cy);
+}
+
 function onDown(e) {
   $("#ov").setPointerCapture(e.pointerId);
+  lastPointerType = e.pointerType;
+  closeContextMenu();
+  clearTimeout(pressTimer);
+  // Pulsación larga (táctil): menú contextual.
+  if (e.pointerType !== "mouse" && S.mode === "edit" && !S.projecting) {
+    pressAt = { x: e.clientX, y: e.clientY };
+    pressTimer = setTimeout(() => {
+      if (pointers.size !== 1 || !pressAt) return;
+      if (G?.type === "move" || G?.type === "point") { G.moved = false; G = { type: "idle" }; }
+      haptic();
+      contextAt(pressAt.x, pressAt.y);
+    }, 600);
+  }
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (S.projecting && !S.guides) { showProjbar(); return; }
   if (pointers.size === 2) return startTwoFinger();
@@ -945,6 +1099,7 @@ function startTwoFinger() {
 
 function onMove(e) {
   if (!pointers.has(e.pointerId)) return;
+  if (pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 10) { clearTimeout(pressTimer); pressAt = null; }
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (!G) return;
   const p = toProject(e.clientX, e.clientY);
@@ -1024,6 +1179,7 @@ function onMove(e) {
 
 function onUp(e) {
   pointers.delete(e.pointerId);
+  clearTimeout(pressTimer); pressAt = null;
   if (!G) return;
   if (pointers.size === 1 && (G.type === "pinch" || G.type === "view")) {
     // Al levantar un dedo de dos, el gesto termina (no salta a mover).
@@ -1109,7 +1265,7 @@ A.nudge = nudge; A.cyclePoint = cyclePoint;
    ====================================================================== */
 function buildChrome() {
   const set = (act, ic) => { const b = document.querySelector(`[data-act="${act}"]`); if (b) b.innerHTML = icon(ic); };
-  set("menu", "menu"); set("undo", "undo"); set("redo", "redo"); set("play", "pause");
+  set("menu", "menu"); set("undo", "undo"); set("redo", "redo"); set("play", "pause"); set("palette", "wand");
   document.querySelectorAll("#top [data-act]").forEach(b => b.addEventListener("click", () => {
     const a = b.dataset.act;
     if (a === "menu") openTab("menu");
@@ -1118,6 +1274,8 @@ function buildChrome() {
     else if (a === "redo") A.redo();
     else if (a === "play") A.togglePlay();
     else if (a === "project") openTab("output");
+    else if (a === "palette") openPalette(app);
+    else if (a === "record") A.record();
   }));
   const dock = $("#dock");
   for (const t of TABS) {
@@ -1254,29 +1412,29 @@ app.renderPanel = renderPanel;
 function bindKeys() {
   addEventListener("keydown", (e) => {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && document.activeElement.type !== "range") return;
+    if (document.getElementById("modal").classList.contains("show") && e.key !== "Escape") return;
     const k = e.key, ctrl = e.ctrlKey || e.metaKey;
-    if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? A.redo() : A.undo(); return; }
-    if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); A.redo(); return; }
-    if (ctrl && k.toLowerCase() === "s") { e.preventDefault(); A.save(); return; }
-    if (ctrl && k.toLowerCase() === "d") { e.preventDefault(); A.duplicate(); return; }
+    // Movimiento fino y teclas de edición directa.
     const m = e.shiftKey ? 10 : 1;
     switch (k) {
-      case " ": e.preventDefault(); A.togglePlay(); break;
-      case "ArrowLeft": e.preventDefault(); for (let i = 0; i < m; i++) nudge(-1, 0); break;
-      case "ArrowRight": e.preventDefault(); for (let i = 0; i < m; i++) nudge(1, 0); break;
-      case "ArrowUp": e.preventDefault(); for (let i = 0; i < m; i++) nudge(0, -1); break;
-      case "ArrowDown": e.preventDefault(); for (let i = 0; i < m; i++) nudge(0, 1); break;
-      case "Tab": e.preventDefault(); cyclePoint(e.shiftKey ? -1 : 1); break;
-      case "Delete": case "Backspace": if (S.sel) A.remove(); break;
-      case "Escape": back(); break;
-      case "PageDown": A.stepScene(1); break;
-      case "PageUp": A.stepScene(-1); break;
-      case "g": case "G": S.guides = !S.guides; sendState(true); renderPanel(); break;
-      case "b": case "B": A.blackout(); break;
-      case "p": case "P": A.projectHere(!S.projecting); break;
-      default:
-        if (/^[1-9]$/.test(k) && S.project.scenes[+k - 1]) A.goScene(S.project.scenes[+k - 1].id);
+      case "ArrowLeft": e.preventDefault(); for (let i = 0; i < m; i++) nudge(-1, 0); return;
+      case "ArrowRight": e.preventDefault(); for (let i = 0; i < m; i++) nudge(1, 0); return;
+      case "ArrowUp": e.preventDefault(); for (let i = 0; i < m; i++) nudge(0, -1); return;
+      case "ArrowDown": e.preventDefault(); for (let i = 0; i < m; i++) nudge(0, 1); return;
+      case "Tab": e.preventDefault(); cyclePoint(e.shiftKey ? -1 : 1); return;
+      case "Escape": closeContextMenu(); back(); return;
+      case "Backspace": if (S.sel) A.remove(); return;
     }
+    if (ctrl && k.toLowerCase() === "z" && e.shiftKey) { e.preventDefault(); A.redo(); return; }
+    // Atajos del registro de comandos.
+    const cmd = KEYS.get(keyOf(e));
+    if (cmd) {
+      if (cmd.needsSel && !S.sel) return;
+      e.preventDefault();
+      cmd.run();
+      return;
+    }
+    if (!ctrl && /^[1-9]$/.test(k) && S.project.scenes[+k - 1]) A.goScene(S.project.scenes[+k - 1].id);
   });
 }
 
@@ -1345,6 +1503,13 @@ function tick(now) {
   pool.applyLookAudio(layers.flatMap(l => Object.values(l.scene.looks)), S.muted || !!S.output);
   drawOverlay(v, view);
   drawLoupe(v, view);
+  const rb = $("#recBadge");
+  if (S.rec) {
+    renderOff(S.rec.o, now);
+    const sec = Math.floor((now - S.rec.start) / 1000);
+    rb.textContent = `● REC ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+    rb.classList.add("show");
+  } else rb.classList.remove("show");
 
   if (S.dirty) {
     S.dirty = false;
@@ -1510,6 +1675,20 @@ async function init() {
   comp = new Compositor(renderer, pool);
   link = new Link("editor", onLinkMsg);
   audio = new AudioEngine();
+  app.commands = buildCommands(app);
+  KEYS = keymap(app.commands);
+  // Versión de escritorio: el menú de la ventana ejecuta los mismos comandos.
+  if (window.LumaDesktop) {
+    const byId = Object.fromEntries(app.commands.map(c => [c.id, c]));
+    window.LumaDesktop.onCommand((id) => {
+      const c = byId[id];
+      if (!c) return;
+      if (c.needsSel && !S.sel) return toast("Selecciona primero una superficie");
+      closeDialog();
+      c.run();
+    });
+    window.LumaDesktop.onDisplaysChanged(() => { if (S.tab === "output") renderPanel(); });
+  }
   buildChrome();
   bindStage();
   bindKeys();

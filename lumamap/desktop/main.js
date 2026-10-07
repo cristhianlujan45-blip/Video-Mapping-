@@ -2,7 +2,7 @@
 // Sirve la app web desde un protocolo propio seguro (app://) para que funcionen
 // los módulos ES, IndexedDB, micrófono y cámara, y abre la ventana de salida
 // directamente a pantalla completa en el proyector (segunda pantalla).
-const { app, BrowserWindow, protocol, screen, session, shell, Menu } = require("electron");
+const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 
@@ -24,10 +24,15 @@ if (!app.requestSingleInstanceLock()) app.quit();
 
 let editor = null;
 let output = null;
+let chosenDisplay = null; // pantalla elegida a mano para la salida (id)
 
-/** Pantalla para la salida: la que no tiene el editor (el proyector), si existe. */
+/** Pantalla para la salida: la elegida, o la que no tiene el editor (el proyector). */
 function projectorDisplay() {
   const all = screen.getAllDisplays();
+  if (chosenDisplay !== null) {
+    const d = all.find(x => x.id === chosenDisplay);
+    if (d) return d;
+  }
   if (all.length < 2 || !editor) return null;
   const mine = screen.getDisplayMatching(editor.getBounds());
   return all.find(d => d.id !== mine.id) || null;
@@ -45,9 +50,9 @@ function placeOutput(win) {
 function createEditor() {
   editor = new BrowserWindow({
     width: 1440, height: 900, minWidth: 800, minHeight: 560,
-    backgroundColor: "#0b0d12", title: "LumaMap", autoHideMenuBar: true, show: false,
+    backgroundColor: "#0b0d12", title: "LumaMap", show: false,
     icon: path.join(WEB, "icon.png"),
-    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false },
+    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload: path.join(__dirname, "preload.js") },
   });
   editor.once("ready-to-show", () => { editor.maximize(); editor.show(); });
   editor.webContents.setWindowOpenHandler(({ url }) => {
@@ -73,8 +78,119 @@ function createEditor() {
   editor.loadURL(ORIGIN + "/index.html");
 }
 
+/* ---------------- Menú de la ventana ---------------- */
+// Los atajos los atiende la propia app (registerAccelerator: false): el menú solo
+// los muestra, así nunca se ejecuta un comando dos veces.
+function cmd(label, id, accelerator) {
+  return { label, accelerator, registerAccelerator: false, click: () => editor?.webContents.send("command", id) };
+}
+function buildMenu() {
+  const displays = screen.getAllDisplays();
+  const template = [
+    { label: "Archivo", submenu: [
+      cmd("Nuevo proyecto", "new", "Ctrl+N"), cmd("Abrir proyecto…", "open", "Ctrl+O"),
+      { type: "separator" },
+      cmd("Guardar", "save", "Ctrl+S"), cmd("Guardar como…", "saveAs", "Ctrl+Shift+S"),
+      cmd("Exportar proyecto .lumamap…", "export", "Ctrl+E"), cmd("Importar proyecto…", "importProject", "Ctrl+Shift+O"),
+      cmd("Importar video o imagen…", "importMedia", "Ctrl+I"),
+      { type: "separator" },
+      cmd("Grabar video de la salida", "record", "Ctrl+R"), cmd("Capturar imagen (PNG)", "snapshot", "Ctrl+Shift+P"),
+      cmd("Resolución de salida…", "resolution"),
+      { type: "separator" },
+      { label: "Salir", role: "quit" },
+    ] },
+    { label: "Editar", submenu: [
+      cmd("Deshacer", "undo", "Ctrl+Z"), cmd("Rehacer", "redo", "Ctrl+Y"),
+      { type: "separator" },
+      cmd("Copiar superficie", "copy", "Ctrl+C"), cmd("Pegar superficie", "paste", "Ctrl+V"), cmd("Duplicar", "duplicate", "Ctrl+D"),
+      cmd("Copiar estilo", "copyStyle", "Ctrl+Shift+C"), cmd("Pegar estilo", "pasteStyle", "Ctrl+Shift+V"),
+      { type: "separator" },
+      cmd("Traer al frente", "front", "Ctrl+]"), cmd("Enviar al fondo", "back", "Ctrl+["),
+      cmd("Centrar en la salida", "center", "C"), cmd("Ocupar toda la salida", "fill"),
+      cmd("Enderezar", "straighten"), cmd("Espejo horizontal", "flipH"), cmd("Voltear vertical", "flipV"), cmd("Girar 90°", "rotate"),
+      cmd("Malla de deformación 4×3", "mesh"), cmd("Dibujar máscara", "mask"),
+      { type: "separator" },
+      cmd("Bloquear / desbloquear", "lock", "L"), cmd("Ocultar / mostrar", "hide", "H"), cmd("Renombrar", "rename", "F2"),
+      cmd("Eliminar", "delete", "Delete"),
+      { type: "separator" },
+      cmd("Todos los comandos…", "palette", "Ctrl+K"),
+    ] },
+    { label: "Añadir", submenu: [
+      cmd("Rectángulo (4 esquinas)", "addRect", "Shift+R"), cmd("Malla curva", "addMesh", "Shift+M"),
+      cmd("Círculo", "addCircle", "Shift+C"), cmd("Triángulo", "addTriangle"), cmd("Hexágono", "addHex"), cmd("Estrella", "addStar"),
+      cmd("Trazar forma a mano", "addTrace", "Shift+F"), cmd("Forma por puntos", "addPoints", "Shift+P"),
+      { type: "separator" },
+      cmd("Dibujar en la pared", "draw", "D"), cmd("Texto", "addText", "Shift+T"),
+      { type: "separator" },
+      cmd("Cubo 3D", "addCube"), cmd("Fachada", "addFacade"), cmd("Escenario", "addStage"),
+    ] },
+    { label: "Ver", submenu: [
+      cmd("Encajar vista", "fit", "Home"), cmd("Acercar", "zoomIn", "+"), cmd("Alejar", "zoomOut", "-"),
+      cmd("Vista previa sin guías", "preview", "V"),
+      { type: "separator" },
+      cmd("Panel Añadir", "tab-add"), cmd("Panel Contenido", "tab-content"), cmd("Panel Efectos", "tab-fx"),
+      cmd("Panel Forma", "tab-shape"), cmd("Panel Capas", "tab-layers"), cmd("Panel Escenas", "tab-scenes"), cmd("Panel Audio y ritmo", "tab-audio"),
+      { type: "separator" },
+      { label: "Pantalla completa del editor", role: "togglefullscreen", accelerator: "F11" },
+    ] },
+    { label: "Proyección", submenu: [
+      cmd("Abrir ventana de salida en el proyector", "outWindow", "Ctrl+Shift+F"),
+      { label: "Pantalla de salida", submenu: [
+        { label: "Automática (la que no tiene el editor)", type: "radio", checked: chosenDisplay === null, click: () => setOutputDisplay(null) },
+        ...displays.map((d, i) => ({
+          label: `Pantalla ${i + 1}: ${d.size.width}×${d.size.height}${d.id === screen.getPrimaryDisplay().id ? " (principal)" : ""}`,
+          type: "radio", checked: chosenDisplay === d.id, click: () => setOutputDisplay(d.id),
+        })),
+      ] },
+      cmd("Pantalla completa aquí", "here", "P"),
+      { type: "separator" },
+      cmd("Guías en el proyector", "guides", "G"), cmd("Apagón", "blackout", "B"), cmd("Sonido de los videos", "mute", "Ctrl+M"),
+      { label: "Patrón de prueba", submenu: [
+        cmd("Cuadrícula", "pattern-grid"), cmd("Blanco", "pattern-white"), cmd("Barras de color", "pattern-bars"),
+        cmd("Rojo", "pattern-red"), cmd("Verde", "pattern-green"), cmd("Azul", "pattern-blue"),
+      ] },
+    ] },
+    { label: "Escenas", submenu: [
+      cmd("Reproducir / pausa", "play", "Space"), cmd("Reiniciar videos", "restart", "Ctrl+0"),
+      cmd("Escena siguiente", "nextScene", "PageDown"), cmd("Escena anterior", "prevScene", "PageUp"),
+      cmd("Nueva escena", "newScene", "Ctrl+Shift+N"),
+    ] },
+    { label: "Audio", submenu: [
+      cmd("Micrófono: escuchar la música", "mic", "M"), cmd("Modo ritmo", "react", "R"),
+      cmd("TAP (marcar tempo)", "tap", "T"), cmd("Marcar el primer tiempo", "downbeat", "Ctrl+1"),
+      cmd("Tempo a la mitad", "half"), cmd("Tempo al doble", "double"),
+      { type: "separator" },
+      cmd("Conectar controlador MIDI", "midi"),
+    ] },
+    { label: "Ayuda", submenu: [
+      cmd("Ayuda y atajos", "help", "F1"), cmd("Todos los comandos", "palette", "Ctrl+K"),
+      { type: "separator" },
+      { label: "Herramientas de desarrollo", role: "toggleDevTools" },
+      { label: `LumaMap ${app.getVersion()}`, enabled: false },
+    ] },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function setOutputDisplay(id) {
+  chosenDisplay = id;
+  buildMenu();
+  if (output) placeOutput(output);
+  else editor?.webContents.send("command", "outWindow");
+}
+
+ipcMain.handle("displays", () => {
+  const out = output ? screen.getDisplayMatching(output.getBounds()).id : null;
+  return screen.getAllDisplays().map((d, i) => ({
+    id: d.id, label: `Pantalla ${i + 1}`, width: d.size.width, height: d.size.height,
+    primary: d.id === screen.getPrimaryDisplay().id, isOutput: d.id === out, chosen: d.id === chosenDisplay,
+  }));
+});
+ipcMain.handle("output-display", (_e, id) => setOutputDisplay(id));
+ipcMain.handle("fullscreen", (_e, on) => editor?.setFullScreen(!!on));
+
 app.whenReady().then(() => {
-  Menu.setApplicationMenu(null);
+  buildMenu();
   protocol.handle("app", (req) => {
     let p = decodeURIComponent(new URL(req.url).pathname);
     if (p === "/" || !p) p = "/index.html";
@@ -89,8 +205,9 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => allowed.has(perm));
 
   // Conectar o desconectar el proyector con la salida abierta: se recoloca sola.
-  screen.on("display-added", () => output && placeOutput(output));
-  screen.on("display-removed", () => output && !projectorDisplay() && output.setFullScreen(false));
+  const displaysChanged = () => { buildMenu(); editor?.webContents.send("displays-changed"); };
+  screen.on("display-added", () => { displaysChanged(); if (output) placeOutput(output); });
+  screen.on("display-removed", () => { displaysChanged(); if (output && !projectorDisplay()) output.setFullScreen(false); });
 
   createEditor();
 });

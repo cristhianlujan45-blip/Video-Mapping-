@@ -13,12 +13,50 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"))
 
 fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
-fs.copyFileSync(path.join(here, "main.js"), path.join(stage, "main.js"));
+for (const f of ["main.js", "preload.js"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
 fs.cpSync(path.join(here, "..", "web"), path.join(stage, "web"), { recursive: true });
 fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
   name: pkg.name, productName: pkg.productName, version: pkg.version, description: pkg.description, main: "main.js", license: pkg.license, author: pkg.author,
 }, null, 2));
 if (process.argv.includes("--stage")) process.exit(0);
+
+// Instalador de Windows (.exe): doble clic, instala y crea accesos directos.
+if (process.argv[2] === "installer") {
+  const { build, Platform, Arch } = await import("electron-builder");
+  const files = await build({
+    targets: Platform.WINDOWS.createTarget(["nsis"], Arch.x64),
+    projectDir: here,
+    publish: "never",
+    config: {
+      appId: "com.lumamap.desktop",
+      productName: "LumaMap",
+      copyright: "MIT",
+      directories: { app: stage, output: path.join(here, "dist") },
+      electronVersion: pkg.devDependencies.electron.replace(/^[^\d]*/, ""),
+      asar: true,
+      publish: null, // sin autoactualización: no se generan archivos de canal
+      artifactName: "LumaMap-Setup-${version}.${ext}",
+      win: {
+        icon: path.join(stage, "web", "icon.png"),
+        // Sin certificado de firma: no se edita el .exe (evita depender de Wine al compilar en Linux).
+        signAndEditExecutable: process.platform === "win32",
+      },
+      nsis: {
+        oneClick: false,
+        perMachine: false,
+        allowToChangeInstallationDirectory: true,
+        createDesktopShortcut: true,
+        createStartMenuShortcut: true,
+        shortcutName: "LumaMap",
+        runAfterFinish: true,
+        installerLanguages: ["es_ES"],
+        language: "3082",
+      },
+    },
+  });
+  console.log("Listo:", files.filter(f => f.endsWith(".exe")).join("\n"));
+  process.exit(0);
+}
 
 const [platform = "win32", arch = "x64"] = process.argv.slice(2);
 const { packager } = await import("@electron/packager");

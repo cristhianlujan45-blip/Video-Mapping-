@@ -63,7 +63,12 @@ cualquier navegador moderno.
 
 **Audio y ritmo**
 - El micrófono analiza graves, medios, agudos y volumen con ganancia automática,
-  detecta cada **golpe (beat)** y calcula el **BPM** de la música.
+  detecta cada **golpe (beat)** y calcula el **BPM** de la música (probado con
+  pistas de 95 y 128 BPM: detecta 94,7 y 128,1).
+- **Al compás:** con el tempo detectado, los efectos caen sobre una rejilla exacta
+  enganchada al bombo (no a la caja ni a los platos) que se corrige sola con cada
+  golpe. Botones ½× / 2× / ±1 / «1» (primer tiempo) y ajuste de **sincronía** en ms
+  por si el proyector o el altavoz añaden retardo.
 - **Modo ritmo** (se activa solo al encender el micrófono): todo el mapping late
   con cada golpe: destello de luz, golpe de zoom, cambio de color, aceleración de
   las animaciones y parpadeo, con intensidad regulable. Puede **cambiar de escena
@@ -93,34 +98,66 @@ añade lo nativo:
   editor. Se detecta al conectar y, si se desconecta el cable, vuelve sola.
 - Selector de archivos del sistema, permisos de cámara y micrófono, exportar con el
   selector de documentos, pantalla siempre encendida, modo inmersivo, vibración al
-  agarrar puntos y botón Atrás.
+  agarrar puntos y botón Atrás (doble pulsación para salir, así el show no se
+  cierra por accidente).
+- **Recuperación automática:** si el motor de la WebView se cae (poca memoria,
+  GPU), la app lo recrea y restaura el proyecto en lugar de cerrarse.
+- APK *release* optimizado (≈300 KB) firmado siempre con la misma clave
+  (`android/lumamap-test.jks`, solo para pruebas; para Google Play usa tu clave con
+  `keystore.properties`).
 
 Compilar desde la raíz del repositorio:
 
 ```bash
-./gradlew :lumamap:assembleDebug
-# APK: lumamap/android/build/outputs/apk/debug/lumamap-debug.apk
+./gradlew :lumamap:assembleRelease
+# APK: lumamap/android/build/outputs/apk/release/lumamap-release.apk
 ```
 
-GitHub Actions lo compila en cada push y lo publica como artefacto
-**`lumamap-debug-apk`** (pestaña *Actions*). Requiere Android 8.0+ y Android
-System WebView / Chrome actualizado (WebGL2).
+Requiere Android 8.0+ y Android System WebView / Chrome actualizado (WebGL2).
+
+## Descargas
+
+La última versión se publica sola en la página **Releases** del repositorio
+(versión preliminar «LumaMap (última versión)»):
+
+- **Windows:** `LumaMap-Setup-<versión>.exe` → doble clic, instala y crea
+  accesos directos en el escritorio y el menú Inicio. Requiere Windows 10 u 11 de
+  64 bits. Si aparece «Windows protegió su PC»: *Más información → Ejecutar de
+  todas formas* (el instalador no lleva certificado de pago).
+- **Android:** `LumaMap-Android.apk`. Todas las versiones se firman con la misma
+  clave, así que cada APK nuevo se instala **encima** del anterior sin perder tus
+  proyectos (solo hay que desinstalar una vez las versiones 2.0 y 2.1).
 
 ## Windows (PC)
 
-`desktop/` empaqueta la misma app con Electron. Descarga
-`LumaMap-<versión>-Windows-x64.zip` (artefacto **`lumamap-windows-x64`** de
-GitHub Actions), descomprímelo y abre **`LumaMap.exe`**; no requiere instalación.
-Conecta el proyector como pantalla extendida (**Win + P → Extender**) y pulsa
-*Proyectar → Abrir ventana de salida*: se abre sola a pantalla completa en el
-proyector y se recoloca si lo reconectas.
+`desktop/` empaqueta la misma app con Electron y añade:
+
+- **Menú de la ventana** con todas las acciones y sus atajos (Archivo, Editar,
+  Añadir, Ver, Proyección, Escenas, Audio, Ayuda).
+- **Salida al proyector** a pantalla completa en la segunda pantalla (Win + P →
+  Extender), con selector de pantalla en *Proyección → Pantalla de salida* y
+  recolocación automática al reconectar.
+- Micrófono, cámara y MIDI sin pedir permisos cada vez.
 
 ```bash
 cd lumamap/desktop
 npm install
-npm start            # probar en tu PC
-npm run dist:win     # dist/LumaMap-<versión>-Windows-x64.zip
+npm start               # probar en tu PC
+npm run installer:win   # dist/LumaMap-Setup-<versión>.exe (en Linux necesita Wine)
+npm run dist:win        # alternativa portable: dist/LumaMap-<versión>-Windows-x64.zip
 ```
+
+## Comandos y atajos
+
+- **Ctrl+K** abre la paleta de comandos: escribe lo que quieres hacer («estrella»,
+  «grabar», «apagón»…) y pulsa Enter. Hay más de 70 comandos.
+- **Clic derecho** (o mantener pulsado en táctil) sobre una superficie: duplicar,
+  copiar/pegar, copiar/pegar estilo, traer al frente, centrar, máscara, bloquear…
+- **Grabar video** de la salida (Ctrl+R) con la música del micrófono, y **capturar
+  imagen** PNG (Ctrl+Mayús+P).
+- **F1** muestra todos los atajos. Algunos: Espacio reproducir · B apagón · G guías ·
+  M micrófono · R modo ritmo · T tap · D dibujar · Mayús+R/M/C rectángulo/malla/círculo ·
+  C centrar · L bloquear · H ocultar · Ctrl+C/V/D copiar/pegar/duplicar · 1-9 escenas.
 
 ## Navegador (PC, tablet, PWA)
 

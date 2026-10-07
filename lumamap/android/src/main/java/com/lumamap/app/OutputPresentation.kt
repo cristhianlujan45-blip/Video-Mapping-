@@ -32,7 +32,9 @@ class OutputPresentation(private val activity: MainActivity, display: Display) :
         super.onCreate(savedInstanceState)
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val w = WebView(context)
-        activity.configureWebView(w)
+        // Si el motor de la salida falla, se cierra limpiamente y el editor sigue;
+        // la salida se puede volver a abrir con «Proyectar».
+        activity.configureWebView(w) { main.post { runCatching { dismiss() } } }
         w.addJavascriptInterface(activity.Bridge(isEditor = false), "LumaNative")
         w.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: android.webkit.PermissionRequest) {

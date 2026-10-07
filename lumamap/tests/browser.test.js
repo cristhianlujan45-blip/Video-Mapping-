@@ -79,6 +79,29 @@ await test("la ventana de salida recibe el proyecto del editor", async () => {
   await out.waitForFunction(() => /Cubo 3D/.test(document.querySelector("#hud small").textContent), null, { timeout: 5000 });
   await out.close();
 });
+await test("paleta de comandos (Ctrl+K) y copiar/pegar", async () => {
+  await page.keyboard.press("Escape");
+  await page.locator('#dock [data-tab="add"]').click();
+  const n = () => page.evaluate(() => window.__lumamap.S.project.surfaces.length);
+  const n0 = await n();
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("estrella");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  assert.equal(await n(), n0 + 1);
+  await page.keyboard.press("Control+c");
+  await page.keyboard.press("Control+v");
+  assert.equal(await n(), n0 + 2);
+  await page.keyboard.press("Control+z");
+  assert.equal(await n(), n0 + 1);
+});
+await test("menú contextual con clic derecho", async () => {
+  const [x, y] = await toScreen([960, 540]);
+  await page.mouse.click(x, y, { button: "right" });
+  assert.equal(await page.locator(".ctxmenu").count(), 1);
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".ctxmenu").count(), 0);
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();
