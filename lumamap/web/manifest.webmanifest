@@ -1,0 +1,9 @@
+{
+  "name": "LumaMap — Video Mapping",
+  "short_name": "LumaMap",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#14171c",
+  "theme_color": "#14171c",
+  "description": "Editor y media server de projection mapping"
+}

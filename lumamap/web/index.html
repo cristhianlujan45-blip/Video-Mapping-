@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LumaMap — Video Mapping</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header id="menubar">
+  <span class="logo">◩ LumaMap</span>
+  <nav>
+    <button class="mb" data-action="new-project">Nuevo</button>
+    <button class="mb" data-action="open">Abrir</button>
+    <button class="mb" data-action="save">Guardar</button>
+    <button class="mb" data-action="save-backend">Guardar y sincronizar</button>
+    <button class="mb" data-action="export">Exportar</button>
+    <button class="mb" data-action="import-project">Importar</button>
+    <button class="mb" data-action="resolution">Resolución</button>
+    <button class="mb" data-action="import-media">Importar medios</button>
+  </nav>
+  <span class="spacer"></span>
+  <button class="mb" data-action="mode-toggle" title="Alternar modo Simple/Pro">Modo</button>
+  <button class="mb warn" data-action="output" title="Abrir ventana de salida (proyector)">⧉ OUTPUT</button>
+</header>
+
+<div id="transport">
+  <button class="tp" data-action="prev" title="Escena anterior">⏮</button>
+  <button class="tp" data-action="stop" title="Stop">⏹</button>
+  <button class="tp" data-action="play" title="Play">▶</button>
+  <button class="tp" data-action="pause" title="Pause">⏸</button>
+  <button class="tp" data-action="next" title="Escena siguiente">⏭</button>
+  <span class="tp-sep"></span>
+  <label>Transición
+    <button class="tp sm" data-action="transition" data-kind="cut">Corte</button>
+    <button class="tp sm" data-action="transition" data-kind="fade">Fade</button>
+  </label>
+  <span class="tp-sep"></span>
+  <span class="tp-label">Patrones de calibración:</span>
+  <button class="tp sm" data-action="pattern" data-pattern="grid">Cuadrícula</button>
+  <button class="tp sm" data-action="pattern" data-pattern="white">Blanco</button>
+  <button class="tp sm" data-action="pattern" data-pattern="red">Rojo</button>
+  <button class="tp sm" data-action="pattern" data-pattern="green">Verde</button>
+  <button class="tp sm" data-action="pattern" data-pattern="blue">Azul</button>
+  <button class="tp sm" data-action="pattern" data-pattern="bw">B/N</button>
+</div>
+
+<main id="layout">
+  <aside id="left">
+    <div class="panel-title">Biblioteca de medios</div>
+    <div id="mediaList" class="panel-body"></div>
+  </aside>
+  <section id="center">
+    <div id="canvasWrap">
+      <canvas id="gl"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+  </section>
+  <aside id="right">
+    <div class="panel-title">Capas</div>
+    <div id="layersList" class="panel-body small"></div>
+    <div class="panel-title">Escenas</div>
+    <div id="scenesList" class="panel-body small"></div>
+    <div class="panel-title">Propiedades</div>
+    <div id="propsBody" class="panel-body props"></div>
+  </aside>
+</main>
+
+<footer id="timeline"><div id="timelineScenes"></div></footer>
+<div id="statusBar"></div>
+
+<input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif,video/mp4,video/webm,video/quicktime" multiple hidden>
+<input type="file" id="projectInput" accept=".json,application/json" hidden>
+<input type="file" id="mapInput" accept="image/png,image/jpeg,image/webp" hidden>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

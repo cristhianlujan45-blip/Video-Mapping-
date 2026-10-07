@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>LumaMap — OUTPUT</title>
+<style>
+  html,body{height:100%;margin:0;background:#000;overflow:hidden;}
+  canvas{position:fixed; inset:0; width:100vw; height:100vh;}
+  #pat{pointer-events:none;}
+  #hud{position:fixed; top:8px; left:10px; color:#4fc3f7; font:12px monospace;
+       background:rgba(0,0,0,.5); padding:4px 8px; border-radius:4px; z-index:5;}
+</style>
+</head>
+<body>
+<canvas id="out"></canvas>
+<canvas id="pat"></canvas>
+<div id="hud">LumaMap OUTPUT — arrastra esta ventana al proyector y pulsa F</div>
+<script type="module" src="/js/output.js"></script>
+</body>
+</html>
