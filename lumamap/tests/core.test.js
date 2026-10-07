@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   homography, applyH, tryHomography, UNIT_SQUARE, evalMesh, gridFromCorners, resampleGrid, gridCornerIdx,
   screenToUV, uvToScreen, triangulatePolygon, simplify, pointInPolygon, surfaceOutline, surfaceAspect, transformPoints,
+  edgeHandles, dragEdge, bbox,
 } from "../web/js/math.js";
 import * as M from "../web/js/model.js";
 import { History } from "../web/js/history.js";
@@ -82,6 +83,29 @@ await test("escala y rotación alrededor del centro", () => {
   assert.ok(near(p.x, 0, 1e-9) && near(p.y, 20, 1e-9));
 });
 
+await test("asa lateral: estira sin girar (lado opuesto fijo, mismo ángulo)", () => {
+  const s = M.createQuad({ corners: [[100, 100], [500, 150], [480, 400], [120, 380]] });
+  const right = edgeHandles(s).find(e => e.side === "right");
+  const pts = dragEdge(s.points, right, 60, 10);
+  const idx = gridCornerIdx(2, 2); // TL, TR, BR, BL
+  assert.deepEqual([pts[idx[0]], pts[idx[3]]], [s.points[idx[0]], s.points[idx[3]]], "el lado izquierdo no se mueve");
+  const dir = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
+  assert.ok(near(dir(pts[idx[1]], pts[idx[2]]), dir(s.points[idx[1]], s.points[idx[2]]), 1e-9), "el lado derecho conserva su ángulo");
+  const moved = Math.hypot(pts[idx[1]].x - s.points[idx[1]].x, pts[idx[1]].y - s.points[idx[1]].y);
+  assert.ok(moved > 50, "se estira hacia fuera: " + moved);
+});
+await test("asas laterales en mallas y polígonos reparten el estiramiento", () => {
+  const m = M.createQuad({ corners: M.rectCorners(0, 0, 300, 200), cols: 4, rows: 3 });
+  const top = edgeHandles(m).find(e => e.side === "top");
+  const pts = dragEdge(m.points, top, 0, -40);
+  assert.ok(near(pts[0].y, -40, 1e-9) && near(pts[4].y, 100 - 20, 1e-9) && near(pts[8].y, 200, 1e-9), "fila media sube la mitad, la de abajo fija");
+  const star = M.SHAPES.star.make(100, 100, 50);
+  const b0 = bbox(star.points);
+  const r = edgeHandles(star).find(e => e.side === "right");
+  const b1 = bbox(dragEdge(star.points, r, 30, 0));
+  assert.ok(near(b1.x, b0.x, 1e-9) && near(b1.w, b0.w + 30, 1e-9), "el polígono se ensancha 30 px");
+});
+
 console.log("== Modelo de proyecto ==");
 await test("todas las plantillas se construyen y validan", () => {
   for (const [k, t] of Object.entries(M.TEMPLATES)) {
@@ -145,6 +169,28 @@ await test("efectos rápidos parten de valores limpios", () => {
   l.fx.brightness = 1.7;
   M.applyFxPreset(l, "Caleidoscopio");
   assert.equal(l.fx.kaleido, 6); assert.equal(l.fx.brightness, 1);
+});
+
+await test("biblioteca de efectos: más de 100 y solo usa parámetros que existen", () => {
+  assert.ok(M.FX_LIBRARY.length >= 100, "efectos: " + M.FX_LIBRARY.length);
+  const keys = new Set(Object.keys(M.DEFAULT_FX()));
+  for (const e of M.FX_LIBRARY) for (const k of Object.keys(e.fx)) assert.ok(keys.has(k), `${e.name}: parámetro desconocido «${k}»`);
+  const maps = new Set(M.COLORMAPS.map(c => c[0]));
+  for (const e of M.FX_LIBRARY) if (e.fx.colormap) assert.ok(maps.has(e.fx.colormap), e.name);
+});
+await test("47 animaciones con identificador único; «Calibrar» conserva su número", () => {
+  assert.equal(M.GENERATORS.length, 47);
+  assert.equal(new Set(M.GENERATORS.map(g => g.id)).size, 47);
+  assert.equal(M.GEN_INDEX.calib, 15);
+});
+await test("resoluciones de composición hasta 8K y ajustes de salida por defecto", () => {
+  const all = M.RESOLUTIONS.flatMap(g => g.list.map(([w, h]) => `${w}x${h}`));
+  for (const r of ["1920x1080", "2048x1080", "2560x1440", "3840x2160", "4096x2160", "7680x4320", "1080x1920"]) assert.ok(all.includes(r), r);
+  const p = M.normalizeProject({ ...M.createProject(), settings: { output: { fps: 30, softEdge: { left: 0.2 } } } });
+  assert.equal(p.settings.output.fps, 30);
+  assert.equal(p.settings.output.softEdge.left, 0.2);
+  assert.equal(p.settings.output.softEdge.curve, 2.2, "completa lo que falta");
+  assert.equal(p.settings.record.height, 1080);
 });
 
 console.log("== Historial ==");

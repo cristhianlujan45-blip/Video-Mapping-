@@ -35,6 +35,37 @@ export const GENERATORS = [
   { id: "gradient", name: "Degradado" },
   { id: "bricks",   name: "Ladrillos" },
   { id: "calib",    name: "Calibrar" },
+  { id: "matrix",   name: "Matrix" },
+  { id: "vortex",   name: "Vórtice" },
+  { id: "hexgrid",  name: "Hexágonos" },
+  { id: "cells",    name: "Celdas" },
+  { id: "aurora",   name: "Aurora" },
+  { id: "lava",     name: "Lava" },
+  { id: "water",    name: "Agua" },
+  { id: "eq",       name: "Ecualizador ♪" },
+  { id: "audiorings", name: "Anillos ♪" },
+  { id: "rays",     name: "Rayos de luz" },
+  { id: "confetti", name: "Confeti" },
+  { id: "snow",     name: "Nieve" },
+  { id: "rain",     name: "Lluvia" },
+  { id: "lightning", name: "Relámpago" },
+  { id: "galaxy",   name: "Galaxia" },
+  { id: "mandala",  name: "Mandala" },
+  { id: "truchet",  name: "Laberinto" },
+  { id: "opart",    name: "Op-art" },
+  { id: "moire",    name: "Moiré" },
+  { id: "hearts",   name: "Corazones" },
+  { id: "fireworks", name: "Fuegos artificiales" },
+  { id: "synthwave", name: "Synthwave" },
+  { id: "glitchblocks", name: "Bloques glitch" },
+  { id: "static",   name: "Estática TV" },
+  { id: "sweepbars", name: "Barrido" },
+  { id: "beatflash", name: "Destello ♪" },
+  { id: "squares",  name: "Cuadrados" },
+  { id: "chevrons", name: "Flechas" },
+  { id: "dots",     name: "Puntos" },
+  { id: "fluid",    name: "Fluido" },
+  { id: "boxtunnel", name: "Túnel cuadrado" },
 ];
 export const GEN_INDEX = Object.fromEntries(GENERATORS.map((g, i) => [g.id, i]));
 
@@ -75,7 +106,20 @@ export const DEFAULT_FX = () => ({
   zoom: 1, rotate: 0, spin: 0, scrollX: 0, scrollY: 0,
   strobe: 0,
   border: 0, borderColor: "#00e5ff", borderAnim: "none", borderGlow: 0.5,
+  // Distorsión
+  twirl: 0, bulge: 0, ripple: 0, tile: 1, polar: false, glitch: 0, chroma: 0, crt: 0, shake: 0,
+  // Color y estilo
+  gamma: 1, posterize: 0, sepia: 0, threshold: 0, hueCycle: 0, colormap: "none",
+  duotone: 0, duoA: "#1a0033", duoB: "#00e5ff",
+  vignette: 0, scanlines: 0, halftone: 0, edges: 0, sharpen: 0, emboss: 0,
+  // Cámara y recortes
+  flipX: false, flipY: false, chromaKey: 0, keyColor: "#00ff00", keySoft: 0.1, lumaKey: 0, lumaSoft: 0.05,
 });
+
+export const COLORMAPS = [
+  ["none", "Normal"], ["thermal", "Térmica"], ["night", "Visión nocturna"], ["xray", "Rayos X"],
+  ["gold", "Oro"], ["rainbow", "Arcoíris"], ["ice", "Hielo"],
+];
 
 export const DEFAULT_SOURCE = () => ({
   type: "none",          // none | media | gen | color | text | drawing | camera
@@ -96,26 +140,147 @@ export function createLook(source = {}) {
   };
 }
 
-/** Efectos rápidos: combinaciones listas de uniforms (sin efecto simulado). */
-export const FX_PRESETS = {
-  "Limpio":      () => ({}),
-  "Neón":        () => ({ saturation: 1.8, contrast: 1.3, border: 0.02, borderAnim: "pulse", borderGlow: 1 }),
-  "Glitch":      () => ({ rgbShift: 0.012, noise: 0.25, pixelate: 0.15, strobe: 0 }),
-  "VHS":         () => ({ blur: 0.4, saturation: 0.7, noise: 0.18, rgbShift: 0.004, contrast: 0.92, wave: 0.15 }),
-  "Caleidoscopio": () => ({ kaleido: 6, spin: 0.1 }),
-  "Espejo":      () => ({ mirror: "quad" }),
-  "Ondas":       () => ({ wave: 0.6 }),
-  "B/N":         () => ({ saturation: 0, contrast: 1.2 }),
-  "Negativo":    () => ({ invert: true }),
-  "Pixel":       () => ({ pixelate: 0.6 }),
-  "Contorno":    () => ({ border: 0.03, borderAnim: "chase", borderGlow: 1 }),
-  "Estroboscopio": () => ({ strobe: 6 }),
-};
+/**
+ * Biblioteca de efectos: combinaciones listas de los parámetros del shader,
+ * por categorías. Todo en GPU y en tiempo real, sobre cualquier contenido
+ * (video, imagen, cámara, animación, texto o dibujo).
+ */
+const L = [];
+const P = (cat, name, fx) => L.push({ cat, name, fx });
+// Color
+P("Color", "Limpio", {});
+P("Color", "Blanco y negro", { saturation: 0, contrast: 1.15 });
+P("Color", "Negativo", { invert: true });
+P("Color", "Sepia", { sepia: 1 });
+P("Color", "Vintage", { sepia: 0.6, contrast: 0.9, vignette: 0.6, noise: 0.08 });
+P("Color", "Cálido", { hue: 0.97, saturation: 1.25, brightness: 1.05, duotone: 0.15, duoA: "#3a0a00", duoB: "#ffcc66" });
+P("Color", "Frío", { duotone: 0.3, duoA: "#000022", duoB: "#66ccff", saturation: 0.8 });
+P("Color", "Pastel", { saturation: 0.55, brightness: 1.15, contrast: 0.8, gamma: 1.2 });
+P("Color", "Saturado", { saturation: 2.2, contrast: 1.2 });
+P("Color", "Alto contraste", { contrast: 1.8, saturation: 1.2 });
+P("Color", "Neón", { saturation: 1.8, contrast: 1.3, border: 0.02, borderAnim: "pulse", borderGlow: 1 });
+P("Color", "Arcoíris en movimiento", { hueCycle: 1.5, saturation: 1.6 });
+P("Color", "Ciclo de color lento", { hueCycle: 0.4 });
+P("Color", "Duotono rosa/cian", { duotone: 1, duoA: "#2b0040", duoB: "#00f0ff" });
+P("Color", "Duotono oro", { duotone: 1, duoA: "#120800", duoB: "#ffd060" });
+P("Color", "Duotono ácido", { duotone: 1, duoA: "#001a00", duoB: "#b6ff00" });
+P("Color", "Duotono fuego", { duotone: 1, duoA: "#200000", duoB: "#ff7a00" });
+P("Color", "Duotono océano", { duotone: 1, duoA: "#000a2a", duoB: "#00ffd0" });
+P("Color", "Duotono púrpura", { duotone: 1, duoA: "#0a0014", duoB: "#c37bff" });
+P("Color", "Posterizar", { posterize: 4 });
+P("Color", "Pop art", { posterize: 3, saturation: 2.2, contrast: 1.3 });
+P("Color", "Umbral B/N", { threshold: 0.5 });
+P("Color", "Silueta", { threshold: 0.35, invert: true });
+P("Color", "Térmica", { colormap: "thermal" });
+P("Color", "Visión nocturna", { colormap: "night", vignette: 0.8, noise: 0.1 });
+P("Color", "Rayos X", { colormap: "xray", contrast: 1.3 });
+P("Color", "Oro", { colormap: "gold", contrast: 1.2 });
+P("Color", "Mapa arcoíris", { colormap: "rainbow" });
+P("Color", "Hielo", { colormap: "ice" });
+P("Color", "Brillante", { brightness: 1.4, gamma: 1.2 });
+P("Color", "Oscuro dramático", { brightness: 0.75, contrast: 1.5, vignette: 1 });
+// Retro
+P("Retro", "VHS", { blur: 0.4, saturation: 0.7, noise: 0.18, rgbShift: 0.004, contrast: 0.92, wave: 0.15, scanlines: 0.4 });
+P("Retro", "TV antigua", { crt: 0.6, scanlines: 0.8, vignette: 0.8, noise: 0.12, saturation: 0.6 });
+P("Retro", "Monitor CRT", { crt: 0.4, scanlines: 0.5, chroma: 0.006, vignette: 0.5 });
+P("Retro", "Película antigua", { sepia: 0.8, noise: 0.22, vignette: 0.9, contrast: 1.1, shake: 0.3 });
+P("Retro", "Polaroid", { sepia: 0.25, brightness: 1.1, contrast: 0.85, vignette: 0.4, saturation: 0.8 });
+P("Retro", "Periódico", { halftone: 1, saturation: 0 });
+P("Retro", "Cómic semitono", { halftone: 0.8, posterize: 4, saturation: 1.6 });
+P("Retro", "Arcade 8 bits", { pixelate: 0.75, posterize: 4, saturation: 1.5 });
+P("Retro", "Game Boy", { pixelate: 0.7, duotone: 1, duoA: "#0f380f", duoB: "#9bbc0f", posterize: 4 });
+P("Retro", "Cine mudo", { saturation: 0, contrast: 1.4, noise: 0.25, vignette: 1, shake: 0.4 });
+P("Retro", "Synthwave", { duotone: 0.6, duoA: "#2a0050", duoB: "#ff3cac", scanlines: 0.3, border: 0.01, borderColor: "#ff3cac", borderGlow: 1 });
+// Glitch
+P("Glitch", "Glitch", { rgbShift: 0.012, noise: 0.25, glitch: 0.4 });
+P("Glitch", "Glitch fuerte", { rgbShift: 0.02, glitch: 1, noise: 0.35, pixelate: 0.2 });
+P("Glitch", "Separación RGB", { rgbShift: 0.01 });
+P("Glitch", "Aberración cromática", { chroma: 0.02 });
+P("Glitch", "Interferencia", { glitch: 0.6, scanlines: 0.6, noise: 0.2 });
+P("Glitch", "Señal perdida", { noise: 0.5, glitch: 0.8, saturation: 0.3, scanlines: 0.9 });
+P("Glitch", "Temblor", { shake: 1 });
+P("Glitch", "Terremoto", { shake: 3, rgbShift: 0.006 });
+P("Glitch", "Datos corruptos", { pixelate: 0.5, glitch: 0.7, posterize: 3, hueCycle: 2 });
+P("Glitch", "Digital", { pixelate: 0.35, chroma: 0.012, scanlines: 0.4 });
+// Distorsión
+P("Distorsión", "Ondas", { wave: 0.6 });
+P("Distorsión", "Ondas fuertes", { wave: 1.8 });
+P("Distorsión", "Remolino", { twirl: 1 });
+P("Distorsión", "Remolino fuerte", { twirl: 2.5 });
+P("Distorsión", "Ojo de pez", { bulge: 0.8 });
+P("Distorsión", "Pellizco", { bulge: -0.8 });
+P("Distorsión", "Gota de agua", { ripple: 1 });
+P("Distorsión", "Estanque", { ripple: 2, wave: 0.3 });
+P("Distorsión", "Túnel polar", { polar: true });
+P("Distorsión", "Túnel giratorio", { polar: true, scrollY: 0.3, spin: 0.5 });
+P("Distorsión", "Mosaico 2×2", { tile: 2 });
+P("Distorsión", "Mosaico 3×3", { tile: 3 });
+P("Distorsión", "Mosaico 4×4", { tile: 4 });
+P("Distorsión", "Mosaico 8×8", { tile: 8 });
+P("Distorsión", "Pixel", { pixelate: 0.6 });
+P("Distorsión", "Pixel grande", { pixelate: 0.9 });
+P("Distorsión", "Espejo ↔", { mirror: "h" });
+P("Distorsión", "Espejo ↕", { mirror: "v" });
+P("Distorsión", "Espejo cuádruple", { mirror: "quad" });
+P("Distorsión", "Desenfoque", { blur: 1 });
+P("Distorsión", "Sueño", { blur: 0.8, brightness: 1.2, saturation: 1.3, vignette: 0.5 });
+// Caleidoscopio
+for (const n of [3, 4, 5, 6, 8, 10, 12, 16]) P("Caleidoscopio", `Caleidoscopio ${n}`, { kaleido: n });
+P("Caleidoscopio", "Caleidoscopio giratorio", { kaleido: 6, spin: 0.3 });
+P("Caleidoscopio", "Flor", { kaleido: 8, twirl: 0.6, spin: 0.15, saturation: 1.5 });
+P("Caleidoscopio", "Cristal", { kaleido: 6, mirror: "quad", chroma: 0.01 });
+P("Caleidoscopio", "Mandala psicodélico", { kaleido: 12, hueCycle: 1, twirl: 1, saturation: 1.8 });
+// Movimiento
+P("Movimiento", "Giro lento", { spin: 0.2 });
+P("Movimiento", "Giro rápido", { spin: 1.5 });
+P("Movimiento", "Zoom acercado", { zoom: 1.8 });
+P("Movimiento", "Zoom alejado (repetir)", { zoom: 0.5 });
+P("Movimiento", "Deslizar ←", { scrollX: 0.15 });
+P("Movimiento", "Deslizar →", { scrollX: -0.15 });
+P("Movimiento", "Deslizar ↑", { scrollY: 0.15 });
+P("Movimiento", "Deslizar ↓", { scrollY: -0.15 });
+P("Movimiento", "Marquesina", { scrollX: -0.25 });
+P("Movimiento", "Cinta infinita", { tile: 2, scrollX: 0.2 });
+// Luz
+P("Luz", "Borde neón", { border: 0.02, borderAnim: "none", borderGlow: 1 });
+P("Luz", "Contorno persecución", { border: 0.03, borderAnim: "chase", borderGlow: 1 });
+P("Luz", "Contorno pulso", { border: 0.025, borderAnim: "pulse", borderGlow: 1 });
+P("Luz", "Contorno arcoíris", { border: 0.025, borderAnim: "rainbow", borderGlow: 1 });
+P("Luz", "Viñeta", { vignette: 1 });
+P("Luz", "Brillo suave", { blur: 0.5, brightness: 1.25, contrast: 1.1 });
+P("Luz", "Estroboscopio lento", { strobe: 3 });
+P("Luz", "Estroboscopio", { strobe: 6 });
+P("Luz", "Estroboscopio rápido", { strobe: 12 });
+// Cámara (también para video e imagen)
+P("Cámara", "Espejo selfie", { flipX: true });
+P("Cámara", "Contorno neón", { edges: 1, saturation: 1.5 });
+P("Cámara", "Contorno sobre imagen", { edges: 0.5 });
+P("Cámara", "Dibujo a lápiz", { edges: 1, saturation: 0, invert: true, contrast: 1.3 });
+P("Cámara", "Cómic", { edges: 0.5, posterize: 4, saturation: 1.6 });
+P("Cámara", "Relieve", { emboss: 1 });
+P("Cámara", "Nitidez", { sharpen: 1 });
+P("Cámara", "Quitar fondo verde", { chromaKey: 0.35, keyColor: "#00ff00", keySoft: 0.12 });
+P("Cámara", "Quitar fondo azul", { chromaKey: 0.35, keyColor: "#0044ff", keySoft: 0.12 });
+P("Cámara", "Quitar el negro", { lumaKey: 0.12, lumaSoft: 0.08 });
+P("Cámara", "Solo lo brillante", { lumaKey: 0.5, lumaSoft: 0.15 });
+P("Cámara", "Silueta neón", { threshold: 0.4, edges: 1, duotone: 1, duoA: "#000000", duoB: "#00e5ff" });
+P("Cámara", "Térmica", { colormap: "thermal", blur: 0.3 });
+P("Cámara", "Visión nocturna", { colormap: "night", vignette: 0.9, noise: 0.12 });
+P("Cámara", "Pixel art", { pixelate: 0.7, posterize: 5, saturation: 1.4 });
+P("Cámara", "Caleidoscopio", { kaleido: 6 });
+P("Cámara", "Fantasma", { invert: true, saturation: 0, lumaKey: 0.3, lumaSoft: 0.2 });
+P("Cámara", "Holograma", { duotone: 1, duoA: "#000814", duoB: "#00e5ff", scanlines: 0.7, glitch: 0.2, chroma: 0.008 });
 
-export function applyFxPreset(look, name) {
+export const FX_LIBRARY = L;
+export const FX_CATEGORIES = [...new Set(L.map(x => x.cat))];
+/** Compatibilidad: nombre → función que devuelve el cambio. */
+export const FX_PRESETS = Object.fromEntries(L.map(x => [x.name, () => ({ ...x.fx })]));
+
+/** Aplica un efecto de la biblioteca. combine = sumarlo a lo que ya tiene. */
+export function applyFxPreset(look, name, combine = false) {
   const gen = FX_PRESETS[name];
   if (!gen) return false;
-  look.fx = { ...DEFAULT_FX(), ...gen() };
+  look.fx = combine ? { ...look.fx, ...gen() } : { ...DEFAULT_FX(), ...gen() };
   return true;
 }
 
@@ -164,8 +329,35 @@ export function defaultSettings() {
   return {
     transitionMs: 800, autoAdvance: false, loopScenes: true, bpm: 120,
     react: { enabled: false, amount: 1, pulse: true, zoom: true, color: true, motion: true, flash: false, sceneBeats: 0 },
+    // Salida (como el «Advanced Output» de los media servers): calidad, color,
+    // orientación del proyector y bordes suaves para unir varios proyectores.
+    output: {
+      fps: 60, renderScale: 1,
+      brightness: 1, contrast: 1, saturation: 1,
+      flipH: false, flipV: false, rotate: 0,
+      softEdge: { left: 0, right: 0, top: 0, bottom: 0, curve: 2.2 },
+    },
+    // Grabación / transmisión
+    record: { height: 1080, fps: 30, mbps: 12 },
   };
 }
+
+/** Resoluciones de composición (las de los media servers profesionales). */
+export const RESOLUTIONS = [
+  { group: "Estándar", list: [[640, 480, "VGA"], [800, 600, "SVGA"], [1024, 768, "XGA (proyector)"], [1280, 720, "HD 720p"], [1280, 800, "WXGA (proyector)"], [1366, 768, "HD portátil"]] },
+  { group: "Full HD y 2K", list: [[1920, 1080, "Full HD 1080p"], [1920, 1200, "WUXGA (proyector)"], [2048, 1080, "2K DCI (cine)"], [2560, 1440, "QHD / 1440p"], [2560, 1600, "WQXGA"]] },
+  { group: "4K y más", list: [[3840, 2160, "4K UHD"], [4096, 2160, "4K DCI (cine)"], [5120, 2880, "5K"], [7680, 4320, "8K UHD"]] },
+  { group: "Vertical y especiales", list: [[1080, 1920, "Vertical 9:16"], [2160, 3840, "Vertical 4K"], [1080, 1080, "Cuadrado"], [2560, 1080, "Ultrapanorámica 21:9"], [3440, 1440, "Ultrapanorámica QHD"]] },
+  { group: "Varios proyectores", list: [[3840, 1080, "2 × Full HD"], [5760, 1080, "3 × Full HD"], [7680, 1080, "4 × Full HD"], [3840, 1200, "2 × WUXGA"], [2048, 768, "2 × XGA"], [1920, 2160, "2 × Full HD apilados"]] },
+];
+
+/** Calidades de grabación y transmisión. */
+export const RECORD_QUALITIES = [
+  { id: "stream", label: "Transmisión (6 Mbps)", mbps: 6 },
+  { id: "high", label: "Alta (12 Mbps)", mbps: 12 },
+  { id: "veryhigh", label: "Muy alta (25 Mbps)", mbps: 25 },
+  { id: "max", label: "Máxima (50 Mbps)", mbps: 50 },
+];
 
 export function createProject(name = "Mi mapping", width = 1920, height = 1080) {
   const scene = createScene("Escena 1");
@@ -320,7 +512,13 @@ export function normalizeProject(json) {
   json.width = json.width || 1920; json.height = json.height || 1080;
   json.media = Array.isArray(json.media) ? json.media : [];
   const st = json.settings || {};
-  json.settings = { ...defaultSettings(), ...st, react: { ...defaultSettings().react, ...(st.react || {}) } };
+  const D = defaultSettings();
+  json.settings = {
+    ...D, ...st,
+    react: { ...D.react, ...(st.react || {}) },
+    output: { ...D.output, ...(st.output || {}), softEdge: { ...D.output.softEdge, ...(st.output?.softEdge || {}) } },
+    record: { ...D.record, ...(st.record || {}) },
+  };
   if (!json.scenes.length) json.scenes.push(createScene());
   if (!json.scenes.some(s => s.id === json.sceneId)) json.sceneId = json.scenes[0].id;
   for (const s of json.surfaces) {

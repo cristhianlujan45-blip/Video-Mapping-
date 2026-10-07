@@ -2,9 +2,14 @@
 // Sirve la app web desde un protocolo propio seguro (app://) para que funcionen
 // los módulos ES, IndexedDB, micrófono y cámara, y abre la ventana de salida
 // directamente a pantalla completa en el proyector (segunda pantalla).
-const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain } = require("electron");
+const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain, net } = require("electron");
+const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
+const { optimize } = require("./optimize.js");
+
+const OPT_DIR = path.join(os.tmpdir(), "lumamap-optimized");
 
 const WEB = path.join(__dirname, "web");
 const ORIGIN = "app://lumamap";
@@ -189,10 +194,56 @@ ipcMain.handle("displays", () => {
 ipcMain.handle("output-display", (_e, id) => setOutputDisplay(id));
 ipcMain.handle("fullscreen", (_e, on) => editor?.setFullScreen(!!on));
 
+// Optimización automática de video al importar (ver optimize.js).
+ipcMain.handle("video:optimize", async (e, file, target) => {
+  const r = await optimize(file, target || {}, OPT_DIR, (pct) => e.sender.send("video:progress", { file, pct }));
+  return { action: r.action, reason: r.reason, ms: r.ms, encoder: r.encoder || null, info: r.info,
+    url: r.action === "keep" ? null : `${ORIGIN}/__opt/${encodeURIComponent(path.basename(r.file))}` };
+});
+/* ---------------- Actualizaciones ---------------- */
+ipcMain.on("app-version", (e) => { e.returnValue = app.getVersion(); });
+ipcMain.handle("update:check", async (_e, url) => {
+  const r = await net.fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+});
+// Descarga el instalador nuevo y lo ejecuta en silencio; al terminar abre LumaMap otra vez.
+ipcMain.handle("update:install", async (e, url) => {
+  if (process.platform !== "win32") { shell.openExternal(url); return; }
+  const r = await net.fetch(url);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const total = +r.headers.get("content-length") || 0;
+  const file = path.join(os.tmpdir(), "LumaMap-Setup-update.exe");
+  const out = fs.createWriteStream(file);
+  const reader = r.body.getReader();
+  let got = 0, lastSent = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out.write(Buffer.from(value));
+    got += value.length;
+    if (total && Date.now() - lastSent > 250) { lastSent = Date.now(); e.sender.send("update:progress", got / total); }
+  }
+  await new Promise((res, rej) => out.end((err) => (err ? rej(err) : res())));
+  if (total && got < total) throw new Error("Descarga incompleta");
+  spawn(file, ["/S", "--force-run"], { detached: true, stdio: "ignore" }).unref();
+  setTimeout(() => app.quit(), 500);
+});
+
+ipcMain.handle("video:release", (_e, url) => {
+  try { fs.rmSync(path.join(OPT_DIR, path.basename(decodeURIComponent(new URL(url).pathname))), { force: true }); } catch {}
+});
+
 app.whenReady().then(() => {
   buildMenu();
   protocol.handle("app", (req) => {
     let p = decodeURIComponent(new URL(req.url).pathname);
+    // Videos optimizados (carpeta temporal): la app los lee una vez y los guarda en su biblioteca.
+    if (p.startsWith("/__opt/")) {
+      const f = path.join(OPT_DIR, path.basename(p));
+      if (!fs.existsSync(f)) return new Response("404", { status: 404 });
+      return new Response(fs.readFileSync(f), { headers: { "content-type": "video/mp4" } });
+    }
     if (p === "/" || !p) p = "/index.html";
     const file = path.normalize(path.join(WEB, p));
     if (!file.startsWith(WEB + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile())

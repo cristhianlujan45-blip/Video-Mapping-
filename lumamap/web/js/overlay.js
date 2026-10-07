@@ -1,7 +1,7 @@
 // web/js/overlay.js
 // Dibujo 2D sobre el render: patrones de prueba del proyector y guías de
 // alineación (contornos, puntos). Se usa en el editor y en la salida.
-import { surfaceOutline, gridCornerIdx } from "./math.js";
+import { surfaceOutline, gridCornerIdx, edgeHandles } from "./math.js";
 
 export const PATTERNS = [
   ["grid", "Cuadrícula"], ["white", "Blanco"], ["bars", "Barras"], ["red", "Rojo"],
@@ -39,7 +39,7 @@ export function drawPattern(ctx, name, W, H) {
  * Guías de alineación: contorno de cada superficie y puntos de la seleccionada.
  * view = {sx, sy, tx, ty}; scale = tamaño de punto en px del canvas.
  */
-export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -1, scale = 1, showAll = true } = {}) {
+export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -1, scale = 1, showAll = true, edges = true, edgeActive = null } = {}) {
   const X = (p) => p.x * view.sx + view.tx, Y = (p) => p.y * view.sy + view.ty;
   for (const s of project.surfaces) {
     if (s.hidden) continue;
@@ -67,6 +67,20 @@ export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -
         ctx.stroke();
       }
     }
+    // Asas de los lados: cambian el tamaño sin girar ni deformar la perspectiva.
+    if (edges && !s.locked) {
+      for (const e of edgeHandles(s)) {
+        const x = X(e), y = Y(e), ang = Math.atan2(e.ny * view.sy, e.nx * view.sx);
+        ctx.save();
+        ctx.translate(x, y); ctx.rotate(ang);
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(-5 * scale, -11 * scale, 10 * scale, 22 * scale, 4 * scale) : ctx.rect(-5 * scale, -11 * scale, 10 * scale, 22 * scale);
+        ctx.fillStyle = e.side === edgeActive ? "#ff2d55" : "#ffffff";
+        ctx.fill();
+        ctx.lineWidth = 2 * scale; ctx.strokeStyle = "#000"; ctx.stroke();
+        ctx.restore();
+      }
+    }
     const corners = s.type === "quad" ? new Set(gridCornerIdx(s.cols, s.rows)) : null;
     s.points.forEach((p, i) => {
       const big = !corners || corners.has(i);
@@ -77,4 +91,42 @@ export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -
       ctx.lineWidth = 2 * scale; ctx.strokeStyle = "#000"; ctx.stroke();
     });
   }
+}
+
+/* ---------------- Ajustes de salida (proyector) ---------------- */
+
+/** Corrección de color y orientación del proyector (techo / retroproyección) vía CSS. */
+export function applyOutputCSS(els, o) {
+  const f = `brightness(${o.brightness ?? 1}) contrast(${o.contrast ?? 1}) saturate(${o.saturation ?? 1})`;
+  const t = `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1}) rotate(${o.rotate === 180 ? 180 : 0}deg)`;
+  for (const el of els) {
+    if (!el) continue;
+    const ff = f === "brightness(1) contrast(1) saturate(1)" ? "" : f;
+    if (el.style.filter !== ff) el.style.filter = ff;
+    const tt = t === "scale(1, 1) rotate(0deg)" ? "" : t;
+    if (el.style.transform !== tt) el.style.transform = tt;
+  }
+}
+
+/**
+ * Bordes suaves (edge blending): degradado a negro en los lados donde dos
+ * proyectores se solapan, con curva gamma para que la suma de luz quede pareja.
+ * Los anchos son fracción de la salida (0.15 = 15 %). x,y,W,H = zona de salida.
+ */
+export function drawSoftEdge(ctx, se, x, y, W, H) {
+  if (!se) return;
+  const curve = se.curve || 2.2;
+  const ramp = (x0, y0, x1, y1, rx, ry, rw, rh) => {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;                                   // 0 = borde, 1 = interior
+      g.addColorStop(t, `rgba(0,0,0,${(1 - Math.pow(t, 1 / curve)).toFixed(3)})`);
+    }
+    ctx.fillStyle = g;
+    ctx.fillRect(rx, ry, rw, rh);
+  };
+  if (se.left > 0) { const w = W * se.left; ramp(x, 0, x + w, 0, x, y, w, H); }
+  if (se.right > 0) { const w = W * se.right; ramp(x + W, 0, x + W - w, 0, x + W - w, y, w, H); }
+  if (se.top > 0) { const h = H * se.top; ramp(0, y, 0, y + h, x, y, W, h); }
+  if (se.bottom > 0) { const h = H * se.bottom; ramp(0, y + H, 0, y + H - h, x, y + H - h, W, h); }
 }

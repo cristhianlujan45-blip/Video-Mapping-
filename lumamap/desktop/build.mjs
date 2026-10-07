@@ -13,10 +13,21 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"))
 
 fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
-for (const f of ["main.js", "preload.js"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
+for (const f of ["main.js", "preload.js", "optimize.js"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
+// ffmpeg para optimizar videos: se incluye su paquete (con el binario de esta plataforma).
+fs.cpSync(path.join(here, "node_modules", "ffmpeg-static"), path.join(stage, "node_modules", "ffmpeg-static"), { recursive: true });
+// Compilando para Windows desde otro sistema: se descarga el ffmpeg.exe de Windows.
+const targetPlatform = process.argv[2] === "installer" ? "win32" : (process.argv[2] || process.platform);
+if (!process.argv.includes("--stage") && targetPlatform !== process.platform) {
+  const dir = path.join(stage, "node_modules", "ffmpeg-static");
+  for (const f of ["ffmpeg", "ffmpeg.exe"]) fs.rmSync(path.join(dir, f), { force: true });
+  execFileSync(process.execPath, [path.join(dir, "install.js")], { cwd: dir, stdio: "inherit",
+    env: { ...process.env, npm_config_platform: targetPlatform, npm_config_arch: "x64" } });
+}
 fs.cpSync(path.join(here, "..", "web"), path.join(stage, "web"), { recursive: true });
 fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
   name: pkg.name, productName: pkg.productName, version: pkg.version, description: pkg.description, main: "main.js", license: pkg.license, author: pkg.author,
+  dependencies: { "ffmpeg-static": pkg.dependencies["ffmpeg-static"] },
 }, null, 2));
 if (process.argv.includes("--stage")) process.exit(0);
 
@@ -34,8 +45,10 @@ if (process.argv[2] === "installer") {
       directories: { app: stage, output: path.join(here, "dist") },
       electronVersion: pkg.devDependencies.electron.replace(/^[^\d]*/, ""),
       asar: true,
+      asarUnpack: ["**/node_modules/ffmpeg-static/**"],   // el binario de ffmpeg debe poder ejecutarse
+      npmRebuild: false,
       publish: null, // sin autoactualización: no se generan archivos de canal
-      artifactName: "LumaMap-Setup-${version}.${ext}",
+      artifactName: "LumaMap-Setup.${ext}",   // nombre fijo: el enlace de descarga y el actualizador no cambian
       win: {
         icon: path.join(stage, "web", "icon.png"),
         // Sin certificado de firma: no se edita el .exe (evita depender de Wine al compilar en Linux).
@@ -63,9 +76,9 @@ const { packager } = await import("@electron/packager");
 const electronVersion = pkg.devDependencies.electron.replace(/^[^\d]*/, "");
 const out = path.join(here, "dist");
 const [appDir] = await packager({
-  dir: stage, out, platform, arch, electronVersion, overwrite: true, asar: true,
+  dir: stage, out, platform, arch, electronVersion, overwrite: true,
   name: "LumaMap", executableName: "LumaMap", appVersion: pkg.version,
-  appCopyright: "MIT", prune: false,
+  appCopyright: "MIT", prune: false, asar: { unpack: "**/node_modules/ffmpeg-static/**" },
 });
 const label = { win32: "Windows", darwin: "macOS", linux: "Linux" }[platform] || platform;
 const zipFile = path.join(out, `LumaMap-${pkg.version}-${label}-${arch}.zip`);

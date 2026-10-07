@@ -102,6 +102,56 @@ await test("menú contextual con clic derecho", async () => {
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".ctxmenu").count(), 0);
 });
+await test("asa lateral: arrastrar el lado derecho ensancha sin mover el izquierdo", async () => {
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => { const a = window.__lumamap; a.actions.addShape("rect"); });
+  const before = await page.evaluate(() => window.__lumamap.surf().points.map(p => ({ ...p })));
+  const xs = before.map(p => p.x), ys = before.map(p => p.y);
+  const right = Math.max(...xs), midY = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const [x, y] = await toScreen([right, midY]);
+  await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 60, y + 15, { steps: 4 }); await page.mouse.up();
+  const after = await page.evaluate(() => window.__lumamap.surf().points);
+  const L = (pts) => pts.filter((_, i) => i === 0 || i === 2);   // rejilla TL, TR, BL, BR
+  assert.deepEqual(L(after), L(before), "lado izquierdo fijo");
+  assert.ok(after[1].x > before[1].x + 20 && Math.abs(after[1].y - before[1].y) < 0.01, "lado derecho se aleja en horizontal");
+});
+await test("biblioteca de efectos: aplicar «Contorno neón» y combinar «Espejo selfie»", async () => {
+  await page.evaluate(() => window.__lumamap.openTab("fx"));
+  await page.locator(".fxlib .chip", { hasText: "Contorno neón" }).first().click();
+  await page.evaluate(() => { document.querySelectorAll(".toggle input")[0].click(); });   // Combinar
+  await page.locator(".fxlib .chip", { hasText: "Espejo selfie" }).first().click();
+  const fx = await page.evaluate(() => window.__lumamap.lookSel().fx);
+  assert.equal(fx.edges, 1); assert.equal(fx.flipX, true);
+});
+await test("las 47 animaciones y los efectos compilan y dibujan sin errores de GPU", async () => {
+  const errs = await page.evaluate(async () => {
+    const { Renderer } = await import("./js/renderer.js");
+    const M = await import("./js/model.js");
+    const c = document.createElement("canvas"); c.width = 64; c.height = 40;
+    const r = new Renderer(c);
+    const s = M.createQuad({ corners: M.rectCorners(0, 0, 64, 40) });
+    const bad = [];
+    const all = { ...M.DEFAULT_FX(), twirl: 1, bulge: 0.5, ripple: 1, tile: 2, polar: true, glitch: 1, chroma: 0.01, crt: 1, posterize: 4, sepia: 1, gamma: 1.5, threshold: 0.3, vignette: 1, scanlines: 1, halftone: 1, duotone: 1, colormap: "thermal", chromaKey: 0.3, lumaKey: 0.2, flipX: true };
+    for (const g of M.GENERATORS) {
+      const look = M.createLook({ type: "gen", gen: g.id }); look.fx = all;
+      r.begin(); r.drawSurface(s, look, { view: { sx: 1, sy: 1, tx: 0, ty: 0 }, time: 1, alpha: 1, tex: null, levels: { beat: 1, bass: 1, count: 3 }, master: 1 });
+      const e = r.gl.getError(); if (e) bad.push(g.id + ":" + e);
+    }
+    return bad;
+  });
+  assert.deepEqual(errs, []);
+});
+await test("resolución personalizada y ajustes del proyector", async () => {
+  await page.evaluate(() => { window.__lumamap.actions.setResolution(); });
+  await page.locator("#modal input[type=number]").first().fill("2560");
+  await page.locator("#modal input[type=number]").nth(1).fill("1440");
+  await page.locator("#modal button", { hasText: "Usar" }).click();
+  assert.deepEqual(await page.evaluate(() => [window.__lumamap.S.project.width, window.__lumamap.S.project.height]), [2560, 1440]);
+  await page.evaluate(() => window.__lumamap.openTab("output"));
+  await page.locator("summary", { hasText: "Orientación del proyector" }).click();
+  await page.locator(".toggle", { hasText: "Retroproyección" }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.settings.output.flipH), true);
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();

@@ -38,6 +38,17 @@ uniform float u_border, u_glow;
 uniform vec3 u_bcol;
 uniform int u_banim;
 uniform float u_beat;
+uniform vec4 u_lev;           // graves, medios, agudos, número de golpe
+uniform vec4 u_d1;            // remolino, ojo de pez, ondas en agua, mosaico
+uniform vec4 u_d2;            // polar, glitch, aberración cromática, curvatura CRT
+uniform vec4 u_c3;            // posterizar, sepia, gamma, umbral
+uniform vec4 u_c4;            // viñeta, líneas de TV, semitono, mapa de color
+uniform vec4 u_c5;            // contornos, nitidez, relieve, duotono
+uniform vec3 u_duoA, u_duoB;
+uniform vec4 u_key;           // croma: tolerancia, suavidad · luma: umbral, suavidad
+uniform vec3 u_keyCol;
+uniform vec2 u_flip;
+uniform vec2 u_texel;
 uniform vec2 u_shape[${MAXP}];
 uniform int u_shapeN;
 uniform vec2 u_mask[${MAXP}];
@@ -76,7 +87,273 @@ float gridLine(float x, float n){
   return 1.0 - smoothstep(0.0, w, f);
 }
 
+
+// ---- Generadores 16..46 (segunda biblioteca) ----
+float hash1(float n){ return fract(sin(n*127.1)*43758.5453); }
+float hexDist(vec2 p){ p = abs(p); return max(dot(p, normalize(vec2(1.0, 1.732))), p.x); }
+vec4 generator2(vec2 uv, vec2 p, float t){
+  float s = u_gscale;
+  vec3 A = u_c1, B = u_c2;
+  float r = length(p), a = atan(p.y, p.x);
+  if(u_gen==16){ // Matrix
+    vec2 g = vec2(uv.x*40.0*s*u_aspect, uv.y*30.0*s);
+    float col = floor(g.x);
+    float sp = 0.6 + hash1(col)*1.6;
+    float y = fract(-uv.y*0.8 + t*sp*0.25 + hash1(col+3.0));
+    float trail = pow(y, 6.0);
+    float glyph = step(0.35, hash(floor(g) + floor(t*12.0*sp)));
+    vec2 f = fract(g);
+    float cell = step(0.12, f.x)*step(f.x, 0.88)*step(0.1, f.y)*step(f.y, 0.9);
+    float k = trail*glyph*cell;
+    return vec4(B*0.05 + A*k + vec3(1.0)*smoothstep(0.97, 1.0, y)*cell*glyph*0.6, 1.0);
+  }
+  if(u_gen==17){ // Vórtice
+    float v = sin(a*6.0 + r*18.0*s - t*3.0 + 2.0/(r+0.15));
+    return vec4(mix(B, A, smoothstep(-0.2, 0.2, v)) * smoothstep(0.0, 0.25, r), 1.0);
+  }
+  if(u_gen==18){ // Hexágonos
+    vec2 q = p*6.0*s;
+    vec2 h1 = vec2(1.0, 1.732), hh = h1*0.5;
+    vec2 ga = mod(q, h1) - hh, gb = mod(q - hh, h1) - hh;
+    vec2 g = dot(ga, ga) < dot(gb, gb) ? ga : gb;
+    vec2 id = q - g;
+    float e = 0.5 - hexDist(g);
+    float w = 0.5 + 0.5*sin(length(id)*0.8 - t*3.0);
+    float line = smoothstep(0.06, 0.0, e);
+    return vec4(mix(B*0.15 + A*w*0.6, A, line), 1.0);
+  }
+  if(u_gen==19){ // Celdas (Voronoi)
+    vec2 q = p*5.0*s, ip = floor(q), fp = fract(q);
+    float d1 = 9.0, d2 = 9.0; vec2 cid = vec2(0.0);
+    for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){
+      vec2 o = vec2(float(x), float(y));
+      vec2 h = vec2(hash(ip+o), hash(ip+o+17.3));
+      vec2 pt = o + 0.5 + 0.4*sin(t + TAU*h);
+      float d = length(pt - fp);
+      if(d < d1){ d2 = d1; d1 = d; cid = ip+o; } else if(d < d2) d2 = d;
+    }
+    vec3 col = mix(B, A, hash(cid));
+    return vec4(mix(col, vec3(1.0), smoothstep(0.08, 0.0, d2-d1)), 1.0);
+  }
+  if(u_gen==20){ // Aurora
+    vec3 col = vec3(0.0);
+    for(int i=0;i<4;i++){
+      float fi = float(i);
+      float y = 0.35 + 0.12*fi + 0.12*sin(uv.x*3.0*s + t*0.5 + fi*1.7) + 0.08*fbm(vec2(uv.x*2.0*s + fi, t*0.2));
+      float band = exp(-abs(uv.y - y)*18.0) * (0.6 + 0.4*sin(uv.x*20.0 + t + fi));
+      col += mix(A, B, fi/3.0) * band * 0.7;
+    }
+    return vec4(col + B*0.03, 1.0);
+  }
+  if(u_gen==21){ // Lava
+    vec2 q = p*2.5*s;
+    vec2 w = vec2(fbm(q + t*0.15), fbm(q + 5.2 - t*0.12));
+    float n = fbm(q + 3.0*w);
+    vec3 col = mix(B*0.2, B, smoothstep(0.2, 0.5, n));
+    col = mix(col, A, smoothstep(0.5, 0.75, n));
+    col = mix(col, vec3(1.0, 0.95, 0.7), smoothstep(0.78, 0.95, n));
+    return vec4(col, 1.0);
+  }
+  if(u_gen==22){ // Agua (cáusticas)
+    vec2 q = p*7.0*s;
+    float c = 0.0;
+    for(int i=0;i<3;i++){
+      float fi = float(i);
+      q += vec2(sin(q.y*1.3 + t*(0.6 + fi*0.2)), cos(q.x*1.1 - t*(0.5 + fi*0.15)));
+      c += 1.0/(1.0 + abs(sin(q.x)*sin(q.y))*10.0);
+    }
+    float k = smoothstep(0.35, 1.2, c);
+    return vec4(mix(B*0.6, A, k) + vec3(pow(k, 4.0)*0.6), 1.0);
+  }
+  if(u_gen==23){ // Ecualizador (audio)
+    float n = 16.0*s;
+    float i = floor(uv.x*n);
+    float f = fract(uv.x*n);
+    float band = i/n < 0.33 ? u_lev.x : (i/n < 0.66 ? u_lev.y : u_lev.z);
+    float hgt = clamp(band*(0.55 + 0.45*hash1(i + floor(t*6.0))) + 0.08 + 0.06*sin(t*3.0 + i*0.7), 0.02, 1.0);
+    float on = step(1.0 - hgt, uv.y) * step(0.12, f) * step(f, 0.88);
+    float seg = step(0.25, fract(uv.y*24.0));
+    vec3 col = mix(A, B, uv.y);
+    return vec4(col*on*seg + B*0.04, 1.0);
+  }
+  if(u_gen==24){ // Anillos al ritmo (audio)
+    float k = 0.0;
+    for(int i=0;i<4;i++){
+      float rr = fract(t*0.35 + float(i)*0.25)*0.9;
+      k += exp(-abs(r - rr)*(40.0 - 20.0*u_lev.x))*(1.0 - rr);
+    }
+    k += u_beat*exp(-r*4.0);
+    return vec4(B*0.05 + A*k, 1.0);
+  }
+  if(u_gen==25){ // Rayos de luz
+    float k = pow(0.5 + 0.5*sin(a*12.0*s + t*1.2), 8.0) * smoothstep(1.2, 0.0, r);
+    k += exp(-r*6.0)*0.8;
+    return vec4(B*0.08 + A*k, 1.0);
+  }
+  if(u_gen==26){ // Confeti
+    vec3 col = B*0.05;
+    for(int L=0;L<3;L++){
+      float fl = float(L);
+      vec2 q = vec2(uv.x*u_aspect, uv.y)*(10.0 + fl*6.0)*s + vec2(0.0, t*(0.6 + fl*0.4));
+      vec2 id = floor(q), f = fract(q) - 0.5;
+      float h = hash(id + fl*13.0);
+      vec2 o = vec2(sin(t + h*TAU), cos(t*1.3 + h*TAU))*0.25;
+      float d = length(f - o);
+      col += hsv2rgb(vec3(h, 0.85, 1.0)) * smoothstep(0.12, 0.05, d) * step(0.5, h);
+    }
+    return vec4(col, 1.0);
+  }
+  if(u_gen==27 || u_gen==28){ // Nieve / Lluvia
+    bool rain = u_gen==28;
+    vec3 col = B*0.08;
+    for(int L=0;L<3;L++){
+      float fl = float(L);
+      vec2 q = vec2(uv.x*u_aspect + (rain ? uv.y*0.25 : 0.0), uv.y);
+      q *= vec2(rain ? 60.0 : 18.0, rain ? 3.0 : 18.0)*(1.0 + fl*0.6)*s;
+      q.y -= t*(rain ? 6.0 : 1.2)*(1.0 + fl*0.5);
+      q.x += rain ? 0.0 : sin(q.y*0.7 + fl)*0.3;
+      vec2 id = floor(q), f = fract(q) - 0.5;
+      float h = hash(id + fl*7.0);
+      float d = rain ? abs(f.x)*6.0 + max(0.0, abs(f.y) - 0.35)*4.0 : length(f);
+      col += A*smoothstep(rain ? 0.6 : 0.2, 0.0, d)*step(0.75, h)*(0.5 + 0.5/(fl+1.0));
+    }
+    return vec4(col, 1.0);
+  }
+  if(u_gen==29){ // Relámpago
+    float seed = floor(t*1.5);
+    float flash = step(0.55, hash1(seed)) * exp(-fract(t*1.5)*6.0);
+    float x0 = hash1(seed + 1.0);
+    float x = x0 + (fbm(vec2(uv.y*6.0, seed)) - 0.5)*0.35;
+    float bolt = exp(-abs(uv.x - x)*90.0*s);
+    return vec4(B*0.06 + B*flash*0.4 + (A + vec3(0.6))*bolt*flash*1.4, 1.0);
+  }
+  if(u_gen==30){ // Galaxia
+    float arm = sin(a*2.0 + log(r + 0.01)*5.0*s - t*0.6);
+    float n = fbm(p*8.0 + t*0.05);
+    float k = smoothstep(0.2, 1.0, arm)*exp(-r*2.2)*(0.5 + n);
+    float star = step(0.985, hash(floor(p*180.0)))*0.8;
+    return vec4(B*0.05 + mix(A, B, r)*k*1.6 + vec3(star) + vec3(exp(-r*12.0)), 1.0);
+  }
+  if(u_gen==31){ // Mandala
+    float n = 8.0;
+    float aa = abs(mod(a, TAU/n) - TAU/n*0.5);
+    float v = sin(aa*12.0*s + r*30.0 - t*2.0)*cos(r*18.0*s + t);
+    return vec4(mix(B, A, smoothstep(-0.1, 0.4, v))*smoothstep(0.95, 0.2, r), 1.0);
+  }
+  if(u_gen==32){ // Truchet
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*8.0*s;
+    vec2 id = floor(q), f = fract(q);
+    if(hash(id + floor(t*0.5)) > 0.5) f.x = 1.0 - f.x;
+    float d = min(abs(length(f) - 0.5), abs(length(f - 1.0) - 0.5));
+    float glow = 0.5 + 0.5*sin(t*3.0 + (id.x + id.y)*0.6);
+    return vec4(B*0.08 + A*smoothstep(0.08, 0.0, d)*glow, 1.0);
+  }
+  if(u_gen==33){ // Op-art
+    float v = sin((p.x + 0.15*sin(p.y*4.0 + t))*40.0*s + sin(r*10.0 - t)*3.0);
+    return vec4(mix(B, A, step(0.0, v)), 1.0);
+  }
+  if(u_gen==34){ // Moiré
+    vec2 c2 = vec2(0.25*sin(t*0.6), 0.2*cos(t*0.4));
+    float v = sin(r*120.0*s) * sin(length(p - c2)*120.0*s);
+    return vec4(mix(B, A, smoothstep(-0.1, 0.1, v)), 1.0);
+  }
+  if(u_gen==35){ // Corazones
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*5.0*s;
+    vec2 id = floor(q), f = fract(q) - 0.5;
+    float beat = 1.0 + 0.15*sin(t*6.0 + hash(id)*TAU) + u_beat*0.25;
+    f /= beat;
+    f.y = -f.y + 0.05;
+    f.x = abs(f.x);
+    float d = length(vec2(f.x - 0.1, f.y - 0.05 - f.x*0.5)) - 0.18;
+    return vec4(mix(B*0.15, A, smoothstep(0.02, -0.02, d)), 1.0);
+  }
+  if(u_gen==36){ // Fuegos artificiales
+    vec3 col = B*0.03;
+    for(int i=0;i<4;i++){
+      float fi = float(i);
+      float cyc = t*0.45 + fi*0.27;
+      float seed = floor(cyc) + fi*11.0, ph = fract(cyc);
+      vec2 cen = vec2((hash1(seed) - 0.5)*u_aspect*0.8, (hash1(seed + 2.0) - 0.5)*0.5);
+      vec2 d = p - cen;
+      float ang = atan(d.y, d.x);
+      float ray = pow(0.5 + 0.5*cos(ang*16.0 + seed), 30.0);
+      float ring = exp(-abs(length(d) - ph*0.45)*60.0);
+      col += hsv2rgb(vec3(hash1(seed + 5.0), 0.8, 1.0)) * ring * (0.4 + ray) * (1.0 - ph)*1.4;
+    }
+    return vec4(col, 1.0);
+  }
+  if(u_gen==37){ // Synthwave
+    vec3 col = mix(B*0.4, vec3(0.0), uv.y);
+    if(uv.y < 0.55){
+      vec2 sp = vec2((uv.x - 0.5)*u_aspect, uv.y - 0.33);
+      float sun = smoothstep(0.2, 0.19, length(sp));
+      float stripes = step(0.0, sin(uv.y*90.0 - t*2.0)) + step(0.33, uv.y);
+      col = mix(col, mix(A, vec3(1.0, 0.85, 0.2), 1.0 - uv.y*2.0), sun*clamp(stripes, 0.0, 1.0));
+    } else {
+      float z = 1.0/(uv.y - 0.5 + 0.02);
+      vec2 g = vec2((uv.x - 0.5)*z*2.0*s, z*0.6*s + t*1.5);
+      vec2 gl = abs(fract(g) - 0.5);
+      float line = smoothstep(0.05*z*0.15, 0.0, min(gl.x, gl.y) - 0.0);
+      col = mix(vec3(0.02, 0.0, 0.06), A, clamp(line*0.9, 0.0, 1.0));
+    }
+    return vec4(col, 1.0);
+  }
+  if(u_gen==38){ // Bloques glitch
+    vec2 q = floor(vec2(uv.x*(4.0 + 12.0*hash1(floor(t*8.0))), uv.y*14.0*s));
+    float h = hash(q + floor(t*10.0));
+    vec3 col = h > 0.8 ? A : (h > 0.6 ? B : vec3(0.0));
+    col *= step(0.3, hash(q + 9.0 + floor(t*4.0)));
+    return vec4(col, 1.0);
+  }
+  if(u_gen==39){ // Estática de TV
+    float n = hash(floor(uv*vec2(320.0, 240.0)*s) + fract(t*13.0)*100.0);
+    float scan = 0.85 + 0.15*sin(uv.y*600.0);
+    float roll = smoothstep(0.0, 0.05, abs(fract(uv.y + t*0.3) - 0.5));
+    return vec4(mix(B, A, n)*scan*(0.7 + 0.3*roll), 1.0);
+  }
+  if(u_gen==40){ // Barrido de luz
+    float x = fract(t*0.4*u_gscale);
+    float k = exp(-abs(uv.x - x)*25.0) + exp(-abs(uv.x - fract(x + 0.5))*25.0)*0.5;
+    float bars = step(0.5, fract(uv.y*6.0 + floor(t*2.0)*0.5));
+    return vec4(B*0.06 + A*k*(0.6 + 0.4*bars), 1.0);
+  }
+  if(u_gen==41){ // Destello al golpe (audio)
+    float alt = mod(u_lev.w, 2.0);
+    vec3 col = mix(A, B, alt) * (0.08 + u_beat);
+    return vec4(col, 1.0);
+  }
+  if(u_gen==42){ // Cuadrados concéntricos
+    vec2 q = abs(uv - 0.5)*vec2(u_aspect, 1.0);
+    float d = max(q.x, q.y);
+    float k = smoothstep(0.35, 0.65, 0.5 + 0.5*sin(d*40.0*s - t*4.0 - u_beat*3.0));
+    return vec4(mix(B*0.1, A, k), 1.0);
+  }
+  if(u_gen==43){ // Chevrons (flechas)
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*6.0*s;
+    float v = fract(q.x - abs(fract(q.y) - 0.5) - t*0.8);
+    return vec4(mix(B, A, step(0.5, v)), 1.0);
+  }
+  if(u_gen==44){ // Puntos
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*14.0*s;
+    vec2 id = floor(q), f = fract(q) - 0.5;
+    float sz = 0.15 + 0.3*(0.5 + 0.5*sin(length(id)*0.5 - t*3.0));
+    return vec4(mix(B*0.08, A, smoothstep(sz, sz - 0.04, length(f))), 1.0);
+  }
+  if(u_gen==45){ // Fluido
+    vec2 q = p*2.0*s;
+    for(int i=1;i<5;i++){ float fi = float(i); q += vec2(0.6/fi*sin(fi*q.y + t + 0.3*fi), 0.6/fi*cos(fi*q.x + t*0.8 + 0.3*fi)); }
+    return vec4(mix(A, B, 0.5 + 0.5*sin(q.x + q.y)), 1.0);
+  }
+  // 46: Túnel cuadrado
+  vec2 q = abs(p);
+  float d = max(q.x, q.y);
+  float z = 0.25/max(d, 0.001) + t*0.8;
+  float k = step(0.5, fract(z*s));
+  return vec4(mix(B, A, k)*clamp(d*3.0, 0.0, 1.0), 1.0);
+}
+
 vec4 generator(vec2 uv, vec2 p, float t){
+  if(u_gen >= 16) return generator2(uv, p, t);
   float s = u_gscale;
   vec3 A = u_c1, B = u_c2;
   if(u_gen==0){
@@ -160,6 +437,12 @@ vec4 generator(vec2 uv, vec2 p, float t){
   return vec4(col, 1.0);
 }
 
+vec2 texUV(vec2 cuv){
+  vec2 tuv = (cuv - 0.5) * u_fit.xy + 0.5 + u_fit.zw;
+  return (tuv.x<0.0 || tuv.x>1.0 || tuv.y<0.0 || tuv.y>1.0) ? fract(tuv) : tuv;
+}
+float lumAt(vec2 cuv){ return dot(texture(u_tex, texUV(cuv)).rgb, vec3(0.299, 0.587, 0.114)); }
+
 vec4 sampleTex(vec2 cuv){
   vec2 tuv = (cuv - 0.5) * u_fit.xy + 0.5 + u_fit.zw;
   if(u_contain==1 && (tuv.x<0.0 || tuv.x>1.0 || tuv.y<0.0 || tuv.y>1.0)) return vec4(0.0);
@@ -173,10 +456,11 @@ vec4 sampleTex(vec2 cuv){
     }
     return acc;
   }
-  if(u_rgb > 0.0){
+  if(u_rgb > 0.0 || u_d2.z > 0.0){
+    vec2 off = vec2(u_rgb, 0.0) + (cuv - 0.5) * u_d2.z;
     vec4 c = texture(u_tex, tuv);
-    c.r = texture(u_tex, tuv + vec2(u_rgb, 0.0)).r;
-    c.b = texture(u_tex, tuv - vec2(u_rgb, 0.0)).b;
+    c.r = texture(u_tex, tuv + off).r;
+    c.b = texture(u_tex, tuv - off).b;
     return c;
   }
   return texture(u_tex, tuv);
@@ -209,9 +493,18 @@ float shapeDist(vec2 uv){
 }
 
 void main(){
-  vec2 uv = v_uvh.xy / v_uvh.z;
+  vec2 uv = v_uvh.xy / v_uvh.z;       // geometría (máscara y borde)
+  vec2 vuv = uv;                      // contenido
+  bool outside = false;
+  if(u_d2.w > 0.0){                   // curvatura de TV antigua
+    vec2 cc = vuv - 0.5;
+    vuv = vuv + cc * dot(cc, cc) * u_d2.w * 1.2;
+    outside = vuv.x < 0.0 || vuv.x > 1.0 || vuv.y < 0.0 || vuv.y > 1.0;
+  }
+  if(u_flip.x > 0.5) vuv.x = 1.0 - vuv.x;
+  if(u_flip.y > 0.5) vuv.y = 1.0 - vuv.y;
   // ---- transformación del contenido ----
-  vec2 p = uv - 0.5;
+  vec2 p = vuv - 0.5;
   p.x *= u_aspect;
   if(u_mirror==1 || u_mirror==3) p.x = -abs(p.x);
   if(u_mirror==2 || u_mirror==3) p.y = -abs(p.y);
@@ -221,15 +514,33 @@ void main(){
     a = mod(a, seg); a = abs(a - seg*0.5);
     p = r * vec2(cos(a), sin(a));
   }
+  if(u_d1.x != 0.0){                  // remolino
+    float tw = u_d1.x * max(0.0, 1.0 - length(p)/0.65) * 3.0;
+    p = mat2(cos(tw), sin(tw), -sin(tw), cos(tw)) * p;
+  }
+  if(u_d1.y != 0.0) p *= 1.0 - u_d1.y*0.7*max(0.0, 1.0 - length(p)/0.7);   // ojo de pez / pellizco
+  if(u_d1.z > 0.0){                   // ondas en agua
+    float rr = length(p);
+    p += (rr > 0.0 ? p/rr : vec2(0.0)) * sin(rr*40.0 - u_time*6.0) * 0.012 * u_d1.z;
+  }
   float cr = cos(u_rot), sr = sin(u_rot);
   p = mat2(cr, sr, -sr, cr) * p;
   p /= max(u_zoom, 0.01);
+  if(u_d2.x > 0.5){                   // coordenadas polares (túnel)
+    vec2 pp = vec2(atan(p.y, p.x)/TAU + 0.5, length(p)*2.0);
+    p = (pp - 0.5) * vec2(u_aspect, 1.0);
+  }
   if(u_wave > 0.0){
     p.x += sin(p.y*12.0 + u_time*3.0) * 0.03 * u_wave;
     p.y += cos(p.x*10.0 + u_time*2.4) * 0.03 * u_wave;
   }
   vec2 gp = p;
   vec2 cuv = vec2(p.x / u_aspect, p.y) + 0.5 + u_scroll;
+  if(u_d1.w > 1.0) cuv = fract(cuv * u_d1.w);                     // mosaico N×N
+  if(u_d2.y > 0.0){                   // glitch: franjas desplazadas
+    float row = floor(vuv.y*24.0), gt = floor(u_time*9.0);
+    if(hash(vec2(row, gt)) < u_d2.y*0.6) cuv.x += (hash(vec2(row + 3.0, gt)) - 0.5) * 0.25 * u_d2.y;
+  }
   if(u_pix > 0.0){
     float cells = mix(260.0, 6.0, u_pix);
     vec2 n = vec2(cells*u_aspect, cells);
@@ -241,6 +552,25 @@ void main(){
   if(u_src==1) c = sampleTex(cuv);
   else if(u_src==2) c = vec4(u_c1, 1.0);
   else if(u_src==3) c = generator(fract(cuv), gp, u_gtime);
+  if(outside) c = vec4(0.0, 0.0, 0.0, 1.0);
+  // ---- recortes: croma (fondo verde/azul) y luma (quitar el negro) ----
+  if(u_key.x > 0.0) c.a *= smoothstep(u_key.x, u_key.x + u_key.y + 0.001, distance(c.rgb, u_keyCol));
+  if(u_key.z > 0.0) c.a *= smoothstep(u_key.z, u_key.z + u_key.w + 0.001, dot(c.rgb, vec3(0.299, 0.587, 0.114)));
+  // ---- efectos que miran a los vecinos (vídeo, imagen, cámara, dibujo) ----
+  if(u_src==1 && (u_c5.x > 0.0 || u_c5.y > 0.0 || u_c5.z > 0.0)){
+    vec2 d = u_texel * 1.5 / max(u_fit.xy, vec2(0.05));
+    float tl = lumAt(cuv + vec2(-d.x, -d.y)), tc = lumAt(cuv + vec2(0.0, -d.y)), tr = lumAt(cuv + vec2(d.x, -d.y));
+    float ml = lumAt(cuv + vec2(-d.x, 0.0)), mr = lumAt(cuv + vec2(d.x, 0.0));
+    float bl = lumAt(cuv + vec2(-d.x, d.y)), bc = lumAt(cuv + vec2(0.0, d.y)), br = lumAt(cuv + vec2(d.x, d.y));
+    if(u_c5.x > 0.0){                 // contornos neón
+      float gx = -tl - 2.0*ml - bl + tr + 2.0*mr + br, gy = -tl - 2.0*tc - tr + bl + 2.0*bc + br;
+      float e = clamp(length(vec2(gx, gy))*2.0, 0.0, 1.0);
+      vec3 hue = c.rgb / max(max(c.r, max(c.g, c.b)), 0.05);
+      c.rgb = mix(c.rgb, e * mix(vec3(1.0), hue, 0.7) * 1.4, u_c5.x);
+    }
+    if(u_c5.y > 0.0) c.rgb += (c.rgb - vec3((tc + ml + mr + bc)*0.25)) * u_c5.y * 2.0;   // nitidez
+    if(u_c5.z > 0.0) c.rgb = mix(c.rgb, vec3(0.5 + (br - tl)*3.0), u_c5.z);                // relieve
+  }
   // ---- color ----
   if(c.a > 0.0){
     if(u_inv==1) c.rgb = 1.0 - c.rgb;
@@ -249,6 +579,27 @@ void main(){
     float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
     c.rgb = mix(vec3(l), c.rgb, u_sat);
     if(u_hue != 0.0){ vec3 h = rgb2hsv(clamp(c.rgb, 0.0, 1.0)); h.x = fract(h.x + u_hue); c.rgb = hsv2rgb(h); }
+    if(u_c3.z != 1.0) c.rgb = pow(max(c.rgb, 0.0), vec3(1.0/max(u_c3.z, 0.05)));        // gamma
+    float lum = clamp(dot(c.rgb, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    if(u_c3.y > 0.0) c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.393, 0.769, 0.189)), dot(c.rgb, vec3(0.349, 0.686, 0.168)), dot(c.rgb, vec3(0.272, 0.534, 0.131))), u_c3.y);
+    if(u_c5.w > 0.0) c.rgb = mix(c.rgb, mix(u_duoA, u_duoB, lum), u_c5.w);                   // duotono
+    int cm = int(u_c4.w + 0.5);       // mapas de color
+    if(cm == 1) c.rgb = lum < 0.33 ? mix(vec3(0.0, 0.0, 0.3), vec3(0.6, 0.0, 0.6), lum*3.0) : (lum < 0.66 ? mix(vec3(0.6, 0.0, 0.6), vec3(1.0, 0.3, 0.0), lum*3.0 - 1.0) : mix(vec3(1.0, 0.3, 0.0), vec3(1.0, 1.0, 0.7), lum*3.0 - 2.0));
+    else if(cm == 2) c.rgb = vec3(0.15, 1.0, 0.25) * (lum*1.4 + (hash(uv*700.0 + fract(u_time*9.0)) - 0.5)*0.15);
+    else if(cm == 3) c.rgb = vec3(0.75, 0.9, 1.0) * (1.0 - lum);
+    else if(cm == 4) c.rgb = vec3(1.0, 0.78, 0.3) * lum * 1.35;
+    else if(cm == 5) c.rgb = hsv2rgb(vec3(fract(lum + u_time*0.05), 0.9, 1.0));
+    else if(cm == 6) c.rgb = mix(vec3(0.0, 0.04, 0.2), vec3(0.65, 0.95, 1.0), lum);
+    if(u_c3.x >= 2.0) c.rgb = floor(c.rgb*u_c3.x + 0.5)/u_c3.x;                              // posterizar
+    if(u_c3.w > 0.0) c.rgb = vec3(step(u_c3.w, lum));                                          // umbral B/N
+    if(u_c4.z > 0.0){                 // semitono (puntos de periódico)
+      vec2 g = vec2(vuv.x*u_aspect, vuv.y)*70.0;
+      g = mat2(0.707, 0.707, -0.707, 0.707) * g;
+      float rad = sqrt(lum)*0.62;
+      c.rgb = mix(c.rgb, c.rgb * smoothstep(rad, rad - 0.1, length(fract(g) - 0.5)), u_c4.z);
+    }
+    if(u_c4.y > 0.0) c.rgb *= 1.0 - u_c4.y*0.55*(0.5 + 0.5*sin(vuv.y*720.0));               // líneas de TV
+    if(u_c4.x > 0.0) c.rgb *= 1.0 - u_c4.x*smoothstep(0.3, 0.85, length((uv - 0.5)*1.25));    // viñeta
     if(u_noise > 0.0) c.rgb += (hash(uv*vec2(1920.0, 1080.0) + fract(u_time*7.13)) - 0.5) * u_noise;
   }
   // ---- borde animado (efectos de línea sobre el contorno) ----
@@ -278,7 +629,7 @@ void main(){
 const UNIFORMS = ["u_tex", "u_src", "u_fit", "u_contain", "u_gen", "u_c1", "u_c2", "u_gscale", "u_gtime",
   "u_aspect", "u_time", "u_alpha", "u_bri", "u_con", "u_sat", "u_hue", "u_rgb", "u_pix", "u_blur", "u_noise",
   "u_inv", "u_mirror", "u_kal", "u_wave", "u_zoom", "u_rot", "u_scroll", "u_border", "u_glow", "u_bcol",
-  "u_banim", "u_beat", "u_shape", "u_shapeN", "u_mask", "u_maskN", "u_maskInv", "u_maskFeather"];
+  "u_banim", "u_beat", "u_lev", "u_d1", "u_d2", "u_c3", "u_c4", "u_c5", "u_duoA", "u_duoB", "u_key", "u_keyCol", "u_flip", "u_texel", "u_shape", "u_shapeN", "u_mask", "u_maskN", "u_maskInv", "u_maskFeather"];
 
 export function hexToRgb(hex) {
   const h = String(hex || "#ffffff").replace("#", "");
@@ -287,6 +638,7 @@ export function hexToRgb(hex) {
 }
 
 const MIRROR = { none: 0, h: 1, v: 2, quad: 3 };
+export const COLORMAP = { none: 0, thermal: 1, night: 2, xray: 3, gold: 4, rainbow: 5, ice: 6 };
 const BANIM = { none: 0, chase: 1, pulse: 2, rainbow: 3 };
 
 function compile(gl, type, src) {
@@ -330,6 +682,18 @@ export class Renderer {
     this.shapeBuf = new Float32Array(MAXP * 2);
     this.maskBuf = new Float32Array(MAXP * 2);
   }
+
+  /** Mayor lado que admite la GPU (texturas y viewport); 8K puede superarlo en móviles. */
+  get maxDim() {
+    if (!this._maxDim) {
+      const gl = this.gl, v = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+      this._maxDim = Math.min(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), v[0], v[1], gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    }
+    return this._maxDim;
+  }
+
+  /** Escala que cabe en la GPU para una salida W×H con la escala pedida. */
+  fitScale(W, H, k = 1) { return Math.min(k, this.maxDim / W, this.maxDim / H); }
 
   resize(w, h) {
     w = Math.max(1, Math.round(w)); h = Math.max(1, Math.round(h));
@@ -434,6 +798,9 @@ export class Renderer {
     // Audio reactivo por superficie: modula el parámetro elegido.
     let bri = fx.brightness, alpha = look.opacity * o.alpha, zoom = fx.zoom, hue = fx.hue, border = fx.border, strobe = fx.strobe;
     let rot = (fx.rotate || 0) * Math.PI / 180 + (fx.spin || 0) * o.time;
+    hue += (fx.hueCycle || 0) * o.time * 0.1;                     // tono que gira solo
+    let shakeX = 0, shakeY = 0;                                  // temblor (más fuerte en cada golpe)
+    if (fx.shake) { const k = fx.shake * (0.004 + (lv.beat || 0) * 0.02); shakeX = Math.sin(o.time * 61.3) * k; shakeY = Math.cos(o.time * 47.9) * k; }
     let gtime = o.time * (src.speed ?? 1);
     if (look.audio?.enabled) {
       const a = (lv[look.audio.band] ?? 0) * (look.audio.amount ?? 1);
@@ -504,12 +871,24 @@ export class Renderer {
     gl.uniform1f(L.u_wave, fx.wave);
     gl.uniform1f(L.u_zoom, zoom);
     gl.uniform1f(L.u_rot, rot);
-    gl.uniform2f(L.u_scroll, ((fx.scrollX || 0) * o.time) % 1, ((fx.scrollY || 0) * o.time) % 1);
+    gl.uniform2f(L.u_scroll, ((fx.scrollX || 0) * o.time) % 1 + shakeX, ((fx.scrollY || 0) * o.time) % 1 + shakeY);
     gl.uniform1f(L.u_border, border);
     gl.uniform1f(L.u_glow, fx.borderGlow ?? 0.5);
     gl.uniform3fv(L.u_bcol, hexToRgb(fx.borderColor));
     gl.uniform1i(L.u_banim, BANIM[fx.borderAnim] ?? 0);
     gl.uniform1f(L.u_beat, lv.beat || 0);
+    gl.uniform4f(L.u_lev, lv.bass || 0, lv.mid || 0, lv.high || 0, lv.count || 0);
+    gl.uniform4f(L.u_d1, fx.twirl || 0, fx.bulge || 0, fx.ripple || 0, fx.tile || 1);
+    gl.uniform4f(L.u_d2, fx.polar ? 1 : 0, fx.glitch || 0, fx.chroma || 0, fx.crt || 0);
+    gl.uniform4f(L.u_c3, fx.posterize || 0, fx.sepia || 0, fx.gamma ?? 1, fx.threshold || 0);
+    gl.uniform4f(L.u_c4, fx.vignette || 0, fx.scanlines || 0, fx.halftone || 0, COLORMAP[fx.colormap] || 0);
+    gl.uniform4f(L.u_c5, fx.edges || 0, fx.sharpen || 0, fx.emboss || 0, fx.duotone || 0);
+    gl.uniform3fv(L.u_duoA, hexToRgb(fx.duoA || "#1a0033"));
+    gl.uniform3fv(L.u_duoB, hexToRgb(fx.duoB || "#00e5ff"));
+    gl.uniform4f(L.u_key, fx.chromaKey || 0, fx.keySoft ?? 0.1, fx.lumaKey || 0, fx.lumaSoft ?? 0.05);
+    gl.uniform3fv(L.u_keyCol, hexToRgb(fx.keyColor || "#00ff00"));
+    gl.uniform2f(L.u_flip, fx.flipX ? 1 : 0, fx.flipY ? 1 : 0);
+    gl.uniform2f(L.u_texel, srcType === 1 ? 1 / Math.max(1, o.tex.w) : 0, srcType === 1 ? 1 / Math.max(1, o.tex.h) : 0);
 
     if (border > 0) {
       const shape = surfaceUVOutline(s);

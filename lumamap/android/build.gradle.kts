@@ -17,8 +17,11 @@ android {
         applicationId = "com.lumamap.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "2.2.0"
+        // Número de compilación (GitHub Actions lo pone en LUMAMAP_BUILD): cada versión
+        // publicada es mayor que la anterior y el actualizador la detecta.
+        val build = providers.environmentVariable("LUMAMAP_BUILD").orNull?.toIntOrNull() ?: 0
+        versionCode = 1000 + build
+        versionName = "2.3.$build"
     }
 
     sourceSets["main"].assets.srcDirs("../web")
@@ -83,4 +86,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.webkit)
+    // Optimización automática de videos al importarlos (transcodificación por hardware).
+    implementation(libs.androidx.media3.transformer)
+    implementation(libs.androidx.media3.effect)
+    implementation(libs.androidx.media3.common)
 }

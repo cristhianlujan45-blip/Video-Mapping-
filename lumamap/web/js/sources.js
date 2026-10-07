@@ -4,10 +4,10 @@
 // salida; cada ventana carga sus propios elementos desde IndexedDB.
 import { getMedia } from "./store.js";
 
-export const ACCEPT = "image/*,video/*,.gif,.webp,.mp4,.webm,.mov,.mkv,.m4v";
+export const ACCEPT = "image/*,video/*,.gif,.webp,.mp4,.webm,.mov,.mkv,.m4v,.avi,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf";
 
 export function kindOf(mime, name = "") {
-  if (/^video\//.test(mime) || /\.(mp4|webm|mov|mkv|m4v)$/i.test(name)) return "video";
+  if (/^video\//.test(mime) || /\.(mp4|webm|mov|mkv|m4v|avi|wmv|flv|mpe?g|ts|mts|m2ts|3gp|mxf|ogv)$/i.test(name)) return "video";
   if (/^image\//.test(mime) || /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(name)) return "image";
   return null;
 }

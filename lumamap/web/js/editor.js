@@ -9,7 +9,7 @@ import { Compositor, sceneLayers } from "./compose.js";
 import { MediaPool, createRuntime, kindOf, getCamera, stopCamera } from "./sources.js";
 import { AudioEngine } from "./audio.js";
 import { Link, nativeBridge } from "./link.js";
-import { drawGuides, drawPattern } from "./overlay.js";
+import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge } from "./overlay.js";
 import { roundPt, newStrokeId, hitStroke } from "./drawing.js";
 import { icon } from "./icons.js";
 import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles } from "./ui.js";
@@ -17,11 +17,12 @@ import { PANELS, TABS, showHelp } from "./panels.js";
 import { buildCommands, keymap, keyOf, openPalette, openContextMenu, closeContextMenu } from "./commands.js";
 import {
   pointInPolygon, surfaceOutline, centroid, transformPoints, screenToUV, uvToScreen,
-  simplify, bbox, gridCornerIdx, surfaceCorners, gridFromCorners, resampleGrid, surfaceAspect,
+  simplify, bbox, gridCornerIdx, surfaceCorners, gridFromCorners, resampleGrid, surfaceAspect, edgeHandles, dragEdge,
 } from "./math.js";
 import { detectFromImageFile } from "./automap.js";
 import { initMIDI } from "./midi.js";
 import { Remote } from "./remote.js";
+import * as Updater from "./updater.js";
 
 const $ = (s) => document.querySelector(s);
 const native = nativeBridge();
@@ -358,9 +359,40 @@ async function makeThumb(rt) {
   return c.toDataURL("image/jpeg", 0.7);
 }
 
+/* Optimización automática de video al importar (versión de escritorio, con ffmpeg).
+   En Android la hace la parte nativa antes de entregar el archivo. */
+const OPT_KEY = "lumamap:autoOptimize";
+app.autoOptimize = () => { try { return localStorage.getItem(OPT_KEY) !== "0"; } catch { return true; } };
+app.setAutoOptimize = (on) => { try { localStorage.setItem(OPT_KEY, on ? "1" : "0"); } catch {} native?.setAutoOptimize?.(on); };
+let progressHooked = false;
+async function optimizeIfNeeded(file) {
+  const D = window.LumaDesktop;
+  if (!D?.optimizeVideo || !app.autoOptimize()) return file;
+  if (!progressHooked) {
+    progressHooked = true;
+    D.onVideoProgress(({ pct }) => toast(`Optimizando video… ${Math.round(pct * 100)} %`));
+  }
+  toast(`Analizando ${file.name}…`);
+  try {
+    const r = await D.optimizeVideo(file, { width: S.project.width, height: S.project.height });
+    if (!r.url) return file;
+    const blob = await (await fetch(r.url)).blob();
+    D.releaseVideo(r.url);
+    const name = file.name.replace(/\.[^.]+$/, "") + ".mp4";
+    const out = new File([blob], name, { type: "video/mp4" });
+    const saved = file.size ? Math.round((1 - out.size / file.size) * 100) : 0;
+    toast(`Video optimizado en ${(r.ms / 1000).toFixed(1)} s · ${r.reason}${saved > 0 ? ` · ${saved} % más liviano` : ""}`);
+    return out;
+  } catch (e) {
+    toast("No se pudo optimizar, se usa el original: " + e.message, "err");
+    return file;
+  }
+}
+
 async function importMediaFiles(files) {
   const added = [];
-  for (const file of files) {
+  for (let file of files) {
+    if (kindOf(file.type, file.name) === "video") file = await optimizeIfNeeded(file);
     const kind = kindOf(file.type, file.name);
     if (!kind) { toast(`Formato no soportado: ${file.name}`, "err"); continue; }
     toast(`Importando ${file.name}…`);
@@ -416,6 +448,8 @@ A.removeMedia = async (id) => {
 };
 
 function pickFiles(sel) {
+  // Android optimiza los videos al elegirlos: necesita saber el tamaño de la salida.
+  if (sel === "#fileMedia") { native?.setVideoTarget?.(S.project.width, S.project.height); native?.setAutoOptimize?.(app.autoOptimize()); }
   return new Promise((resolve) => {
     const input = $(sel);
     input.value = "";
@@ -548,23 +582,33 @@ A.importProject = async () => {
 
 A.setResolution = async () => {
   const P = S.project;
-  const presets = [[1280, 720], [1920, 1080], [3840, 2160], [1024, 768], [1280, 800], [1920, 1200]];
+  const groups = M.RESOLUTIONS.map(g => ({ ...g, list: [...g.list] }));
+  const extra = [];
   const ext = native?.externalSize ? native.externalSize() : "";
-  if (ext && /^\d+x\d+$/.test(ext)) { const [w, hh] = ext.split("x").map(Number); presets.unshift([w, hh, "Proyector"]); }
+  if (ext && /^\d+x\d+$/.test(ext)) { const [w, hh] = ext.split("x").map(Number); extra.push([w, hh, "Proyector conectado"]); }
   const scr = [Math.round(screen.width * DPR()), Math.round(screen.height * DPR())].sort((a, b) => b - a);
-  presets.push([scr[0], scr[1], "Esta pantalla"]);
+  extra.push([scr[0], scr[1], "Esta pantalla"]);
+  groups.unshift({ group: "Tus pantallas", list: extra });
+  const wIn = h("input", { type: "number", class: "text-in", min: 64, max: 16384, value: P.width });
+  const hIn = h("input", { type: "number", class: "text-in", min: 64, max: 16384, value: P.height });
   const content = h("div", {},
-    h("p", { class: "hint" }, `Actual: ${P.width}×${P.height}. Usa la resolución nativa del proyector para la máxima nitidez. Las superficies se reescalan solas.`),
-    tiles(presets.map(([w, hh, label]) => ({ id: `${w}x${hh}`, label: `${label ? label + " · " : ""}${w}×${hh}`, ic: "screen" })), { value: `${P.width}x${P.height}`, onPick: (id) => closeDialog(id), cols: 2 }));
-  const pick = await dialog({ title: "Resolución de salida", content, buttons: [{ label: "Cancelar", value: null }] });
+    h("p", { class: "hint" }, `Actual: ${P.width}×${P.height}. Usa la resolución nativa del proyector para la máxima nitidez; con varios proyectores, la suma de todos. Las superficies se reescalan solas.`),
+    ...groups.map(g => h("div", {}, h("h4", { class: "res-group" }, g.group),
+      tiles(g.list.map(([w, hh, label]) => ({ id: `${w}x${hh}`, label: `${label} · ${w}×${hh}`, ic: "screen" })), { value: `${P.width}x${P.height}`, onPick: (id) => closeDialog(id), cols: 2 }))),
+    h("h4", { class: "res-group" }, "Personalizada"),
+    h("div", { class: "row" }, wIn, h("span", {}, "×"), hIn,
+      btn({ label: "Usar", kind: "primary", onClick: () => closeDialog(`${Math.round(+wIn.value)}x${Math.round(+hIn.value)}`) })));
+  const pick = await dialog({ title: "Resolución de la composición", content, buttons: [{ label: "Cancelar", value: null }], wide: true });
   if (!pick) return;
   const [w, hh] = pick.split("x").map(Number);
+  if (!(w >= 64 && hh >= 64 && w <= 16384 && hh <= 16384)) return toast("Resolución no válida (64 a 16384 px)", "err");
   const kx = w / P.width, ky = hh / P.height;
   for (const s of P.surfaces) s.points = s.points.map(p => ({ x: p.x * kx, y: p.y * ky }));
   P.width = w; P.height = hh;
   renderer.meshCache.clear();
   fitView(); changed({ panel: true }); commit();
-  toast(`Resolución ${w}×${hh}`);
+  const fit = renderer.fitScale(w, hh, 1);
+  toast(fit < 1 ? `Resolución ${w}×${hh} · tu GPU dibuja a ${Math.round(w * fit)}×${Math.round(hh * fit)} como máximo` : `Resolución ${w}×${hh}`);
 };
 
 A.detectFromPhoto = async () => {
@@ -780,6 +824,31 @@ A.selectNext = (d = 1) => {
   select(arr[(i + d + arr.length) % arr.length].id);
 };
 A.zoom = (k) => { S.view.zoom = Math.max(0.3, Math.min(12, S.view.zoom * k)); };
+/* ---- actualizaciones ---- */
+A.checkUpdates = async (silent = false) => {
+  const cur = Updater.currentVersion();
+  if (cur.platform === "web") { if (!silent) { toast("Recargando la última versión…"); setTimeout(() => location.reload(), 600); } return; }
+  if (!silent) toast("Buscando actualizaciones…");
+  let remote;
+  try { remote = await Updater.fetchLatest(); }
+  catch (e) { if (!silent) toast("No se pudo buscar: " + e.message, "err"); return; }
+  if (!Updater.isNewer(remote, cur)) { if (!silent) toast(`Ya tienes la última versión (${cur.version})`); return; }
+  const go = await dialog({
+    title: "Nueva versión disponible",
+    content: h("div", {}, h("p", {}, `Tienes la ${cur.version} y está disponible la ${remote.version}.`),
+      remote.notes ? h("p", { class: "hint" }, remote.notes) : null,
+      h("p", { class: "hint" }, cur.platform === "android"
+        ? "Se descargará y Android te pedirá confirmar con «Actualizar». Tus proyectos se conservan."
+        : "Se descargará e instalará sola; LumaMap se reiniciará. Tus proyectos se conservan.")),
+    buttons: [{ label: "Más tarde", value: false }, { label: "Actualizar", kind: "primary", value: true }],
+  });
+  if (!go) return;
+  await Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {});
+  toast("Descargando actualización…");
+  try { await Updater.install(remote, (p) => toast(`Descargando actualización… ${Math.round(p * 100)} %`)); }
+  catch (e) { toast("No se pudo actualizar: " + e.message, "err"); }
+};
+app.version = () => Updater.currentVersion();
 A.help = () => showHelp(app);
 A.palette = () => openPalette(app);
 A.toggleGuides = () => { S.guides = !S.guides; sendState(true); renderPanel(); toast(S.guides ? "Guías en el proyector" : "Guías ocultas"); };
@@ -807,8 +876,10 @@ app.saveBlob = saveBlob;
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
 
 /** Renderizador aparte a la resolución de salida (para grabar o capturar sin la interfaz). */
-function offscreenRenderer(preserve) {
-  const P = S.project, k = Math.min(1, 1920 / P.width);
+function offscreenRenderer(preserve, height = 0) {
+  const P = S.project;
+  // Grabación: altura elegida (720p…4K) · captura: resolución completa (lo que admita la GPU).
+  const k = Math.min(height ? height / P.height : 1, 4096 / P.width, 4096 / P.height);
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(P.width * k / 2) * 2; canvas.height = Math.round(P.height * k / 2) * 2;
   const r = new Renderer(canvas, { preserve });
@@ -830,14 +901,15 @@ A.record = () => {
     return;
   }
   if (typeof MediaRecorder === "undefined") return toast("Este dispositivo no puede grabar video", "err");
-  const o = offscreenRenderer(false);
-  const stream = o.canvas.captureStream(30);
+  const rec = S.project.settings.record;
+  const o = offscreenRenderer(false, rec.height);
+  const stream = o.canvas.captureStream(rec.fps || 30);
   // Con el micrófono activo, el video incluye la música que se oye.
   if (audio.stream) for (const t of audio.stream.getAudioTracks()) stream.addTrack(t);
   const types = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
   const mime = types.find(t => MediaRecorder.isTypeSupported?.(t)) || "";
   let mr;
-  try { mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6 }); }
+  try { mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: (rec.mbps || 12) * 1e6 }); }
   catch (e) { return toast("No se pudo grabar: " + e.message, "err"); }
   const chunks = [];
   mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
@@ -852,7 +924,7 @@ A.record = () => {
   mr.start(1000);
   S.rec = { mr, o, start: performance.now() };
   updateChrome();
-  toast("Grabando la salida… vuelve a pulsar Grabar para terminar");
+  toast(`Grabando ${o.canvas.width}×${o.canvas.height} a ${rec.fps} fps… vuelve a pulsar Grabar para terminar`);
 };
 
 /* ======================================================================
@@ -927,7 +999,14 @@ let G = null; // gesto en curso
 
 function toProject(clientX, clientY) {
   const r = $("#ov").getBoundingClientRect(), d = DPR(), v = currentView();
-  return { x: ((clientX - r.left) * d - v.tx) / v.sx, y: ((clientY - r.top) * d - v.ty) / v.sy };
+  let cx = clientX - r.left, cy = clientY - r.top;
+  if (S.projecting) {
+    // La imagen está espejada/girada para el proyector: el toque también.
+    const O = S.project.settings.output, rot = O.rotate === 180;
+    if (O.flipH !== rot) cx = r.width - cx;
+    if (O.flipV !== rot) cy = r.height - cy;
+  }
+  return { x: (cx * d - v.tx) / v.sx, y: (cy * d - v.ty) / v.sy };
 }
 const hitRadius = (css = 26) => (css * DPR()) / currentView().sx;
 
@@ -1070,6 +1149,30 @@ function onDown(e) {
       return;
     }
   }
+  // Asas de los lados: cambiar el tamaño sin girar.
+  if (s && !s.locked && !s.hidden) {
+    const r = hitRadius(22);
+    const eh = edgeHandles(s).find(e => Math.hypot(e.x - p.x, e.y - p.y) < r);
+    if (eh) {
+      // Esquinas de otras superficies que coinciden con los puntos que se mueven: van juntas.
+      const links = [];
+      if (S.linkCorners) {
+        const tol = hitRadius(7);
+        s.points.forEach((q, i) => {
+          if (!eh.w[i]) return;
+          for (const o of S.project.surfaces) {
+            if (o.id === s.id || o.locked || o.hidden) continue;
+            for (const op of o.points) if (Math.hypot(op.x - q.x, op.y - q.y) < tol) links.push({ i, op, x0: op.x, y0: op.y });
+          }
+        });
+      }
+      G = { type: "edge", s, h: eh, start: s.points.map(q => ({ ...q })), p0: p, links };
+      S.point = -1;
+      haptic();
+      updateChrome();
+      return;
+    }
+  }
   const hit = hitSurface(p);
   if (hit) {
     if (hit.id !== S.sel) select(hit.id);
@@ -1111,6 +1214,14 @@ function onMove(e) {
       old.x = np.x; old.y = np.y;
       for (const q of G.linked) { q.x += dx; q.y += dy; }
       G.moved = true; G.at = np;
+      changed();
+      break;
+    }
+    case "edge": {
+      const pts = dragEdge(G.start, G.h, p.x - G.p0.x, p.y - G.p0.y);
+      pts.forEach((q, i) => { G.s.points[i].x = q.x; G.s.points[i].y = q.y; });
+      for (const l of G.links) { l.op.x = l.x0 + pts[l.i].x - G.start[l.i].x; l.op.y = l.y0 + pts[l.i].y - G.start[l.i].y; }
+      G.moved = true; G.at = { x: G.h.x + (p.x - G.p0.x), y: G.h.y + (p.y - G.p0.y) };
       changed();
       break;
     }
@@ -1189,7 +1300,7 @@ function onUp(e) {
   }
   if (pointers.size > 0) return;
   switch (G.type) {
-    case "point": case "move": case "pinch": if (G.moved) commit(); break;
+    case "point": case "move": case "pinch": case "edge": if (G.moved) commit(); break;
     case "mask": commit(); break;
     case "draw": {
       if (S.live) {
@@ -1531,9 +1642,12 @@ function tick(now) {
 function drawOverlay(v, view) {
   const ctx = ovCtx(), W = $("#ov").width, H = $("#ov").height, d = DPR(), P = S.project;
   ctx.clearRect(0, 0, W, H);
+  // En pantalla completa se aplican los ajustes del proyector (color, espejo, bordes suaves).
+  applyOutputCSS([$("#gl"), $("#ov")], S.projecting ? P.settings.output : {});
   if (S.pattern && S.projecting) {
     ctx.save(); ctx.setTransform(v.sx, 0, 0, v.sy, v.tx, v.ty); drawPattern(ctx, S.pattern, P.width, P.height); ctx.restore();
   }
+  if (S.projecting) drawSoftEdge(ctx, P.settings.output.softEdge, v.tx, v.ty, P.width * v.sx, P.height * v.sy);
   // Atenúa lo que queda fuera de la salida.
   if (!S.projecting) {
     ctx.fillStyle = "rgba(5,6,10,.55)";
@@ -1546,6 +1660,7 @@ function drawOverlay(v, view) {
     drawGuides(ctx, P, view, {
       selectedId: S.mode === "edit" || S.mode === "mask" ? S.sel : null,
       pointIdx: S.point, scale: d, showAll: S.mode !== "draw",
+      edges: S.mode === "edit", edgeActive: G?.type === "edge" ? G.h.side : null,
     });
   }
   const X = (p) => p.x * v.sx + v.tx, Y = (p) => p.y * v.sy + v.ty;
@@ -1578,7 +1693,7 @@ function drawOverlay(v, view) {
 /** Lupa de precisión: amplía la zona bajo el dedo al mover un punto o dibujar. */
 function drawLoupe(v) {
   const lp = $("#loupe");
-  const active = G && G.at && ["point", "draw", "draftPoint", "mask", "trace"].includes(G.type) && pointers.size === 1;
+  const active = G && G.at && ["point", "edge", "draw", "draftPoint", "mask", "trace"].includes(G.type) && pointers.size === 1;
   lp.style.display = active ? "block" : "none";
   if (!active) return;
   const ctx = lp.getContext("2d"), Z = 3, R = lp.width;
@@ -1607,6 +1722,14 @@ window.__lumaNativeEvent = (ev) => {
     if (ev.count && ev.resumed) S.output = "native";
     updateChrome(); renderPanel();
   } else if (ev.type === "saved") toast(ev.ok ? "Archivo guardado" : "No se guardó el archivo", ev.ok ? "" : "err");
+  else if (ev.type === "updateProgress") window.__lumaUpdateProgress?.(ev.pct);
+  else if (ev.type === "updateError") toast("No se pudo actualizar: " + ev.msg, "err");
+  else if (ev.type === "updateReady") toast("Confirma «Actualizar» en la pantalla de Android");
+  else if (ev.type === "optimize") {
+    if (ev.stage === "probe") toast("Analizando video…");
+    else if (ev.stage === "progress") toast(`Optimizando video… ${Math.round(ev.pct * 100)} %`);
+    else if (ev.stage === "done") toast(ev.msg);
+  }
 };
 
 async function connectRemote() {
@@ -1708,6 +1831,8 @@ async function init() {
   audio.bpm = S.project.settings.bpm || 120;
   requestAnimationFrame(tick);
   connectRemote();
+  // Busca actualizaciones al abrir (en silencio: solo avisa si hay una nueva).
+  setTimeout(() => A.checkUpdates(true), 5000);
   if ("serviceWorker" in navigator && !native && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
   window.__lumamap = app; // depuración y pruebas
 }

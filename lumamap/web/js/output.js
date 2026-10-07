@@ -6,7 +6,7 @@ import { Renderer, webgl2Supported } from "./renderer.js";
 import { Compositor, sceneLayers } from "./compose.js";
 import { MediaPool } from "./sources.js";
 import { Link } from "./link.js";
-import { drawPattern, drawGuides } from "./overlay.js";
+import { drawPattern, drawGuides, applyOutputCSS, drawSoftEdge } from "./overlay.js";
 import { normalizeProject, usedMediaIds } from "./model.js";
 
 const glCanvas = document.getElementById("out");
@@ -19,6 +19,7 @@ let st = { playing: true, master: 1, blackout: false, pattern: null, guides: fal
 let timeOffset = 0;      // tiempo del editor - tiempo local (s)
 let frozenTime = 0;      // tiempo del editor cuando está en pausa
 let levelsAt = 0;        // cuándo llegaron los últimos niveles de audio
+let lastDraw = 0, ovk = 1; // último fotograma dibujado · escala de la capa de guías
 
 /** Extrapola el ritmo entre mensajes (llegan ~30 veces/s) para que el compás no salte. */
 function liveLevels(now) {
@@ -71,10 +72,14 @@ const link = new Link("output", async (m) => {
 link.send({ t: "hello" });
 pool.setPlaying(true);
 
+function outCfg() { return project?.settings?.output || {}; }
 function resize() {
   const W = project?.width || 1920, H = project?.height || 1080;
-  renderer.resize(W, H);
-  if (ov.width !== W || ov.height !== H) { ov.width = W; ov.height = H; }
+  const k = renderer.fitScale(W, H, outCfg().renderScale || 1); // escala de render (calidad / rendimiento)
+  renderer.resize(W * k, H * k);
+  ovk = Math.min(1, 2048 / Math.max(W, H));            // guías y patrones no necesitan 8K
+  const ow = Math.round(W * ovk), oh = Math.round(H * ovk);
+  if (ov.width !== ow || ov.height !== oh) { ov.width = ow; ov.height = oh; }
 }
 resize();
 
@@ -102,17 +107,26 @@ function tick() {
   requestAnimationFrame(tick);
   if (!project) return;
   const now = performance.now();
+  const oc = outCfg();
+  // Límite de fotogramas por segundo (como el «frame rate» de la composición).
+  if (oc.fps && oc.fps < 120 && now - lastDraw < 1000 / oc.fps - 2) return;
+  lastDraw = now;
+  resize();
+  applyOutputCSS([glCanvas, ov], oc);
   const time = st.playing ? now / 1000 + timeOffset : frozenTime;
   const W = project.width, H = project.height;
-  const view = { sx: 1, sy: 1, tx: 0, ty: 0 };
+  const k = renderer.fitScale(W, H, oc.renderScale || 1);
+  const view = { sx: k, sy: k, tx: 0, ty: 0 };
   if (tr && now - tr.start > tr.dur) tr = null;
   comp.frame(project, {
     layers: sceneLayers(project, tr, now), time, levels: liveLevels(now), view,
     master: st.master, blackout: st.blackout || !!st.pattern, clear: [0, 0, 0, 1], live: st.live || null,
   });
+  octx.setTransform(ovk, 0, 0, ovk, 0, 0);
   octx.clearRect(0, 0, W, H);
   if (st.pattern) drawPattern(octx, st.pattern, W, H);
-  if (st.guides) drawGuides(octx, project, view, { selectedId: st.sel, pointIdx: st.point, scale: W / 1280 });
+  if (st.guides) drawGuides(octx, project, { sx: 1, sy: 1, tx: 0, ty: 0 }, { selectedId: st.sel, pointIdx: st.point, scale: W / 1280 });
+  drawSoftEdge(octx, oc.softEdge, 0, 0, W, H);
   pool.applyLookAudio(sceneLayers(project, null, now).flatMap(l => Object.values(l.scene.looks)), st.muted);
 }
 tick();

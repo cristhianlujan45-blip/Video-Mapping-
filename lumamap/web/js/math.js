@@ -313,3 +313,47 @@ export function transformPoints(points, c, s, rot) {
 }
 
 export function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+/* ---------------- Asas de los lados (cambiar tamaño sin girar) ---------------- */
+
+/**
+ * Asas en el centro de cada lado de una superficie. Arrastrar un asa estira la
+ * superficie solo en perpendicular a ese lado: el lado opuesto queda fijo y los
+ * puntos intermedios (mallas, polígonos) se reparten en proporción, así no
+ * cambian el ángulo ni la perspectiva.
+ * Devuelve [{side, x, y, nx, ny, w:[peso por punto]}].
+ */
+export function edgeHandles(s) {
+  const c = centroid(s.points);
+  const out = [];
+  const add = (side, mid, a, b, w) => {
+    let nx = b.y - a.y, ny = -(b.x - a.x);
+    const L = Math.hypot(nx, ny) || 1;
+    nx /= L; ny /= L;
+    if ((mid.x - c.x) * nx + (mid.y - c.y) * ny < 0) { nx = -nx; ny = -ny; }
+    out.push({ side, x: mid.x, y: mid.y, nx, ny, w });
+  };
+  if (s.type === "quad") {
+    const { cols, rows } = s;
+    const P = (r, col) => s.points[r * cols + col];
+    const weights = (fn) => s.points.map((_, i) => fn(Math.floor(i / cols), i % cols));
+    add("top", uvToScreen(s, 0.5, 0), P(0, 0), P(0, cols - 1), weights((r) => 1 - r / (rows - 1)));
+    add("right", uvToScreen(s, 1, 0.5), P(0, cols - 1), P(rows - 1, cols - 1), weights((r, col) => col / (cols - 1)));
+    add("bottom", uvToScreen(s, 0.5, 1), P(rows - 1, cols - 1), P(rows - 1, 0), weights((r) => r / (rows - 1)));
+    add("left", uvToScreen(s, 0, 0.5), P(rows - 1, 0), P(0, 0), weights((r, col) => 1 - col / (cols - 1)));
+  } else {
+    const b = bbox(s.points);
+    const x0 = b.x, x1 = b.x + b.w, y0 = b.y, y1 = b.y + b.h;
+    add("top", { x: (x0 + x1) / 2, y: y0 }, { x: x0, y: y0 }, { x: x1, y: y0 }, s.points.map(p => (y1 - p.y) / b.h));
+    add("right", { x: x1, y: (y0 + y1) / 2 }, { x: x1, y: y0 }, { x: x1, y: y1 }, s.points.map(p => (p.x - x0) / b.w));
+    add("bottom", { x: (x0 + x1) / 2, y: y1 }, { x: x1, y: y1 }, { x: x0, y: y1 }, s.points.map(p => (p.y - y0) / b.h));
+    add("left", { x: x0, y: (y0 + y1) / 2 }, { x: x0, y: y1 }, { x: x0, y: y0 }, s.points.map(p => (x1 - p.x) / b.w));
+  }
+  return out;
+}
+
+/** Aplica el arrastre de un asa: start = puntos al empezar, (dx,dy) = desplazamiento total. */
+export function dragEdge(start, handle, dx, dy) {
+  const d = dx * handle.nx + dy * handle.ny;
+  return start.map((p, i) => ({ x: p.x + handle.nx * d * handle.w[i], y: p.y + handle.ny * d * handle.w[i] }));
+}

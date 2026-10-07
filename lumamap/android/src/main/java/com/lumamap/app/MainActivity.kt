@@ -86,7 +86,8 @@ class MainActivity : ComponentActivity() {
             if (clip != null) for (i in 0 until clip.itemCount) uris += clip.getItemAt(i).uri
             else data.data?.let { uris += it }
         }
-        cb.onReceiveValue(uris.toTypedArray())
+        // Videos: se optimizan antes de entregarlos al editor (si hace falta).
+        optimizeAll(uris, 0, mutableListOf()) { cb.onReceiveValue(it.toTypedArray()) }
     }
 
     private val askPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
@@ -151,6 +152,29 @@ class MainActivity : ComponentActivity() {
             }
         })
         displayManager.registerDisplayListener(displayListener, main)
+    }
+
+    /* ------------------------------------------------------------ optimización de video */
+
+    private val optimizer by lazy { VideoOptimizer(this) }
+    private var videoTargetW = 1920
+    private var videoTargetH = 1080
+    private var autoOptimize = true
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun optimizeAll(uris: List<Uri>, i: Int, out: MutableList<Uri>, done: (List<Uri>) -> Unit) {
+        if (i >= uris.size) { done(out); return }
+        val uri = uris[i]
+        val isVideo = contentResolver.getType(uri)?.startsWith("video/") == true
+        if (!autoOptimize || !isVideo) { out += uri; optimizeAll(uris, i + 1, out, done); return }
+        nativeEvent(JSONObject().put("type", "optimize").put("stage", "probe"))
+        optimizer.optimize(uri, videoTargetW, videoTargetH,
+            onProgress = { p -> nativeEvent(JSONObject().put("type", "optimize").put("stage", "progress").put("pct", p.toDouble())) },
+            onDone = { result, msg ->
+                if (msg != null) nativeEvent(JSONObject().put("type", "optimize").put("stage", "done").put("msg", msg))
+                out += result
+                optimizeAll(uris, i + 1, out, done)
+            })
     }
 
     /** Crea (o vuelve a crear tras un fallo) la WebView del editor. */
@@ -318,6 +342,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Para las clases auxiliares (actualizador): evento hacia la página y JS directo. */
+    fun event(json: JSONObject) = nativeEvent(json)
+    fun toEditorJs(js: String) { web.evaluateJavascript(js, null) }
+    private val updater by lazy { AppUpdater(this) }
+
     private fun nativeEvent(json: JSONObject) {
         main.post {
             web.evaluateJavascript("window.__lumaNativeEvent && window.__lumaNativeEvent(${json})", null)
@@ -385,6 +414,27 @@ class MainActivity : ComponentActivity() {
                 c.hide(WindowInsetsCompat.Type.systemBars())
             } else c.show(WindowInsetsCompat.Type.systemBars())
         }.let { }
+
+        /** Tamaño de la composición: los videos más grandes se reducen a él al importarlos. */
+        @JavascriptInterface
+        fun setVideoTarget(w: Int, h: Int) { videoTargetW = w.coerceIn(320, 7680); videoTargetH = h.coerceIn(240, 4320) }
+
+        @JavascriptInterface
+        fun setAutoOptimize(on: Boolean) { autoOptimize = on }
+
+        /** "versión|código", p. ej. "2.3.14|1014". */
+        @JavascriptInterface
+        fun appVersion(): String {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+            return "${info.versionName}|$code"
+        }
+
+        @JavascriptInterface
+        fun checkUpdate(url: String) = updater.check(url)
+
+        @JavascriptInterface
+        fun installUpdate(url: String) = updater.install(url)
 
         @JavascriptInterface
         fun haptic() {

@@ -92,6 +92,7 @@ export function buildCommands(app) {
   add("Ayuda", "palette", "Todos los comandos", () => openPalette(app), { keys: "Ctrl+K", ic: "menu" });
   add("Ayuda", "help", "Ayuda y atajos", () => A.help(), { keys: "F1", ic: "help" });
   add("Ayuda", "midi", "Conectar controlador MIDI", A.midi, { ic: "midi" });
+  add("Ayuda", "update", "Buscar actualizaciones", () => A.checkUpdates(false), { ic: "download" });
   return C;
 }
 
