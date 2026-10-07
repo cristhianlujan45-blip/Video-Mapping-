@@ -37,6 +37,21 @@ cualquier navegador moderno.
 - Detección de superficies en una foto (experimental) y foto o cámara de
   referencia en el editor para trazar las formas.
 
+**Contenido**
+- Biblioteca de **144 animaciones** catalogadas (Abstracto, Geométrico, Naturaleza,
+  Espacio, Neón y retro, Luces y show, Fiesta, Música ♪, Calibración) con buscador
+  y miniaturas, sobre 72 animaciones base en GPU.
+- Biblioteca de **122 efectos** (color, retro, glitch, distorsión, caleidoscopio,
+  movimiento, luz y cámara: chroma key, luma key, bordes, térmica, visión nocturna…).
+- Videos, fotos y **GIF animados** (también WebP/APNG animados).
+- **Texto animado**: marquesina, créditos, máquina de escribir, letra a letra, ola,
+  rebote, arcoíris, karaoke, pulso con la música, neón, glitch, zoom… con brillo
+  y contorno.
+- **Conversión automática de video al importar** (como Alley de Resolume): si un
+  video es pesado (ProRes, HEVC, 4K en una salida 1080p, bitrate altísimo…) se
+  convierte solo a H.264 ligero usando la tarjeta gráfica; si ya es adecuado se
+  importa al instante.
+
 **Dibujar en la pared**
 - Pinceles **neón** con resplandor, pincel normal, línea, rectángulo, círculo y
   borrador de trazos; relleno opcional; 10 colores y selector libre.
@@ -120,13 +135,19 @@ Requiere Android 8.0+ y Android System WebView / Chrome actualizado (WebGL2).
 La última versión se publica sola en la página **Releases** del repositorio
 (versión preliminar «LumaMap (última versión)»):
 
-- **Windows:** `LumaMap-Setup-<versión>.exe` → doble clic, instala y crea
+- **Windows:** `LumaMap-Setup.exe` → doble clic, instala y crea
   accesos directos en el escritorio y el menú Inicio. Requiere Windows 10 u 11 de
   64 bits. Si aparece «Windows protegió su PC»: *Más información → Ejecutar de
   todas formas* (el instalador no lleva certificado de pago).
 - **Android:** `LumaMap-Android.apk`. Todas las versiones se firman con la misma
   clave, así que cada APK nuevo se instala **encima** del anterior sin perder tus
   proyectos (solo hay que desinstalar una vez las versiones 2.0 y 2.1).
+
+**Actualizar sin reinstalar:** la app consulta `version.json` al abrirse; si hay
+una versión nueva aparece el aviso con el botón **Actualizar** (también en
+☰ → *Buscar actualizaciones*). En Windows se descarga y se reinstala sola; en
+Android se descarga y se abre la pantalla de instalación (la primera vez hay que
+permitir «Instalar apps desconocidas» para LumaMap).
 
 ## Windows (PC)
 

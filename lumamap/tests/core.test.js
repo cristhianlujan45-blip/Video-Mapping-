@@ -178,9 +178,9 @@ await test("biblioteca de efectos: más de 100 y solo usa parámetros que existe
   const maps = new Set(M.COLORMAPS.map(c => c[0]));
   for (const e of M.FX_LIBRARY) if (e.fx.colormap) assert.ok(maps.has(e.fx.colormap), e.name);
 });
-await test("47 animaciones con identificador único; «Calibrar» conserva su número", () => {
-  assert.equal(M.GENERATORS.length, 47);
-  assert.equal(new Set(M.GENERATORS.map(g => g.id)).size, 47);
+await test("72 animaciones base con identificador único; «Calibrar» conserva su número", () => {
+  assert.equal(M.GENERATORS.length, 72);
+  assert.equal(new Set(M.GENERATORS.map(g => g.id)).size, 72);
   assert.equal(M.GEN_INDEX.calib, 15);
 });
 await test("resoluciones de composición hasta 8K y ajustes de salida por defecto", () => {
@@ -191,6 +191,63 @@ await test("resoluciones de composición hasta 8K y ajustes de salida por defect
   assert.equal(p.settings.output.softEdge.left, 0.2);
   assert.equal(p.settings.output.softEdge.curve, 2.2, "completa lo que falta");
   assert.equal(p.settings.record.height, 1080);
+});
+
+await test("catálogo de más de 100 animaciones, todas válidas y catalogadas", () => {
+  assert.ok(M.ANIM_LIBRARY.length >= 100, String(M.ANIM_LIBRARY.length));
+  assert.equal(new Set(M.ANIM_LIBRARY.map(a => a.id)).size, M.ANIM_LIBRARY.length);
+  const cats = new Set(M.ANIM_CATEGORIES);
+  for (const a of M.ANIM_LIBRARY) {
+    assert.ok(a.gen in M.GEN_INDEX, `${a.name}: ${a.gen}`);
+    assert.ok(cats.has(a.cat), `${a.name}: ${a.cat}`);
+    assert.match(a.color, /^#[0-9a-f]{6}$/i, a.name);
+    if (a.fx) for (const k of Object.keys(a.fx)) assert.ok(k in M.DEFAULT_FX(), `${a.name}: fx ${k}`);
+  }
+  for (const c of M.ANIM_CATEGORIES) if (c !== "Todas") assert.ok(M.ANIM_LIBRARY.some(a => a.cat === c), `categoría vacía ${c}`);
+});
+
+console.log("== Texto animado ==");
+await test("todas las animaciones de texto se dibujan sin errores", async () => {
+  const { TEXT_ANIMS, renderText } = await import("../web/js/sources.js");
+  assert.ok(TEXT_ANIMS.length >= 15);
+  let draws = 0;
+  const ctx = new Proxy({}, { get: (o, k) => k in o ? o[k] : k === "measureText" ? (t) => ({ width: String(t).length * 10 }) : (k === "fillText" || k === "strokeText") ? () => { draws++; } : () => {}, set: (o, k, v) => { o[k] = v; return true; } });
+  const canvas = { width: 400, height: 200, getContext: () => ctx };
+  for (const [id] of TEXT_ANIMS) {
+    const before = draws;
+    for (const t of [0, 0.7, 3.3]) renderText(canvas, { ...M.DEFAULT_SOURCE(), type: "text", text: "Hola\nLumaMap", textAnim: id, textGlow: 0.5, textOutline: 0.3 }, t, 0.5);
+    assert.ok(draws > before, `${id} no dibuja`);
+  }
+});
+
+console.log("== Actualizaciones ==");
+await test("compara compilaciones para saber si hay versión nueva", async () => {
+  const { buildOf, isNewer } = await import("../web/js/updater.js");
+  assert.equal(buildOf("2.3.57"), 57);
+  assert.equal(buildOf(""), 0);
+  assert.ok(isNewer({ build: 58 }, { platform: "android", build: 57 }));
+  assert.ok(!isNewer({ build: 57 }, { platform: "windows", build: 57 }));
+  assert.ok(!isNewer({ build: 99 }, { platform: "web", build: 0 }), "en la web no se instala");
+});
+
+console.log("== Optimizador de video ==");
+await test("analiza ffmpeg y decide conservar, re-empaquetar o convertir", async () => {
+  const { createRequire } = await import("node:module");
+  const { decide, parseProbe } = createRequire(import.meta.url)("../desktop/optimize.js");
+  const info = parseProbe(`Input #0, mov,mp4 from 'a.mov':
+  Duration: 00:01:02.50, start: 0.000000, bitrate: 45000 kb/s
+  Stream #0:0(und): Video: prores (HQ) (apch / 0x68637061), yuv422p10le, 3840x2160, 44000 kb/s, 29.97 fps
+  Stream #0:1(und): Audio: aac (LC), 48000 Hz, stereo`);
+  assert.equal(info.codec, "prores"); assert.equal(info.width, 3840); assert.equal(info.height, 2160);
+  assert.equal(info.duration, 62.5); assert.equal(info.bitrate, 45000); assert.ok(info.audio);
+  const T = { width: 1920, height: 1080 };
+  assert.equal(decide(info, ".mov", T).action, "encode");
+  const ok = { codec: "h264", width: 1920, height: 1080, fps: 30, bitrate: 8000 };
+  assert.equal(decide(ok, ".mp4", T).action, "keep");
+  assert.equal(decide(ok, ".mkv", T).action, "remux");
+  assert.equal(decide({ ...ok, width: 3840, height: 2160 }, ".mp4", T).action, "encode");
+  assert.equal(decide({ ...ok, fps: 120 }, ".mp4", T).action, "encode");
+  assert.equal(decide({ codec: null }, ".mp4", T).action, "keep");
 });
 
 console.log("== Historial ==");

@@ -1,6 +1,6 @@
 // web/sw.js — caché offline de la app (PWA). Red primero para recibir
 // actualizaciones; si no hay conexión, se sirve la copia guardada.
-const CACHE = "lumamap-v4";
+const CACHE = "lumamap-v5";
 const SHELL = ["./", "index.html", "output.html", "controller.html", "css/app.css", "icon.svg", "manifest.webmanifest",
   "js/editor.js", "js/panels.js", "js/ui.js", "js/icons.js", "js/model.js", "js/math.js", "js/history.js", "js/store.js",
   "js/renderer.js", "js/compose.js", "js/drawing.js", "js/sources.js", "js/audio.js", "js/link.js", "js/overlay.js",

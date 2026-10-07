@@ -82,6 +82,16 @@ export async function createRuntime(rec) {
   rt.width = img.naturalWidth || 1024; rt.height = img.naturalHeight || 1024;
   rt.source = () => img;
   rt.frameKey = () => 0;
+  if (/gif|webp/i.test(rec.mime || rec.blob.type)) {
+    // Sin ImageDecoder: el navegador anima la imagen si está en el documento;
+    // se sube a la GPU unas 15 veces por segundo.
+    rt.kind = "anim";
+    img.setAttribute("aria-hidden", "true");
+    img.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0.01;pointer-events:none";
+    document.body?.append(img);
+    rt.frameKey = () => Math.floor(performance.now() / 66);
+    rt.dispose = () => img.remove();
+  }
   return rt;
 }
 
@@ -170,39 +180,127 @@ export function stopCamera() {
 
 /* ---------------- Texto ---------------- */
 
-/** Pinta un texto centrado y ajustado al tamaño en un canvas. */
-export function renderText(canvas, src) {
+/** Animaciones de texto disponibles. */
+export const TEXT_ANIMS = [
+  ["none", "Fijo"], ["marquee", "Marquesina ←"], ["marqueeR", "Marquesina →"], ["credits", "Créditos ↑"],
+  ["typewriter", "Máquina de escribir"], ["letters", "Letra a letra"], ["wave", "Ola"], ["bounce", "Rebote"],
+  ["rainbow", "Arcoíris"], ["karaoke", "Karaoke"], ["pulse", "Pulso ♪"], ["blink", "Parpadeo"],
+  ["neon", "Neón que tiembla"], ["glitch", "Glitch"], ["shake", "Temblor"], ["zoom", "Zoom"], ["fade", "Aparecer"],
+];
+
+const fract = (x) => x - Math.floor(x);
+const hashf = (n) => fract(Math.sin(n * 127.1) * 43758.5453);
+
+/**
+ * Pinta un texto (centrado y ajustado al tamaño) en un canvas, animado en el
+ * instante t (segundos). beat = golpe de la música (0..1) para «Pulso».
+ */
+export function renderText(canvas, src, t = 0, beat = 0) {
   const ctx = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
   ctx.clearRect(0, 0, W, H);
   if (src.textBg && !/^#?[0-9a-f]{6}00$/i.test(src.textBg)) { ctx.fillStyle = src.textBg; ctx.fillRect(0, 0, W, H); }
-  const lines = String(src.text || "").split("\n");
+  const anim = src.textAnim || "none";
+  const sp = (src.textSpeed ?? 1);
+  const tt = t * sp;
+  const scroll = anim === "marquee" || anim === "marqueeR";
+  const text = String(src.text || "");
+  const lines = scroll ? [text.replace(/\n/g, "   ")] : text.split("\n");
   const font = src.font || "sans-serif";
-  let size = H / Math.max(1, lines.length) * 0.8;
+  let size = H / Math.max(1, lines.length) * (scroll ? 0.7 : 0.8);
   ctx.font = `900 ${size}px ${font}`;
-  const widest = Math.max(1, ...lines.map(l => ctx.measureText(l).width));
-  size = Math.min(size, size * (W * 0.92) / widest);
-  ctx.font = `900 ${size}px ${font}`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillStyle = src.textColor || "#fff";
-  const lh = size * 1.1, y0 = H / 2 - (lines.length - 1) * lh / 2;
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, y0 + i * lh));
+  if (!scroll) {
+    const widest = Math.max(1, ...lines.map(l => ctx.measureText(l).width));
+    size = Math.min(size, size * (W * 0.92) / widest);
+    ctx.font = `900 ${size}px ${font}`;
+  }
+  ctx.textBaseline = "middle";
+  const color = src.textColor || "#fff";
+  const glow = src.textGlow || 0, outline = src.textOutline || 0;
+  const total = text.replace(/\n/g, "").length || 1;
+  const lh = size * 1.1;
+  let y0 = H / 2 - (lines.length - 1) * lh / 2;
+
+  // Transformaciones de todo el texto
+  let alpha = 1, scale = 1, dx = 0, dy = 0;
+  if (anim === "blink") alpha = fract(tt * 1.5) < 0.6 ? 1 : 0.05;
+  if (anim === "pulse") scale = 1 + beat * 0.22 + Math.sin(tt * 4) * 0.03;
+  if (anim === "zoom") { const k = fract(tt * 0.35); scale = 0.2 + k * 1.1; alpha = Math.min(1, k * 4) * Math.min(1, (1 - k) * 5); }
+  if (anim === "fade") alpha = 0.5 + 0.5 * Math.sin(tt * 1.6);
+  if (anim === "neon") alpha = hashf(Math.floor(tt * 14)) > 0.12 ? 1 : 0.25;
+  if (anim === "shake") { dx = (hashf(Math.floor(tt * 30)) - 0.5) * size * 0.08; dy = (hashf(Math.floor(tt * 30) + 7) - 0.5) * size * 0.08; }
+  if (anim === "credits") { const blockH = lines.length * lh; y0 = H + blockH / 2 - fract(tt * 0.12) * (H + blockH) - (lines.length - 1) * lh / 2; }
+  ctx.globalAlpha = alpha;
+  ctx.translate(W / 2 + dx, H / 2 + dy); ctx.scale(scale, scale); ctx.translate(-W / 2, -H / 2);
+
+  const glowAmt = anim === "neon" ? Math.max(glow, 0.8) : glow;
+  const draw = (str, x, y, fill) => {
+    if (glowAmt > 0) { ctx.shadowColor = fill; ctx.shadowBlur = size * glowAmt * 0.6; }
+    if (outline > 0) { ctx.lineWidth = size * outline * 0.12; ctx.strokeStyle = src.textOutlineColor || "#000"; ctx.lineJoin = "round"; ctx.strokeText(str, x, y); }
+    ctx.fillStyle = fill;
+    ctx.fillText(str, x, y);
+    ctx.shadowBlur = 0;
+  };
+
+  if (scroll) {
+    ctx.textAlign = "left";
+    const tw = ctx.measureText(lines[0]).width + W * 0.3;
+    let x = -fract(tt * 0.15 * W / tw) * tw;
+    if (anim === "marqueeR") x = -tw - x;    // misma velocidad, sentido contrario
+    for (let k = -1; k <= Math.ceil(W / tw) + 1; k++) draw(lines[0], x + k * tw, H / 2, color);
+    return;
+  }
+  const perLetter = ["typewriter", "letters", "wave", "bounce", "rainbow", "karaoke", "glitch"].includes(anim);
+  if (!perLetter) {
+    ctx.textAlign = "center";
+    lines.forEach((l, i) => draw(l, W / 2, y0 + i * lh, color));
+    return;
+  }
+  // Letra a letra
+  ctx.textAlign = "left";
+  const cycle = Math.max(2, total * 0.12 + 2);           // segundos por ciclo (escribir + pausa)
+  const shown = anim === "typewriter" || anim === "letters" ? fract(tt / cycle) * (total + total * 0.3) : total;
+  let n = 0;
+  lines.forEach((l, li) => {
+    const lw = ctx.measureText(l).width;
+    let x = W / 2 - lw / 2;
+    const y = y0 + li * lh;
+    for (const ch of l) {
+      const cw = ctx.measureText(ch).width;
+      let fill = color, yy = y, xx = x, a = 1;
+      if (anim === "typewriter" && n >= shown) a = 0;
+      if (anim === "letters") a = Math.max(0, Math.min(1, shown - n));
+      if (anim === "wave") yy += Math.sin(tt * 4 - n * 0.5) * size * 0.15;
+      if (anim === "bounce") yy -= Math.abs(Math.sin(tt * 3 - n * 0.35)) * size * 0.25;
+      if (anim === "rainbow") fill = `hsl(${(n * 25 + tt * 120) % 360},100%,60%)`;
+      if (anim === "karaoke") fill = n < fract(tt / cycle) * (total + 2) ? (src.textColor2 || "#ffcc00") : color;
+      if (anim === "glitch" && hashf(n + Math.floor(tt * 12)) > 0.8) { xx += (hashf(n * 3 + Math.floor(tt * 12)) - 0.5) * size * 0.3; fill = hashf(n + 5) > 0.5 ? "#ff2d55" : "#00e5ff"; }
+      if (a > 0) { ctx.globalAlpha = alpha * a; draw(ch, xx, yy, fill); }
+      x += cw; n++;
+    }
+    // cursor de la máquina de escribir
+    if (anim === "typewriter" && li === lines.length - 1 && fract(tt * 2) < 0.5) { ctx.globalAlpha = alpha; ctx.fillStyle = color; }
+  });
 }
 
 export class TextCache {
   constructor() { this.map = new Map(); }
-  get(key, src, aspect) {
+  get(key, src, aspect, t = 0, beat = 0) {
     const w = 1024, h = Math.max(64, Math.min(2048, Math.round(w / Math.max(0.1, aspect))));
-    const sig = [src.text, src.font, src.textColor, src.textBg, w, h].join("|");
+    const animated = src.textAnim && src.textAnim !== "none";
+    const sig = [src.text, src.font, src.textColor, src.textColor2, src.textBg, src.textGlow, src.textOutline, src.textOutlineColor, src.textAnim, w, h].join("|");
     let e = this.map.get(key);
     if (!e) {
       const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(w, h) : Object.assign(document.createElement("canvas"), { width: w, height: h });
       e = { canvas, sig: null };
       this.map.set(key, e);
     }
-    if (e.sig !== sig) {
-      e.canvas.width = w; e.canvas.height = h;
-      renderText(e.canvas, src);
+    if (e.sig !== sig || animated) {
+      if (e.canvas.width !== w || e.canvas.height !== h) { e.canvas.width = w; e.canvas.height = h; }
+      renderText(e.canvas, src, t, beat);
       e.sig = sig;
       e.version = (e.version || 0) + 1;
     }

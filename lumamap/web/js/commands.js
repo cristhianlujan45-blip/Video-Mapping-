@@ -18,7 +18,7 @@ export function buildCommands(app) {
   add("Archivo", "saveAs", "Guardar como…", () => A.save(true), { keys: "Ctrl+Shift+S", ic: "copy" });
   add("Archivo", "export", "Exportar proyecto .lumamap", A.exportProject, { keys: "Ctrl+E", ic: "download" });
   add("Archivo", "importProject", "Importar proyecto", A.importProject, { keys: "Ctrl+Shift+O", ic: "upload" });
-  add("Archivo", "importMedia", "Importar video o imagen", () => A.importMedia(), { keys: "Ctrl+I", ic: "upload" });
+  add("Archivo", "importMedia", "Importar video, imagen o GIF", () => A.importMedia(), { keys: "Ctrl+I", ic: "upload" });
   add("Archivo", "record", "Grabar video de la salida (iniciar / detener)", A.record, { keys: "Ctrl+R", ic: "camera" });
   add("Archivo", "snapshot", "Capturar imagen de la salida (PNG)", A.snapshot, { keys: "Ctrl+Shift+P", ic: "photo" });
   add("Archivo", "resolution", "Resolución de salida…", A.setResolution, { ic: "screen" });

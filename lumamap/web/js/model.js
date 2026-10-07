@@ -66,7 +66,197 @@ export const GENERATORS = [
   { id: "dots",     name: "Puntos" },
   { id: "fluid",    name: "Fluido" },
   { id: "boxtunnel", name: "Túnel cuadrado" },
+  { id: "circuit",  name: "Circuito" },
+  { id: "bubbles",  name: "Burbujas" },
+  { id: "smoke",    name: "Humo" },
+  { id: "ocean",    name: "Océano" },
+  { id: "sunset",   name: "Atardecer" },
+  { id: "neonwaves", name: "Ondas neón" },
+  { id: "floor3d",  name: "Suelo 3D" },
+  { id: "spheres",  name: "Esferas" },
+  { id: "triangles", name: "Triángulos" },
+  { id: "scales",   name: "Escamas" },
+  { id: "ledcurtain", name: "Cortina LED ♪" },
+  { id: "blinds",   name: "Persiana" },
+  { id: "diagsweep", name: "Barrido diagonal" },
+  { id: "radar",    name: "Radar" },
+  { id: "heartbeat", name: "Pulso cardíaco" },
+  { id: "crosslasers", name: "Láseres cruzados" },
+  { id: "phyllo",   name: "Espiral de puntos" },
+  { id: "interference", name: "Interferencia" },
+  { id: "conic",    name: "Arcoíris circular" },
+  { id: "argyle",   name: "Rombos" },
+  { id: "colorfog", name: "Neblina de color" },
+  { id: "fallblocks", name: "Bloques que caen" },
+  { id: "shooting", name: "Estrellas fugaces" },
+  { id: "electric", name: "Electricidad" },
+  { id: "windows",  name: "Ventanas" },
 ];
+/**
+ * Catálogo de animaciones: cada una combina una animación base con su paleta,
+ * velocidad, escala y, a veces, un efecto. Organizado por categorías para
+ * encontrarlo rápido (más de 130).
+ */
+const AL = [];
+const ani = (cat, name, gen, color, color2, speed = 1, scale = 1, fx = null) =>
+  AL.push({ id: "a" + AL.length, cat, name, gen, color, color2, speed, scale, fx });
+// Abstracto
+ani("Abstracto", "Plasma eléctrico", "plasma", "#00e5ff", "#ff00aa");
+ani("Abstracto", "Plasma fuego", "plasma", "#ffcc00", "#ff2d55", 1.3);
+ani("Abstracto", "Plasma océano", "plasma", "#00ffd0", "#002a6a", 0.7);
+ani("Abstracto", "Plasma ácido", "plasma", "#b6ff00", "#7a00ff", 1.6, 1.5);
+ani("Abstracto", "Fluido", "fluid", "#ff3cac", "#2b86c5");
+ani("Abstracto", "Fluido tropical", "fluid", "#ffcc00", "#00e5a0", 1.4);
+ani("Abstracto", "Fluido nocturno", "fluid", "#5b2cff", "#000a2a", 0.6);
+ani("Abstracto", "Lava", "lava", "#ffcc00", "#ff2d00");
+ani("Abstracto", "Lava fría", "lava", "#00e5ff", "#1a0066", 0.8);
+ani("Abstracto", "Nubes", "clouds", "#ffffff", "#0a84ff", 0.6);
+ani("Abstracto", "Nubes rosas", "clouds", "#ff9ad5", "#3a0d5c", 0.8);
+ani("Abstracto", "Degradado vivo", "gradient", "#ff2d55", "#0a84ff");
+ani("Abstracto", "Degradado suave", "gradient", "#ffd6a5", "#a0c4ff", 0.4);
+ani("Abstracto", "Neblina de color", "colorfog", "#ffffff", "#000000");
+ani("Abstracto", "Neblina lenta", "colorfog", "#ffffff", "#000000", 0.4, 1.5);
+ani("Abstracto", "Aurora boreal", "aurora", "#00ff9c", "#7a00ff");
+ani("Abstracto", "Aurora rosa", "aurora", "#ff3cac", "#00e5ff", 1.4);
+ani("Abstracto", "Celdas vivas", "cells", "#ff00aa", "#00e5ff");
+ani("Abstracto", "Vitral", "cells", "#ffcc00", "#bf5af2", 0.6, 1.8);
+ani("Abstracto", "Interferencia", "interference", "#00e5ff", "#000000");
+ani("Abstracto", "Moiré", "moire", "#ffffff", "#000000");
+ani("Abstracto", "Moiré de color", "moire", "#ff2d8a", "#00e5ff", 1.5, 0.7);
+// Geométrico
+ani("Geométrico", "Rayas", "stripes", "#ff00aa", "#220033");
+ani("Geométrico", "Rayas de caramelo", "stripes", "#ffffff", "#ff2d55", 1.5, 1.5);
+ani("Geométrico", "Damero", "checker", "#00e5ff", "#ff00aa");
+ani("Geométrico", "Damero B/N", "checker", "#ffffff", "#000000", 0.5);
+ani("Geométrico", "Hexágonos", "hexgrid", "#00e5ff", "#000a2a");
+ani("Geométrico", "Panal dorado", "hexgrid", "#ffcc00", "#2a1400", 0.7, 1.5);
+ani("Geométrico", "Triángulos", "triangles", "#ff2d8a", "#00e5ff");
+ani("Geométrico", "Triángulos pastel", "triangles", "#ffd6a5", "#a0c4ff", 0.6, 1.4);
+ani("Geométrico", "Escamas", "scales", "#00e5a0", "#0a3a5a");
+ani("Geométrico", "Escamas de sirena", "scales", "#ff7ae0", "#5b2cff", 1.4, 0.8);
+ani("Geométrico", "Rombos", "argyle", "#ff2d55", "#1a0033");
+ani("Geométrico", "Cuadrados concéntricos", "squares", "#00e5ff", "#000000");
+ani("Geométrico", "Cuadrados de fuego", "squares", "#ffcc00", "#ff2d00", 1.5);
+ani("Geométrico", "Flechas", "chevrons", "#ffcc00", "#000000");
+ani("Geométrico", "Flechas neón", "chevrons", "#00e5ff", "#ff00aa", 1.6, 0.7);
+ani("Geométrico", "Puntos", "dots", "#00e5ff", "#000000");
+ani("Geométrico", "Puntos pop", "dots", "#ff2d55", "#ffcc00", 1.3, 0.7);
+ani("Geométrico", "Laberinto", "truchet", "#00e5ff", "#000000");
+ani("Geométrico", "Laberinto dorado", "truchet", "#ffcc00", "#1a0a00", 0.7, 1.4);
+ani("Geométrico", "Op-art", "opart", "#ffffff", "#000000");
+ani("Geométrico", "Op-art de color", "opart", "#ff00aa", "#00e5ff", 1.3);
+ani("Geométrico", "Ondas", "rings", "#00e5ff", "#ff00aa");
+ani("Geométrico", "Ondas hipnóticas", "rings", "#ffffff", "#000000", 1.6, 1.5);
+ani("Geométrico", "Espiral", "spiral", "#ff00aa", "#00e5ff");
+ani("Geométrico", "Espiral hipnótica", "spiral", "#ffffff", "#000000", 1.8, 1.5);
+ani("Geométrico", "Mandala", "mandala", "#ffcc00", "#7a00ff");
+ani("Geométrico", "Mandala de hielo", "mandala", "#ffffff", "#0a84ff", 0.7);
+ani("Geométrico", "Esferas", "spheres", "#ff2d55", "#00e5ff");
+ani("Geométrico", "Perlas", "spheres", "#ffffff", "#ffd6a5", 0.6, 1.5);
+ani("Geométrico", "Espiral de puntos", "phyllo", "#ffffff", "#000000");
+ani("Geométrico", "Arcoíris circular", "conic", "#ffffff", "#000000");
+ani("Geométrico", "Suelo 3D", "floor3d", "#ff00aa", "#000000");
+ani("Geométrico", "Suelo 3D cian", "floor3d", "#00e5ff", "#0a0014", 1.6, 0.7);
+// Naturaleza
+ani("Naturaleza", "Fuego", "fire", "#ffcc00", "#ff2d55");
+ani("Naturaleza", "Fuego azul", "fire", "#66e0ff", "#1a33ff", 1.2);
+ani("Naturaleza", "Fuego verde", "fire", "#ccff66", "#00a83a", 1.2);
+ani("Naturaleza", "Agua", "water", "#bff6ff", "#0a5a8a");
+ani("Naturaleza", "Piscina", "water", "#ffffff", "#00b4d8", 0.7, 0.8);
+ani("Naturaleza", "Océano", "ocean", "#ffb347", "#004e92");
+ani("Naturaleza", "Mar nocturno", "ocean", "#c3d9ff", "#000c2a", 0.6);
+ani("Naturaleza", "Atardecer", "sunset", "#ff5e3a", "#2a0845");
+ani("Naturaleza", "Amanecer", "sunset", "#ffd166", "#5d9cec", 0.5);
+ani("Naturaleza", "Humo", "smoke", "#d0d0d0", "#000000");
+ani("Naturaleza", "Humo de colores", "smoke", "#ff3cac", "#120020", 1.3);
+ani("Naturaleza", "Nieve", "snow", "#ffffff", "#0a2a4a");
+ani("Naturaleza", "Ventisca", "snow", "#ffffff", "#334455", 2.2, 1.4);
+ani("Naturaleza", "Lluvia", "rain", "#9ad1ff", "#05101f");
+ani("Naturaleza", "Tormenta", "lightning", "#e0e8ff", "#1a1a3a");
+ani("Naturaleza", "Relámpagos violetas", "lightning", "#e2b6ff", "#14002a", 1.6);
+ani("Naturaleza", "Burbujas", "bubbles", "#bff6ff", "#002a4a");
+ani("Naturaleza", "Burbujas de jabón", "bubbles", "#ff9ad5", "#1a0033", 0.7, 0.8);
+ani("Naturaleza", "Electricidad", "electric", "#66e0ff", "#000010");
+ani("Naturaleza", "Rayo de plasma", "electric", "#ff66ff", "#0a0014", 1.5);
+// Espacio
+ani("Espacio", "Estrellas", "stars", "#ffffff", "#0a84ff");
+ani("Espacio", "Cielo dorado", "stars", "#ffd166", "#2a1a00", 0.6, 1.4);
+ani("Espacio", "Estrellas fugaces", "shooting", "#ffffff", "#020617");
+ani("Espacio", "Lluvia de meteoros", "shooting", "#ffcc66", "#0a0014", 2.2);
+ani("Espacio", "Galaxia", "galaxy", "#bfa8ff", "#00e5ff");
+ani("Espacio", "Galaxia de fuego", "galaxy", "#ffcc00", "#ff2d55", 1.3);
+ani("Espacio", "Túnel", "tunnel", "#00e5ff", "#ff00aa");
+ani("Espacio", "Túnel del tiempo", "tunnel", "#ffffff", "#5b2cff", 2, 1.4);
+ani("Espacio", "Túnel cuadrado", "boxtunnel", "#ff00aa", "#00e5ff");
+ani("Espacio", "Hiperespacio", "boxtunnel", "#ffffff", "#000000", 2.5, 1.5);
+ani("Espacio", "Vórtice", "vortex", "#00e5ff", "#000000");
+ani("Espacio", "Agujero negro", "vortex", "#ff7a00", "#000000", 1.5, 0.7);
+// Neón y retro
+ani("Neón y retro", "Neón grid", "grid", "#00e5ff", "#000000");
+ani("Neón y retro", "Grid rosa", "grid", "#ff00aa", "#0a0014", 1.4, 0.7);
+ani("Neón y retro", "Synthwave", "synthwave", "#ff00aa", "#3a0066");
+ani("Neón y retro", "Outrun", "synthwave", "#00e5ff", "#14002a", 1.6);
+ani("Neón y retro", "Líneas", "waves", "#00e5ff", "#000000");
+ani("Neón y retro", "Ondas neón", "neonwaves", "#ffffff", "#000000");
+ani("Neón y retro", "Matrix", "matrix", "#00ff66", "#000000");
+ani("Neón y retro", "Matrix azul", "matrix", "#00e5ff", "#000000", 1.4);
+ani("Neón y retro", "Circuito", "circuit", "#00e5ff", "#000000");
+ani("Neón y retro", "Circuito dorado", "circuit", "#ffcc00", "#100800", 1.5);
+ani("Neón y retro", "Estática de TV", "static", "#ffffff", "#000000");
+ani("Neón y retro", "Bloques glitch", "glitchblocks", "#ff00aa", "#00e5ff");
+ani("Neón y retro", "Bloques que caen", "fallblocks", "#00e5ff", "#ff00aa");
+ani("Neón y retro", "Ladrillos", "bricks", "#ff9500", "#1a0a00");
+ani("Neón y retro", "Ladrillos neón", "bricks", "#00e5ff", "#000a14", 1.5);
+ani("Neón y retro", "Arcoíris", "rainbow", "#ffffff", "#000000");
+ani("Neón y retro", "Arcoíris rápido", "rainbow", "#ffffff", "#000000", 3, 2);
+// Luces y show
+ani("Luces y show", "Láser", "sweep", "#00ff66", "#000000");
+ani("Luces y show", "Láser rojo", "sweep", "#ff2d55", "#000000", 1.8, 0.6);
+ani("Luces y show", "Láseres cruzados", "crosslasers", "#00ff66", "#ff00aa");
+ani("Luces y show", "Láseres azules", "crosslasers", "#00e5ff", "#0a84ff", 1.6);
+ani("Luces y show", "Rayos de luz", "rays", "#ffd166", "#000000");
+ani("Luces y show", "Rayos de colores", "rays", "#ff00aa", "#00e5ff", 1.6, 1.5);
+ani("Luces y show", "Barrido", "sweepbars", "#ffffff", "#000000");
+ani("Luces y show", "Barrido de color", "sweepbars", "#ff00aa", "#000000", 1.5);
+ani("Luces y show", "Barrido diagonal", "diagsweep", "#00e5ff", "#000000");
+ani("Luces y show", "Persiana", "blinds", "#ffffff", "#000000");
+ani("Luces y show", "Persiana de color", "blinds", "#ff2d55", "#0a84ff", 2);
+ani("Luces y show", "Cortina LED", "ledcurtain", "#00e5ff", "#ff00aa");
+ani("Luces y show", "Cortina dorada", "ledcurtain", "#ffcc00", "#ff7a00", 1.4);
+ani("Luces y show", "Radar", "radar", "#00ff66", "#001a08");
+ani("Luces y show", "Pulso cardíaco", "heartbeat", "#ff2d55", "#200006");
+ani("Luces y show", "Ventanas encendidas", "windows", "#ffd166", "#101820");
+ani("Luces y show", "Edificio de neón", "windows", "#00e5ff", "#0a0014", 2);
+ani("Luces y show", "Estroboscopio blanco", "beatflash", "#ffffff", "#ffffff", 1, 1, { strobe: 8 });
+ani("Luces y show", "Estroboscopio de color", "rainbow", "#ffffff", "#000000", 2, 1, { strobe: 6 });
+// Fiesta
+ani("Fiesta", "Confeti", "confetti", "#ffffff", "#000000");
+ani("Fiesta", "Confeti dorado", "confetti", "#ffcc00", "#100800", 1.5, 1.3, { hue: 0.1 });
+ani("Fiesta", "Fuegos artificiales", "fireworks", "#ffffff", "#000000");
+ani("Fiesta", "Fuegos rápidos", "fireworks", "#ffffff", "#0a0014", 2);
+ani("Fiesta", "Corazones", "hearts", "#ff2d55", "#200010");
+ani("Fiesta", "Corazones pastel", "hearts", "#ff9ad5", "#ffe4f1", 0.7, 0.8);
+ani("Fiesta", "Disco", "checker", "#ff00aa", "#00e5ff", 2, 1.5, { hueCycle: 2 });
+ani("Fiesta", "Bola de espejos", "dots", "#ffffff", "#0a0a0a", 2, 0.6, { hueCycle: 1, kaleido: 8 });
+// Música ♪ (reaccionan al micrófono o al tempo)
+ani("Música ♪", "Ecualizador", "eq", "#00e5ff", "#ff00aa");
+ani("Música ♪", "Ecualizador fuego", "eq", "#ffcc00", "#ff2d00");
+ani("Música ♪", "Anillos al ritmo", "audiorings", "#00e5ff", "#000000");
+ani("Música ♪", "Anillos rosas", "audiorings", "#ff00aa", "#14002a", 1.5);
+ani("Música ♪", "Destello al golpe", "beatflash", "#ffffff", "#00e5ff");
+ani("Música ♪", "Destello de colores", "beatflash", "#ff00aa", "#ffcc00");
+ani("Música ♪", "Cortina al ritmo", "ledcurtain", "#00ff66", "#00e5ff", 1.5);
+ani("Música ♪", "Cuadrados al golpe", "squares", "#ffffff", "#000000", 1.2);
+ani("Música ♪", "Corazón al ritmo", "hearts", "#ff2d55", "#000000", 1, 0.4);
+// Calibración y pruebas
+ani("Calibración", "Calibrar", "calib", "#00e5ff", "#000000");
+ani("Calibración", "Calibrar blanco", "calib", "#ffffff", "#000000");
+ani("Calibración", "Damero de ajuste", "checker", "#ffffff", "#000000", 0, 2);
+ani("Calibración", "Rejilla blanca", "grid", "#ffffff", "#000000", 0, 1.5);
+
+export const ANIM_LIBRARY = AL;
+export const ANIM_CATEGORIES = [...new Set(AL.map(x => x.cat))];
+
 export const GEN_INDEX = Object.fromEntries(GENERATORS.map((g, i) => [g.id, i]));
 
 export const BLEND_MODES = [
@@ -126,6 +316,7 @@ export const DEFAULT_SOURCE = () => ({
   mediaId: null,
   gen: "plasma", color: "#00e5ff", color2: "#ff00aa", speed: 1, scale: 1,
   text: "LUMAMAP", font: "Impact, 'Arial Black', sans-serif", textColor: "#ffffff", textBg: "#00000000",
+  textAnim: "none", textSpeed: 1, textGlow: 0, textOutline: 0, textOutlineColor: "#000000", textColor2: "#ffcc00",
   strokes: [],
 });
 

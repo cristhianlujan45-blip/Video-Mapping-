@@ -352,7 +352,229 @@ vec4 generator2(vec2 uv, vec2 p, float t){
   return vec4(mix(B, A, k)*clamp(d*3.0, 0.0, 1.0), 1.0);
 }
 
+// ---- Generadores 47..71 (tercera biblioteca) ----
+vec4 generator3(vec2 uv, vec2 p, float t){
+  float s = u_gscale;
+  vec3 A = u_c1, B = u_c2;
+  float r = length(p), a = atan(p.y, p.x);
+  if(u_gen==47){ // Circuito
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*10.0*s;
+    vec2 id = floor(q), f = fract(q);
+    float h = hash(id);
+    float line = h > 0.5 ? smoothstep(0.06, 0.0, abs(f.y - 0.5)) : smoothstep(0.06, 0.0, abs(f.x - 0.5));
+    float node = smoothstep(0.14, 0.08, length(f - 0.5)) * step(0.8, hash(id + 4.0));
+    float pulse = smoothstep(0.15, 0.0, abs(fract((h > 0.5 ? f.x : f.y) + h*3.0 - t*0.8) - 0.5) - 0.35);
+    return vec4(B*0.08 + A*(line*(0.25 + pulse) + node), 1.0);
+  }
+  if(u_gen==48){ // Burbujas
+    vec3 col = B*0.12;
+    for(int L=0;L<3;L++){
+      float fl = float(L);
+      vec2 q = vec2(uv.x*u_aspect, uv.y)*(6.0 + fl*3.0)*s;
+      q.y += t*(0.5 + fl*0.3);
+      q.x += sin(q.y*0.8 + fl)*0.2;
+      vec2 id = floor(q), f = fract(q) - 0.5;
+      float h = hash(id + fl*9.0), rad = 0.12 + 0.2*h;
+      float d = length(f);
+      float ring = smoothstep(0.03, 0.0, abs(d - rad)) + smoothstep(rad*0.5, 0.0, length(f - vec2(-rad*0.35, rad*0.35)))*0.5;
+      col += A*ring*step(0.55, h);
+    }
+    return vec4(col, 1.0);
+  }
+  if(u_gen==49){ // Humo
+    vec2 q = vec2(p.x*2.0*s, (1.0 - uv.y)*2.0*s - t*0.3);
+    float n = fbm(q + fbm(q*1.5 + t*0.1));
+    float k = smoothstep(0.35, 0.85, n) * smoothstep(0.0, 0.6, 1.0 - uv.y + 0.2);
+    return vec4(mix(B*0.05, A, k), 1.0);
+  }
+  if(u_gen==50){ // Océano
+    float y = uv.y;
+    float w = 0.0;
+    for(int i=0;i<5;i++){ float fi = float(i); w += sin(uv.x*(4.0 + fi*3.0)*s + t*(1.0 + fi*0.4) + fi)*0.02/(fi + 1.0); }
+    float sea = step(0.45 + w, y);
+    vec3 sky = mix(A*0.6, B*0.3, y*2.0);
+    vec3 water = mix(B, B*0.3, (y - 0.45)*1.8) + A*0.3*pow(0.5 + 0.5*sin(uv.x*60.0 + t*3.0 + y*40.0), 20.0);
+    return vec4(mix(sky, water, sea), 1.0);
+  }
+  if(u_gen==51){ // Atardecer
+    vec2 sp = vec2((uv.x - 0.5)*u_aspect, uv.y - 0.55 - 0.05*sin(t*0.2));
+    vec3 sky = mix(A, B, uv.y*1.2);
+    float sun = smoothstep(0.16, 0.15, length(sp)) * step(uv.y, 0.62);
+    float glow = exp(-length(sp)*4.0);
+    vec3 col = sky + vec3(1.0, 0.8, 0.4)*glow*0.6 + vec3(1.0, 0.9, 0.6)*sun;
+    if(uv.y > 0.62) col = mix(col*0.4, A*0.2, (uv.y - 0.62)*2.0) + vec3(1.0, 0.7, 0.3)*0.3*pow(0.5 + 0.5*sin(uv.y*120.0 + t*2.0 + uv.x*6.0), 6.0)*smoothstep(0.25, 0.0, abs(uv.x - 0.5));
+    return vec4(col, 1.0);
+  }
+  if(u_gen==52){ // Ondas neón
+    vec3 col = vec3(0.0);
+    for(int i=0;i<6;i++){
+      float fi = float(i);
+      float y = 0.5 + 0.3*sin(uv.x*(3.0 + fi)*s + t*(1.0 + fi*0.2) + fi*1.3)*(0.4 + 0.1*fi);
+      col += hsv2rgb(vec3(fract(fi/6.0 + t*0.05), 0.8, 1.0))*exp(-abs(uv.y - y)*80.0)*0.9;
+    }
+    return vec4(col*mix(vec3(1.0), A, 0.3) + B*0.04, 1.0);
+  }
+  if(u_gen==53){ // Suelo 3D
+    float hz = 0.4;
+    if(uv.y < hz) return vec4(B*0.1*(uv.y/hz), 1.0);
+    float z = 1.0/(uv.y - hz + 0.01);
+    vec2 g = vec2((uv.x - 0.5)*z*1.5*s, z*0.5*s + t*2.0);
+    float ck = mod(floor(g.x) + floor(g.y), 2.0);
+    return vec4(mix(B, A, ck)*clamp((uv.y - hz)*3.0, 0.0, 1.0), 1.0);
+  }
+  if(u_gen==54){ // Esferas
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*6.0*s;
+    vec2 id = floor(q), f = fract(q) - 0.5;
+    float rad = 0.32 + 0.1*sin(t*2.0 + hash(id)*TAU);
+    float d = length(f);
+    float z = sqrt(max(0.0, rad*rad - d*d))/rad;
+    float shade = clamp(dot(normalize(vec3(f, z*rad)), normalize(vec3(-0.5, -0.6, 0.6))), 0.0, 1.0);
+    vec3 col = mix(A, B, hash(id))*shade + vec3(pow(shade, 20.0));
+    return vec4(mix(B*0.05, col, step(d, rad)), 1.0);
+  }
+  if(u_gen==55){ // Triángulos
+    vec2 q = vec2(uv.x*u_aspect*1.1547, uv.y)*8.0*s;
+    q.x += q.y*0.5;
+    vec2 id = floor(q), f = fract(q);
+    float up = step(f.x, f.y);
+    float h = hash(id*2.0 + up);
+    float on = step(0.5, sin(t*2.0 + h*TAU));
+    return vec4(mix(B*0.2, mix(A, B, h), on)*(0.8 + 0.2*up), 1.0);
+  }
+  if(u_gen==56){ // Escamas
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*10.0*s;
+    q.x += 0.5*mod(floor(q.y), 2.0);
+    vec2 f = fract(q) - vec2(0.5, 0.0);
+    float d = length(f);
+    float k = smoothstep(0.55, 0.45, d) - smoothstep(0.48, 0.42, d)*0.6;
+    float sh = 0.5 + 0.5*sin(floor(q.y)*0.6 - t*2.0);
+    return vec4(mix(B, A, sh)*(0.4 + 0.6*k), 1.0);
+  }
+  if(u_gen==57){ // Cortina LED
+    float n = 32.0*s;
+    float col = floor(uv.x*n);
+    float f = fract(uv.x*n);
+    float v = 0.5 + 0.5*sin(t*3.0 + col*0.7 + u_lev.x*4.0);
+    float drop = fract(uv.y - t*(0.5 + hash1(col)) - hash1(col + 2.0));
+    float k = smoothstep(0.2, 0.5, f)*smoothstep(0.8, 0.5, f)*(v*0.5 + pow(1.0 - drop, 3.0));
+    return vec4(mix(B*0.05, mix(A, B, hash1(col)), k), 1.0);
+  }
+  if(u_gen==58){ // Persiana
+    float open = 0.5 + 0.5*sin(t*1.2);
+    float k = step(fract(uv.y*10.0*s), open);
+    return vec4(mix(B*0.05, A, k), 1.0);
+  }
+  if(u_gen==59){ // Barrido diagonal
+    float d = fract((uv.x*u_aspect + uv.y)*0.5*s - t*0.4);
+    float k = smoothstep(0.0, 0.05, d)*smoothstep(0.5, 0.45, d);
+    float trail = exp(-d*6.0)*0.3;
+    return vec4(B*0.05 + A*(k + trail), 1.0);
+  }
+  if(u_gen==60){ // Radar
+    float sweep = fract(a/TAU - t*0.3);
+    float beam = pow(1.0 - sweep, 6.0)*step(r, 0.5);
+    float rings = smoothstep(0.01, 0.0, abs(fract(r*8.0) - 0.5) - 0.48)*step(r, 0.5);
+    vec2 bl = p*8.0; vec2 id = floor(bl);
+    float blip = step(0.93, hash(id))*smoothstep(0.2, 0.0, length(fract(bl) - 0.5))*pow(1.0 - fract(atan(id.y + 0.5, id.x + 0.5)/TAU - t*0.3), 3.0);
+    return vec4(B*0.06 + A*(beam*0.8 + rings*0.4 + blip*2.0)*step(r, 0.5), 1.0);
+  }
+  if(u_gen==61){ // Pulso cardíaco
+    float x = fract(uv.x - t*0.35);
+    float ph = fract(x*2.0*s);
+    float ecg = 0.5 - (ph > 0.4 && ph < 0.45 ? (ph - 0.4)*8.0 : ph > 0.45 && ph < 0.5 ? (0.5 - ph)*16.0 - 0.4 : ph > 0.5 && ph < 0.55 ? (ph - 0.55)*4.0 : 0.0);
+    float k = exp(-abs(uv.y - ecg)*120.0);
+    float grid = max(gridLine(uv.x, 20.0), gridLine(uv.y, 12.0))*0.15;
+    return vec4(B*0.05 + B*grid + A*k*1.5*(0.3 + 0.7*smoothstep(0.0, 0.3, 1.0 - x)), 1.0);
+  }
+  if(u_gen==62){ // Láseres cruzados
+    vec3 col = B*0.04;
+    vec2 base = vec2(0.0, 0.55);
+    for(int i=0;i<6;i++){
+      float fi = float(i);
+      float ang = -1.5708 + sin(t*(0.7 + fi*0.13) + fi*1.7)*0.9;
+      vec2 o = vec2((fi/5.0 - 0.5)*u_aspect*0.9, 0.5);
+      vec2 d = p - o;
+      vec2 dir = vec2(cos(ang), sin(ang));
+      float dist = abs(d.x*dir.y - d.y*dir.x);
+      col += mix(A, B, fi/5.0)*exp(-dist*160.0)*step(0.0, dot(d, dir));
+    }
+    return vec4(col + vec3(0.02)*fbm(p*3.0 + t*0.2), 1.0);
+  }
+  if(u_gen==63){ // Espiral de puntos
+    vec3 col = B*0.05;
+    for(int i=0;i<96;i++){
+      float fi = float(i);
+      float rr = sqrt(fi/96.0)*0.48;
+      float aa = fi*2.39996 + t*0.4;
+      vec2 c = rr*vec2(cos(aa), sin(aa));
+      col += hsv2rgb(vec3(fract(fi/96.0 + t*0.1), 0.7, 1.0))*smoothstep(0.016*s + 0.004, 0.0, length(p - c));
+    }
+    return vec4(mix(col, col*A*2.0, 0.3), 1.0);
+  }
+  if(u_gen==64){ // Interferencia
+    vec2 c1 = vec2(-0.25 + 0.1*sin(t*0.5), 0.0), c2 = vec2(0.25, 0.1*cos(t*0.4));
+    float v = sin(length(p - c1)*60.0*s - t*4.0) + sin(length(p - c2)*60.0*s - t*4.0);
+    return vec4(mix(B, A, smoothstep(-0.5, 1.5, v)), 1.0);
+  }
+  if(u_gen==65) return vec4(hsv2rgb(vec3(fract(a/TAU + t*0.1), 0.85, 1.0))*smoothstep(0.0, 0.1, r), 1.0); // Arcoíris circular
+  if(u_gen==66){ // Rombos (argyle)
+    vec2 q = vec2(uv.x*u_aspect, uv.y)*5.0*s;
+    vec2 g = abs(fract(q) - 0.5);
+    float dia = step(g.x + g.y, 0.5);
+    float lines = smoothstep(0.03, 0.0, abs(fract(q.x + q.y) - 0.5) - 0.47) + smoothstep(0.03, 0.0, abs(fract(q.x - q.y + t*0.2) - 0.5) - 0.47);
+    return vec4(mix(B, A, dia) + vec3(lines*0.5), 1.0);
+  }
+  if(u_gen==67){ // Neblina de color
+    vec3 col = vec3(0.0);
+    for(int i=0;i<5;i++){
+      float fi = float(i);
+      vec2 c = vec2(sin(t*0.3 + fi*2.1)*0.6*u_aspect*0.5, cos(t*0.25 + fi*1.3)*0.35);
+      col += hsv2rgb(vec3(fract(fi*0.2 + t*0.03), 0.8, 1.0))*exp(-length(p - c)*3.0/s);
+    }
+    return vec4(mix(col, col*mix(A, B, uv.y), 0.4)*0.8, 1.0);
+  }
+  if(u_gen==68){ // Bloques que caen
+    vec2 q = vec2(uv.x*12.0*s*u_aspect, uv.y*20.0*s);
+    float col = floor(q.x);
+    float fall = fract(t*0.15*(0.5 + hash1(col)) + hash1(col + 3.0));
+    float stack = 0.2 + 0.6*hash1(col + floor(t*0.15));
+    vec2 f = fract(q);
+    float cell = step(0.06, f.x)*step(f.x, 0.94)*step(0.06, f.y)*step(f.y, 0.94);
+    float isStack = step(1.0 - stack, uv.y);
+    float isDrop = step(abs(uv.y - fall*(1.0 - stack)), 0.05);
+    return vec4(mix(B*0.05, mix(A, B, hash1(col)), max(isStack, isDrop)*cell), 1.0);
+  }
+  if(u_gen==69){ // Estrellas fugaces
+    vec3 col = B*0.08 + vec3(step(0.996, hash(floor(uv*vec2(400.0, 250.0)))))*0.8;
+    for(int i=0;i<3;i++){
+      float fi = float(i);
+      float cyc = t*0.3 + fi*0.37, seed = floor(cyc) + fi*5.0, ph = fract(cyc);
+      vec2 st = vec2(hash1(seed)*1.2 - 0.1, hash1(seed + 1.0)*0.4);
+      vec2 head = st + vec2(0.6, 0.35)*ph;
+      vec2 d = uv - head;
+      vec2 dir = normalize(vec2(0.6, 0.35));
+      float along = -dot(d, dir), across = abs(d.x*dir.y - d.y*dir.x);
+      col += A*exp(-across*400.0)*smoothstep(0.25, 0.0, along)*step(0.0, along)*(1.0 - ph);
+    }
+    return vec4(col, 1.0);
+  }
+  if(u_gen==70){ // Electricidad
+    float n = fbm(p*4.0*s + vec2(t*2.0, 0.0));
+    float arc = exp(-abs(p.y - (n - 0.5)*0.6)*40.0) + exp(-abs(p.y - (fbm(p*5.0 + 9.0 - t*2.5) - 0.5)*0.6)*50.0)*0.7;
+    float flick = 0.7 + 0.3*hash1(floor(t*20.0));
+    return vec4(B*0.05 + (A + vec3(0.5))*arc*flick, 1.0);
+  }
+  // 71: Ventanas (fachada que se enciende)
+  vec2 q = vec2(uv.x*u_aspect*4.0*s, uv.y*6.0*s);
+  vec2 id = floor(q), f = fract(q);
+  float win = step(0.15, f.x)*step(f.x, 0.85)*step(0.2, f.y)*step(f.y, 0.85);
+  float on = step(0.45, hash(id + floor(t*0.5 + hash(id)*3.0)));
+  float flick = 0.85 + 0.15*sin(t*7.0 + hash(id)*30.0);
+  return vec4(mix(B*0.15, mix(A, vec3(1.0, 0.85, 0.5), 0.3)*flick, win*on) + B*0.05*(1.0 - win), 1.0);
+}
+
 vec4 generator(vec2 uv, vec2 p, float t){
+  if(u_gen >= 47) return generator3(uv, p, t);
   if(u_gen >= 16) return generator2(uv, p, t);
   float s = u_gscale;
   vec3 A = u_c1, B = u_c2;

@@ -2,13 +2,16 @@
 // Contenido de los paneles del editor. Cada panel recibe la API `app`
 // (estado + acciones de editor.js) y devuelve un nodo DOM.
 import {
-  GENERATORS, FX_LIBRARY, FX_CATEGORIES, COLORMAPS, RECORD_QUALITIES, BLEND_MODES, BORDER_ANIMS, AUDIO_TARGETS, AUDIO_BANDS,
+  GENERATORS, ANIM_LIBRARY, ANIM_CATEGORIES, FX_LIBRARY, FX_CATEGORIES, COLORMAPS, RECORD_QUALITIES, BLEND_MODES, BORDER_ANIMS, AUDIO_TARGETS, AUDIO_BANDS,
   DRAW_TOOLS, DRAW_ANIMS, SHAPES, DEFAULT_FX, lookOf,
 } from "./model.js";
 import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog } from "./ui.js";
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
-import { genThumbs } from "./thumbs.js";
+import { genThumbs, animThumb } from "./thumbs.js";
+import { TEXT_ANIMS } from "./sources.js";
+
+const animUI = { cat: "Todas", q: "" };
 
 export const TABS = [
   { id: "add", label: "Añadir", ic: "plus" },
@@ -48,7 +51,7 @@ const add = {
     return h("div", {},
       section("Contenido rápido",
         tiles([
-          { id: "media", label: "Video / imagen", ic: "upload" },
+          { id: "media", label: "Video, foto o GIF", ic: "upload" },
           { id: "draw", label: "Dibujar", ic: "pen" },
           { id: "text", label: "Texto", ic: "text" },
           { id: "camera", label: "Cámara", ic: "camera" },
@@ -105,7 +108,7 @@ const draw = {
 
 /* ---------------------------------------------------------------- Contenido */
 const SOURCE_TYPES = [
-  { id: "media", label: "Video / imagen", ic: "photo" },
+  { id: "media", label: "Video, foto o GIF", ic: "photo" },
   { id: "gen", label: "Animación", ic: "wand" },
   { id: "color", label: "Color", ic: "sun" },
   { id: "text", label: "Texto", ic: "text" },
@@ -143,7 +146,7 @@ const content = {
         grid.append(cell);
       }
       wrap.append(section("Biblioteca", grid,
-        btn({ label: "Importar video o imagen", ic: "upload", kind: "block primary", onClick: () => A.importMedia("selected") }),
+        btn({ label: "Importar video, imagen o GIF", ic: "upload", kind: "block primary", onClick: () => A.importMedia("selected") }),
         hint("Mantén pulsado un archivo para quitarlo. Formatos: MP4, WebM, MOV, JPG, PNG, WebP, GIF animado.")));
       wrap.append(section("Encaje",
         segmented({ options: [["stretch", "Estirar"], ["cover", "Recortar"], ["contain", "Ajustar"]], value: look.fit, onChange: (v) => app.edit(() => { look.fit = v; }) }),
@@ -154,8 +157,36 @@ const content = {
     }
 
     if (src.type === "gen") {
-      const items = GENERATORS.map(g => ({ id: g.id, label: g.name, img: genThumbs()[g.id] }));
-      wrap.append(section("Animación", tiles(items, { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) })));
+      // Catálogo: buscador + categorías + miniaturas reales.
+      const search = h("input", { type: "search", class: "text-in", placeholder: `Buscar entre ${ANIM_LIBRARY.length} animaciones…`, value: animUI.q });
+      const cats = h("div", { class: "chips" });
+      const grid = h("div", {});
+      const norm = (t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const renderGrid = () => {
+        const q = norm(animUI.q.trim());
+        const list = ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || a.cat === animUI.cat) && (!q || norm(a.name + " " + a.cat).includes(q)));
+        grid.innerHTML = "";
+        grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: animThumb(a) })), { cols: 4, onPick: (id) => {
+          const a = ANIM_LIBRARY.find(x => x.id === id);
+          app.edit(() => {
+            Object.assign(src, { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale });
+            if (a.fx) look.fx = { ...DEFAULT_FX(), ...a.fx };
+          });
+          app.renderPanel();
+          toast(a.name);
+        } }) : hint("Ninguna animación con ese nombre."));
+      };
+      for (const c of ["Todas", ...ANIM_CATEGORIES]) {
+        const b = h("button", { class: `chip ${animUI.cat === c ? "on" : ""}`, onclick: () => {
+          animUI.cat = c; cats.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); renderGrid();
+        } }, c);
+        cats.append(b);
+      }
+      search.addEventListener("input", () => { animUI.q = search.value; renderGrid(); });
+      renderGrid();
+      wrap.append(section(`Biblioteca de animaciones (${ANIM_LIBRARY.length})`, search, cats, grid));
+      wrap.append(fold(`Animaciones base (${GENERATORS.length})`, false,
+        tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: genThumbs()[g.id] })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) })));
       wrap.append(section("Colores",
         swatches({ label: "Color principal", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
         swatches({ label: "Color secundario", value: src.color2, onChange: (c) => app.edit(() => { src.color2 = c; }) }),
@@ -176,8 +207,22 @@ const content = {
       wrap.append(section("Texto", ta, sel,
         swatches({ label: "Color del texto", value: src.textColor, onChange: (c) => app.edit(() => { src.textColor = c; }) }),
         swatches({ label: "Fondo", value: src.textBg?.slice(0, 7) || "#000000", palette: ["#000000", "#ffffff", "#ff2d55", "#0a84ff", "#34c759", "#bf5af2"], onChange: (c) => app.edit(() => { src.textBg = c; }) }),
-        row(btn({ label: "Sin fondo", kind: "wide", onClick: () => app.edit(() => { src.textBg = "#00000000"; }) }),
-          btn({ label: look.fx.scrollX ? "Detener marquesina" : "Marquesina", ic: "right", kind: "wide", onClick: () => { app.edit(() => { look.fx.scrollX = look.fx.scrollX ? 0 : -0.15; }); app.renderPanel(); } }))));
+        btn({ label: "Sin fondo", kind: "block", onClick: () => app.edit(() => { src.textBg = "#00000000"; }) })));
+      const anims = h("div", { class: "chips" });
+      for (const [id, label] of TEXT_ANIMS) {
+        const b = h("button", { class: `chip ${(src.textAnim || "none") === id ? "on" : ""}`, onclick: () => {
+          app.edit(() => { src.textAnim = id; if (id !== "none" && look.fx.scrollX) look.fx.scrollX = 0; });
+          anims.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b));
+        } }, label);
+        anims.append(b);
+      }
+      wrap.append(section("Animar texto", anims,
+        slider({ label: "Velocidad", min: 0.1, max: 4, step: 0.05, value: src.textSpeed ?? 1, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { src.textSpeed = v; }) }),
+        swatches({ label: "Segundo color (karaoke, arcoíris)", value: src.textColor2 || "#ffcc00", onChange: (c) => app.edit(() => { src.textColor2 = c; }) }),
+        slider({ label: "Brillo neón", min: 0, max: 1, value: src.textGlow ?? 0, def: 0, fmt: pct, onInput: (v) => app.edit(() => { src.textGlow = v; }) }),
+        slider({ label: "Contorno", min: 0, max: 1, value: src.textOutline ?? 0, def: 0, fmt: pct, onInput: (v) => app.edit(() => { src.textOutline = v; }) }),
+        swatches({ label: "Color del contorno", value: src.textOutlineColor || "#000000", palette: ["#000000", "#ffffff", "#ff2d55", "#0a84ff", "#34c759", "#ffcc00"], onChange: (c) => app.edit(() => { src.textOutlineColor = c; }) }),
+        hint("«Pulso ♪» late con la música cuando el micrófono está activo.")));
     }
 
     if (src.type === "drawing") {

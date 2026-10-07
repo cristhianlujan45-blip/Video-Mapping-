@@ -34,7 +34,7 @@ export class Compositor {
       }
       case "text": {
         const { aspect } = surfaceAspect(s);
-        const e = this.texts.get(scene.id + ":" + s.id, src, aspect);
+        const e = this.texts.get(scene.id + ":" + s.id, src, aspect, o.time, o.levels?.beat || 0);
         return this.r.texture("t:" + scene.id + ":" + s.id, e.canvas, e.version);
       }
       case "drawing": {

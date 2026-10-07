@@ -123,7 +123,17 @@ await test("biblioteca de efectos: aplicar «Contorno neón» y combinar «Espej
   const fx = await page.evaluate(() => window.__lumamap.lookSel().fx);
   assert.equal(fx.edges, 1); assert.equal(fx.flipX, true);
 });
-await test("las 47 animaciones y los efectos compilan y dibujan sin errores de GPU", async () => {
+await test("catálogo de animaciones y texto animado desde el panel", async () => {
+  await page.evaluate(() => { window.__lumamap.actions.setSource({ type: "gen" }); window.__lumamap.openTab("content"); });
+  await page.locator("input[type=search]").first().fill("aurora");
+  await page.locator(".tile", { hasText: "Aurora boreal" }).first().click();
+  const gen = await page.evaluate(() => window.__lumamap.lookSel().source.gen);
+  assert.equal(gen, "aurora");
+  await page.evaluate(() => { window.__lumamap.actions.setSource({ type: "text", text: "Hola" }); });
+  await page.locator(".chip", { hasText: "Ola" }).first().click();
+  assert.equal(await page.evaluate(() => window.__lumamap.lookSel().source.textAnim), "wave");
+});
+await test("las 72 animaciones base, el catálogo y los efectos compilan y dibujan sin errores de GPU", async () => {
   const errs = await page.evaluate(async () => {
     const { Renderer } = await import("./js/renderer.js");
     const M = await import("./js/model.js");
