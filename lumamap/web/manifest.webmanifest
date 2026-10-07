@@ -1,9 +1,12 @@
 {
-  "name": "LumaMap — Video Mapping",
+  "name": "LumaMap · Video Mapping",
   "short_name": "LumaMap",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#14171c",
-  "theme_color": "#14171c",
-  "description": "Editor y media server de projection mapping"
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "description": "Video mapping táctil: superficies, dibujo sobre la pared, efectos, audio reactivo y salida a proyector.",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
 }

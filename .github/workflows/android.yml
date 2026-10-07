@@ -17,17 +17,32 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: LumaMap tests (motor, modelo, servidor)
+        working-directory: lumamap
+        run: npm test
 
       - name: Unit tests (core + app)
         run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
 
-      - name: Build debug APK
-        run: ./gradlew --no-daemon :app:assembleDebug
+      - name: Build debug APKs
+        run: ./gradlew --no-daemon :app:assembleDebug :lumamap:assembleDebug
 
-      - name: Upload debug APK
+      - name: Upload LUJAN MAPPING debug APK
         uses: actions/upload-artifact@v4
         with:
           name: lujan-mapping-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload LumaMap debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumamap-debug-apk
+          path: lumamap/android/build/outputs/apk/debug/*.apk
           if-no-files-found: error

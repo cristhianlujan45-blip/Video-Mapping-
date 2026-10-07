@@ -1,0 +1,200 @@
+// tests/core.test.js — núcleo sin navegador: geometría, modelo, historial y dibujo.
+import assert from "node:assert/strict";
+import {
+  homography, applyH, tryHomography, UNIT_SQUARE, evalMesh, gridFromCorners, resampleGrid, gridCornerIdx,
+  screenToUV, uvToScreen, triangulatePolygon, simplify, pointInPolygon, surfaceOutline, surfaceAspect, transformPoints,
+} from "../web/js/math.js";
+import * as M from "../web/js/model.js";
+import { History } from "../web/js/history.js";
+import { hitStroke, isAnimated, strokesSignature } from "../web/js/drawing.js";
+import { detectQuads } from "../web/js/automap.js";
+import { test, report } from "./harness.js";
+
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+console.log("== Geometría ==");
+await test("homografía lleva el cuadrado unidad a las 4 esquinas", () => {
+  const dst = [[100, 50], [500, 80], [480, 400], [120, 380]];
+  const H = homography(UNIT_SQUARE, dst);
+  UNIT_SQUARE.forEach(([u, v], i) => { const [x, y] = applyH(H, u, v); assert.ok(near(x, dst[i][0]) && near(y, dst[i][1])); });
+});
+await test("homografía degenerada no lanza (tryHomography = null)", () => {
+  assert.equal(tryHomography(UNIT_SQUARE, [[0, 0], [0, 0], [0, 0], [0, 0]]), null);
+});
+await test("pantalla → UV → pantalla es la identidad en un quad deformado", () => {
+  const s = M.createQuad({ corners: [[100, 50], [500, 80], [480, 400], [120, 380]] });
+  for (const [u, v] of [[0.2, 0.3], [0.5, 0.5], [0.9, 0.1]]) {
+    const p = uvToScreen(s, u, v), uv = screenToUV(s, p.x, p.y);
+    assert.ok(near(uv.u, u, 1e-6) && near(uv.v, v, 1e-6));
+  }
+});
+await test("la interpolación (u/w, v/w, 1/w) del shader reproduce la perspectiva exacta", () => {
+  // Simula el rasterizador: interpolación lineal en pantalla entre dos vértices.
+  const corners = [[0, 0], [400, 60], [400, 240], [0, 300]];
+  const H = homography(UNIT_SQUARE, corners);
+  const attr = ([u, v]) => { const q = 1 / (H[6] * u + H[7] * v + H[8]); return [u * q, v * q, q]; };
+  const a = attr([0, 0]), b = attr([1, 1]);
+  const pa = applyH(H, 0, 0), pb = applyH(H, 1, 1);
+  const t = 0.37, m = a.map((x, i) => x + (b[i] - x) * t);
+  const uv = [m[0] / m[2], m[1] / m[2]];
+  const screen = [pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t];
+  const back = applyH(H, uv[0], uv[1]);
+  assert.ok(near(back[0], screen[0], 1e-6) && near(back[1], screen[1], 1e-6));
+});
+await test("malla Catmull-Rom pasa exactamente por sus puntos de control", () => {
+  const pts = gridFromCorners([[0, 0], [300, 0], [300, 200], [0, 200]], 4, 3);
+  pts[5].x += 25; pts[5].y -= 10; // deforma un punto interior
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
+    const p = evalMesh(pts, 4, 3, c / 3, r / 2), q = pts[r * 4 + c];
+    assert.ok(near(p.x, q.x, 1e-6) && near(p.y, q.y, 1e-6), `punto ${c},${r}`);
+  }
+});
+await test("cambiar la resolución de la malla conserva la forma", () => {
+  const corners = [[10, 20], [410, 0], [400, 300], [30, 280]];
+  const g2 = gridFromCorners(corners, 2, 2);
+  const g5 = resampleGrid(g2, 2, 2, 5, 4);
+  const idx = gridCornerIdx(5, 4);
+  idx.forEach((i, k) => assert.ok(near(g5[i].x, corners[k][0], 1e-6) && near(g5[i].y, corners[k][1], 1e-6)));
+  const back = resampleGrid(g5, 5, 4, 2, 2);
+  gridCornerIdx(2, 2).forEach((i, k) => assert.ok(near(back[i].x, corners[k][0], 1e-4)));
+});
+await test("triangulación de polígono cóncavo (estrella) cubre n-2 triángulos", () => {
+  const star = M.SHAPES.star.make(0, 0, 100).points;
+  const tris = triangulatePolygon(star);
+  assert.equal(tris.length, (star.length - 2) * 3);
+});
+await test("simplificación conserva extremos y reduce puntos", () => {
+  const pts = []; for (let i = 0; i <= 100; i++) pts.push({ x: i, y: Math.abs(50 - i) < 1 ? 30 : 0 });
+  const s = simplify(pts, 1);
+  assert.ok(s.length < 10 && s[0].x === 0 && s.at(-1).x === 100);
+});
+await test("contorno y contacto de un quad", () => {
+  const s = M.createQuad({ corners: M.rectCorners(0, 0, 100, 50) });
+  const o = surfaceOutline(s);
+  assert.equal(o.length, 4);
+  assert.ok(pointInPolygon({ x: 50, y: 25 }, o) && !pointInPolygon({ x: 150, y: 25 }, o));
+  assert.ok(near(surfaceAspect(s).aspect, 2));
+});
+await test("escala y rotación alrededor del centro", () => {
+  const p = transformPoints([{ x: 10, y: 0 }], { x: 0, y: 0 }, 2, Math.PI / 2)[0];
+  assert.ok(near(p.x, 0, 1e-9) && near(p.y, 20, 1e-9));
+});
+
+console.log("== Modelo de proyecto ==");
+await test("todas las plantillas se construyen y validan", () => {
+  for (const [k, t] of Object.entries(M.TEMPLATES)) {
+    const p = M.normalizeProject(JSON.parse(JSON.stringify(t.build())));
+    for (const s of p.surfaces) assert.ok(p.scenes[0].looks[s.id], `${k}: look para ${s.name}`);
+  }
+});
+await test("cubo 3D: las caras comparten esquinas exactas (para moverlas juntas)", () => {
+  const p = M.TEMPLATES.cube.build();
+  const all = p.surfaces.flatMap(s => s.points.map(q => `${q.x},${q.y}`));
+  const shared = all.filter((k, i) => all.indexOf(k) !== i);
+  assert.ok(shared.length >= 4, "esquinas compartidas: " + shared.length);
+});
+await test("addSurface crea contenido en todas las escenas; removeSurface lo limpia", () => {
+  const p = M.createProject();
+  M.duplicateScene(p, p.sceneId);
+  const s = M.addSurface(p, M.createQuad({ corners: M.rectCorners(0, 0, 10, 10) }), { type: "color", color: "#ff0000" });
+  assert.ok(p.scenes.every(sc => sc.looks[s.id]?.source.color === "#ff0000"));
+  p.scenes[0].looks[s.id].source.color = "#00ff00";
+  assert.equal(p.scenes[1].looks[s.id].source.color, "#ff0000", "los looks no comparten referencia");
+  M.removeSurface(p, s.id);
+  assert.ok(p.scenes.every(sc => !sc.looks[s.id]) && !p.surfaces.length);
+});
+await test("duplicar superficie copia geometría desplazada y sus looks", () => {
+  const p = M.TEMPLATES.screen.build();
+  const c = M.duplicateSurface(p, p.surfaces[0].id, 40);
+  assert.equal(p.surfaces.length, 2);
+  assert.equal(c.points[0].x, p.surfaces[0].points[0].x + 40);
+  assert.ok(p.scenes[0].looks[c.id]);
+});
+await test("medios usados se detectan en cualquier escena", () => {
+  const p = M.TEMPLATES.screen.build();
+  const sc2 = M.duplicateScene(p, p.sceneId);
+  sc2.looks[p.surfaces[0].id].source = { ...M.DEFAULT_SOURCE(), type: "media", mediaId: "med_1" };
+  assert.deepEqual([...M.usedMediaIds(p)], ["med_1"]);
+});
+await test("migra proyectos de LumaMap v1", () => {
+  const v1 = {
+    version: 1, name: "Viejo", width: 1280, height: 720, currentSceneId: "sc1",
+    surfaces: [
+      { id: "a", name: "Quad", type: "quad", points: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 80 }, { x: 0, y: 80 }], mediaId: "m1", opacity: 0.5, blend: "add", fx: { saturation: 0 } },
+      { id: "b", name: "Poly", type: "poly", points: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 25, y: 40 }] },
+    ],
+    scenes: [{ id: "sc1", name: "Uno", layers: [{ id: "l1", surfaceId: "a" }, { id: "l2", surfaceId: "b" }] }],
+    media: [{ id: "m1", name: "v.mp4", kind: "video", dataUrl: "data:video/mp4;base64,AAAA" }],
+  };
+  const p = M.normalizeProject(v1);
+  assert.equal(p.version, 2);
+  const q = p.surfaces.find(s => s.id === "a");
+  assert.equal(q.type, "quad"); assert.deepEqual([q.points[2].x, q.points[2].y, q.points[3].x], [0, 80, 100], "orden de rejilla TL,TR,BL,BR");
+  const look = p.scenes[0].looks.a;
+  assert.equal(look.source.mediaId, "m1"); assert.equal(look.opacity, 0.5); assert.equal(look.blend, "add"); assert.equal(look.fx.saturation, 0);
+  assert.equal(p.media[0].dataUrl.slice(0, 10), "data:video");
+});
+await test("rechaza archivos que no son proyectos", () => {
+  assert.throws(() => M.normalizeProject(null));
+  assert.throws(() => M.normalizeProject({ version: 99 }));
+});
+await test("efectos rápidos parten de valores limpios", () => {
+  const l = M.createLook();
+  l.fx.brightness = 1.7;
+  M.applyFxPreset(l, "Caleidoscopio");
+  assert.equal(l.fx.kaleido, 6); assert.equal(l.fx.brightness, 1);
+});
+
+console.log("== Historial ==");
+await test("deshacer / rehacer por instantáneas", () => {
+  const h = new History();
+  const p = { a: 1 };
+  h.reset(p);
+  p.a = 2; h.commit(p);
+  p.a = 3; h.commit(p);
+  assert.equal(h.commit(p), false, "sin cambios no crea paso");
+  assert.equal(h.undo().a, 2);
+  assert.equal(h.undo().a, 1);
+  assert.equal(h.undo(), null);
+  assert.equal(h.redo().a, 2);
+  assert.ok(h.canRedo);
+});
+
+console.log("== Dibujo ==");
+await test("borrador encuentra el trazo bajo el dedo", () => {
+  const strokes = [
+    { id: "1", tool: "pen", width: 0.01, pts: [[0.1, 0.1], [0.4, 0.1]] },
+    { id: "2", tool: "rect", width: 0.01, pts: [[0.5, 0.5], [0.8, 0.8]] },
+    { id: "3", tool: "ellipse", width: 0.01, fill: true, pts: [[0.1, 0.5], [0.3, 0.9]] },
+  ];
+  assert.equal(hitStroke(strokes, 0.25, 0.105, 0.02), 0);
+  assert.equal(hitStroke(strokes, 0.8, 0.65, 0.02), 1);
+  assert.equal(hitStroke(strokes, 0.2, 0.7, 0.02), 2, "elipse rellena: cualquier punto interior");
+  assert.equal(hitStroke(strokes, 0.95, 0.05, 0.02), -1);
+});
+await test("firma de trazos detecta cambios y animaciones", () => {
+  const a = [{ id: "x", pts: [[0, 0]] }];
+  assert.notEqual(strokesSignature(a), strokesSignature([...a, { id: "y", pts: [] }]));
+  assert.equal(isAnimated(a), false);
+  assert.equal(isAnimated([{ id: "z", anim: "pulse", pts: [] }]), true);
+});
+
+console.log("== Detección de superficies en foto (experimental) ==");
+function synthImage(w, h, draw) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) data[i * 4 + 3] = 255;
+  draw((x, y, v) => { const i = (y * w + x) * 4; data[i] = data[i + 1] = data[i + 2] = v; });
+  return { width: w, height: h, data };
+}
+await test("detecta un rectángulo blanco sobre negro", () => {
+  const img = synthImage(80, 60, (px) => { for (let y = 15; y < 40; y++) for (let x = 20; x < 50; x++) px(x, y, 255); });
+  const quads = detectQuads(img);
+  assert.ok(quads.length >= 1);
+  const xs = quads[0].points.map(p => p.x), ys = quads[0].points.map(p => p.y);
+  assert.ok(Math.min(...xs) >= 17 && Math.max(...xs) <= 53 && Math.min(...ys) >= 12 && Math.max(...ys) <= 43);
+});
+await test("imagen vacía: no inventa superficies", () => {
+  assert.equal(detectQuads(synthImage(60, 40, () => {})).length, 0);
+});
+
+report();

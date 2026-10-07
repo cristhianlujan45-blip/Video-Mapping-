@@ -1,98 +1,107 @@
-// web/js/output.js — Ventana OUTPUT: solo la composición final, nunca la UI del editor.
-import { Renderer } from "/web/js/renderer.js";
-import * as P from "/web/js/project.js";
+// web/js/output.js
+// Ventana / pantalla de salida: solo la composición final, sin interfaz.
+// Recibe el proyecto y el estado del editor por el Link y carga los medios
+// desde IndexedDB. En Android se muestra en el proyector vía Presentation.
+import { Renderer, webgl2Supported } from "./renderer.js";
+import { Compositor, sceneLayers } from "./compose.js";
+import { MediaPool } from "./sources.js";
+import { Link } from "./link.js";
+import { drawPattern, drawGuides } from "./overlay.js";
+import { normalizeProject, usedMediaIds } from "./model.js";
 
 const glCanvas = document.getElementById("out");
-const patCanvas = document.getElementById("pat");
-const patCtx = patCanvas.getContext("2d");
+const ov = document.getElementById("ov");
+const octx = ov.getContext("2d");
 const hud = document.getElementById("hud");
 
-let renderer = null, project = null, media = new Map();
-let current = { currentSceneId: null, playing: false, masterBrightness: 1, pattern: null };
+let project = null;
+let st = { playing: true, master: 1, blackout: false, pattern: null, guides: false, sel: null, point: -1, levels: null, muted: true };
+let timeOffset = 0;      // tiempo del editor - tiempo local (s)
+let frozenTime = 0;      // tiempo del editor cuando está en pausa
+let tr = null;           // transición {fromId, start, dur}
 
-function dataUrlToBlob(du) {
-  const [head, b64] = du.split(",");
-  const mime = (head.match(/data:(.*?);/) || [])[1] || "application/octet-stream";
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
+if (!webgl2Supported()) {
+  hud.innerHTML = "WebGL2 no disponible en esta pantalla.";
+  throw new Error("WebGL2");
 }
+const renderer = new Renderer(glCanvas);
+const pool = new MediaPool();
+const comp = new Compositor(renderer, pool);
 
-async function loadDoc(doc) {
-  for (const m of media.values()) { if (m.element && m.element.pause) try { m.element.pause(); } catch {} }
-  media.clear();
-  project = P.validateProject(JSON.parse(JSON.stringify(doc)));
-  for (const md of doc.media || []) {
-    if (!md.dataUrl) continue;
-    const url = URL.createObjectURL(dataUrlToBlob(md.dataUrl));
-    const m = { ...md, objectUrl: url, element: null };
-    if (md.kind === "video") {
-      const v = document.createElement("video");
-      v.muted = true; v.loop = true; v.playsInline = true; v.src = url;
-      await new Promise(res => { v.onloadeddata = res; v.onerror = res; });
-      m.element = v;
-      if (current.playing) v.play().catch(() => {});
-    } else {
-      const img = new Image();
-      await new Promise(res => { img.onload = res; img.onerror = res; img.src = url; });
-      m.element = img;
+const link = new Link("output", async (m) => {
+  if (m.t === "project") {
+    const prevScene = project?.sceneId;
+    project = normalizeProject(m.project);
+    if (prevScene && prevScene !== project.sceneId && m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - (m.tr.elapsed || 0), dur: m.tr.dur };
+    for (const id of usedMediaIds(project)) pool.ensure(id);
+    for (const id of [...pool.items.keys()]) if (!project.media.some(md => md.id === id)) pool.remove(id);
+    hud.querySelector("small").textContent = `${project.name} · ${project.width}×${project.height}`;
+    resize();
+  } else if (m.t === "state") {
+    const wasPlaying = st.playing;
+    st = { ...st, ...m.state };
+    if (typeof m.time === "number") { timeOffset = m.time - performance.now() / 1000; frozenTime = m.time; }
+    if (m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - m.tr.elapsed, dur: m.tr.dur };
+    if (st.playing !== wasPlaying) pool.setPlaying(st.playing);
+  } else if (m.t === "media") {
+    pool.remove(m.id);
+    pool.ensure(m.id);
+  } else if (m.t === "vsync") {
+    for (const it of m.items) {
+      const rt = pool.get(it.id);
+      if (!rt || rt.kind !== "video") continue;
+      const d = Math.abs(rt.el.currentTime - it.time);
+      if (d > 0.25 && d < (rt.el.duration || 1e9) - 0.25) { try { rt.el.currentTime = it.time; } catch {} }
     }
-    media.set(m.id, m);
-  }
-  if (!renderer) renderer = new Renderer(glCanvas);
-  hud.textContent = `LumaMap OUTPUT · ${project.width}×${project.height} — F = pantalla completa`;
-}
-
-function drawPattern(name) {
-  patCanvas.width = innerWidth; patCanvas.height = innerHeight;
-  const W = patCanvas.width, H = patCanvas.height, c = patCtx;
-  if (!name) { c.clearRect(0, 0, W, H); return; }
-  const colors = { white: "#fff", red: "#f00", green: "#0f0", blue: "#00f" };
-  if (name === "grid" || name === "lines") {
-    c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
-    c.strokeStyle = "#0f0"; c.lineWidth = 1;
-    const step = 80;
-    for (let x = 0; x <= W; x += step) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
-    for (let y = 0; y <= H; y += step) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
-  } else if (name === "bw") {
-    for (let x = 0; x < W; x += 40) { c.fillStyle = (x / 40) % 2 ? "#fff" : "#000"; c.fillRect(x, 0, 40, H); }
-  } else {
-    c.fillStyle = colors[name] || "#fff"; c.fillRect(0, 0, W, H);
-  }
-}
-
-const bc = new BroadcastChannel("lumap-output");
-bc.onmessage = async (ev) => {
-  const msg = ev.data;
-  if (msg.kind === "project") await loadDoc(msg.doc);
-  if (msg.kind === "state") {
-    current = msg;
-    drawPattern(msg.pattern);
-    for (const m of media.values())
-      if (m.kind === "video" && m.element) {
-        if (msg.playing) m.element.play().catch(() => {}); else m.element.pause();
-      }
-  }
-};
-
-addEventListener("keydown", (e) => {
-  if (e.key.toLowerCase() === "f") {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen().catch(() => {
-      hud.textContent = "Pantalla completa bloqueada por el navegador — usa F11.";
-    });
+  } else if (m.t === "restart") {
+    pool.restart();
   }
 });
-addEventListener("resize", () => drawPattern(current.pattern));
+link.send({ t: "hello" });
+pool.setPlaying(true);
 
+function resize() {
+  const W = project?.width || 1920, H = project?.height || 1080;
+  renderer.resize(W, H);
+  if (ov.width !== W || ov.height !== H) { ov.width = W; ov.height = H; }
+}
+resize();
+
+/* ---------------- HUD y pantalla completa ---------------- */
+let hudTimer = 0;
+function showHud() {
+  hud.classList.remove("hide");
+  document.body.style.cursor = "default";
+  clearTimeout(hudTimer);
+  hudTimer = setTimeout(() => { hud.classList.add("hide"); document.body.style.cursor = "none"; }, 3500);
+}
+const isNative = new URLSearchParams(location.search).has("native");
+if (isNative) hud.classList.add("hide"); else showHud();
+addEventListener("pointermove", () => { if (!isNative) showHud(); });
+function toggleFs() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+}
+document.getElementById("fs").onclick = toggleFs;
+addEventListener("dblclick", toggleFs);
+addEventListener("keydown", (e) => { if (e.key === "f" || e.key === "F") toggleFs(); });
+
+/* ---------------- Bucle de render ---------------- */
 function tick() {
   requestAnimationFrame(tick);
-  if (!renderer || !project || current.pattern) return;
-  const scenes = new Map(project.scenes.map(s => [s.id, s]));
-  const surfaces = new Map(project.surfaces.map(s => [s.id, s]));
-  const sc = scenes.get(current.currentSceneId);
-  if (sc) renderer.drawScene(sc, surfaces, media,
-    { time: performance.now() / 1000, globalAlpha: current.masterBrightness ?? 1, W: project.width, H: project.height });
+  if (!project) return;
+  const now = performance.now();
+  const time = st.playing ? now / 1000 + timeOffset : frozenTime;
+  const W = project.width, H = project.height;
+  const view = { sx: 1, sy: 1, tx: 0, ty: 0 };
+  if (tr && now - tr.start > tr.dur) tr = null;
+  comp.frame(project, {
+    layers: sceneLayers(project, tr, now), time, levels: st.levels, view,
+    master: st.master, blackout: st.blackout || !!st.pattern, clear: [0, 0, 0, 1], live: st.live || null,
+  });
+  octx.clearRect(0, 0, W, H);
+  if (st.pattern) drawPattern(octx, st.pattern, W, H);
+  if (st.guides) drawGuides(octx, project, view, { selectedId: st.sel, pointIdx: st.point, scale: W / 1280 });
+  pool.applyLookAudio(sceneLayers(project, null, now).flatMap(l => Object.values(l.scene.looks)), st.muted);
 }
 tick();

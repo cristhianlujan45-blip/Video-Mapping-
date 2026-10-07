@@ -1,11 +1,12 @@
 {
-  "name": "lumap",
-  "version": "0.1.0",
-  "description": "Plataforma profesional de video mapping (editor + media server + control remoto)",
+  "name": "lumamap",
+  "version": "2.0.0",
+  "description": "Video mapping táctil: editor + salida a proyector + mando remoto. Web (PWA) y Android.",
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node tests/run.js && node tests/run2.js"
+    "test": "node tests/core.test.js && node tests/server.test.js",
+    "test:browser": "node tests/browser.test.js"
   },
   "engines": { "node": ">=18" },
   "license": "MIT"

@@ -1,5 +1,11 @@
 # LUJAN MAPPING
 
+> **Nuevo: [LumaMap 2](lumamap/README.md)** — app de video mapping táctil para
+> Android y tablet: dibujo con neón sobre la pared, 16 animaciones en GPU, malla
+> de deformación, máscaras, efectos, audio reactivo, escenas y salida HDMI/USB-C
+> al proyector. Su APK se compila con `./gradlew :lumamap:assembleDebug` y el CI
+> lo publica como artefacto `lumamap-debug-apk`.
+
 Projection mapping para Android: colocas videos e imágenes sobre superficies reales
 (paredes, fachadas, cajas, escenarios) deformando sus esquinas con el dedo, y envías la
 salida limpia a un proyector por HDMI/USB-C mientras el teléfono o la tablet sigue

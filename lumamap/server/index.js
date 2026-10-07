@@ -1,5 +1,6 @@
 // server/index.js
-// Backend LumaMap: HTTP estático + API de proyectos + WebSocket (RFC 6455) sin dependencias.
+// Backend LumaMap (opcional): sirve la app web en la red local, API de proyectos,
+// mando remoto por WebSocket (RFC 6455) y OSC por UDP. Sin dependencias.
 // Funciona offline en red local. Sincronización opcional cuando hay conexión.
 import http from "node:http";
 import crypto from "node:crypto";
@@ -12,14 +13,13 @@ import { decodeOSC } from "./osc.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const WEB = path.join(ROOT, "web");
-const SHARED = path.join(ROOT, "shared");
 const DATA = path.join(ROOT, "data");
 fs.mkdirSync(DATA, { recursive: true });
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
-  ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
+  ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".gif": "image/gif",
   ".webmanifest": "application/manifest+json", ".ico": "image/x-icon",
   ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".wav": "audio/wav",
 };
@@ -144,13 +144,20 @@ function onUpgrade(req, sock) {
 /* ---------------- HTTP: estáticos + API proyectos ---------------- */
 
 function safeJoin(baseDir, urlPath) {
-  const p = path.normalize(path.join(baseDir, decodeURIComponent(urlPath)));
-  return p.startsWith(baseDir) ? p : null;
+  let decoded;
+  try { decoded = decodeURIComponent(urlPath); } catch { return null; }
+  const p = path.normalize(path.join(baseDir, decoded));
+  return p === baseDir || p.startsWith(baseDir + path.sep) ? p : null;
 }
 
 export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPort = 9129 } = {}) {
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    if (url.pathname === "/api/ping") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, app: "lumamap", displays: [...clients].filter(c => c.role === "display").length }));
+      return;
+    }
     // API: proyectos en el backend (sincronización opcional)
     if (url.pathname === "/api/projects" && req.method === "GET") {
       const list = fs.readdirSync(DATA).filter(f => f.endsWith(".json"))
@@ -189,9 +196,7 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
       return;
     }
     // Estáticos
-    let filePath;
-    if (url.pathname.startsWith("/shared/")) filePath = safeJoin(SHARED, url.pathname.slice(7));
-    else filePath = safeJoin(WEB, url.pathname === "/" ? "/index.html" : url.pathname);
+    const filePath = safeJoin(WEB, url.pathname === "/" ? "/index.html" : url.pathname);
     if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       res.writeHead(200, { "content-type": MIME[path.extname(filePath)] || "application/octet-stream" });
       fs.createReadStream(filePath).pipe(res);
@@ -223,6 +228,7 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
         case "/lumap/scene": ctl("goto", v[0]); break;        // índice 0-based
         case "/lumap/brightness": ctl("brightness", v[0]); break; // 0..1
         case "/lumap/opacity": ctl("opacity", v[0]); break;   // 0..1
+        case "/lumap/blackout": ctl("blackout"); break;
       }
     });
     sock.on("error", () => {}); // si el puerto está ocupado, se opera sin OSC
