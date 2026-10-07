@@ -15,6 +15,7 @@ const animUI = { cat: "Todas", q: "" };
 
 export const TABS = [
   { id: "add", label: "Añadir", ic: "plus" },
+  { id: "anim", label: "Animaciones", ic: "wand" },
   { id: "draw", label: "Dibujar", ic: "pen" },
   { id: "content", label: "Contenido", ic: "content" },
   { id: "fx", label: "Efectos", ic: "fx" },
@@ -106,6 +107,86 @@ const draw = {
   },
 };
 
+/* ------------------------------------------------------------ Animaciones */
+/** Aplica una animación del catálogo a la superficie seleccionada. */
+function applyAnim(app, a) {
+  const look = app.lookSel();
+  if (!look) return;
+  app.edit(() => {
+    Object.assign(look.source, { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale });
+    if (a.fx) look.fx = { ...DEFAULT_FX(), ...a.fx };
+  });
+  app.renderPanel();
+  toast(a.name);
+}
+
+/** Catálogo: buscador + categorías + miniaturas reales. */
+function animCatalog(app, onPick) {
+  const search = h("input", { type: "search", class: "text-in", placeholder: `Buscar entre ${ANIM_LIBRARY.length} animaciones…`, value: animUI.q });
+  const cats = h("div", { class: "chips" });
+  const grid = h("div", {});
+  const norm = (t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const cur = app.lookSel()?.source;
+  const renderGrid = () => {
+    const q = norm(animUI.q.trim());
+    const list = ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || a.cat === animUI.cat) && (!q || norm(a.name + " " + a.cat).includes(q)));
+    grid.innerHTML = "";
+    const on = cur?.type === "gen" ? list.find(a => a.gen === cur.gen && a.color === cur.color && a.color2 === cur.color2)?.id : null;
+    grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: animThumb(a) })), { value: on, cols: 4, onPick: (id) => onPick(ANIM_LIBRARY.find(x => x.id === id)) }) : hint("Ninguna animación con ese nombre."));
+  };
+  for (const c of ["Todas", ...ANIM_CATEGORIES]) {
+    const n = c === "Todas" ? ANIM_LIBRARY.length : ANIM_LIBRARY.filter(a => a.cat === c).length;
+    const b = h("button", { class: `chip ${animUI.cat === c ? "on" : ""}`, onclick: () => {
+      animUI.cat = c; cats.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); renderGrid();
+    } }, `${c} · ${n}`);
+    cats.append(b);
+  }
+  search.addEventListener("input", () => { animUI.q = search.value; renderGrid(); });
+  renderGrid();
+  return section(`Biblioteca de animaciones (${ANIM_LIBRARY.length})`, search, cats, grid);
+}
+
+const anim = {
+  title: (app) => app.surf() ? `Animaciones · ${app.surf().name}` : "Animaciones",
+  render(app) {
+    const A = app.actions;
+    const wrap = h("div", {});
+    if (!app.surf()) {
+      wrap.append(hint("Toca una animación: se crea una superficie a pantalla completa con ella. Si seleccionas una superficie, la animación se pone en esa."));
+      wrap.append(animCatalog(app, (a) => {
+        A.addShape("rect");
+        A.fillFrame();
+        applyAnim(app, a);
+      }));
+      return wrap;
+    }
+    const look = app.lookSel(), src = look.source;
+    wrap.append(animCatalog(app, (a) => applyAnim(app, a)));
+    if (src.type === "gen") {
+      wrap.append(section("Ajustar la animación",
+        swatches({ label: "Color principal", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
+        swatches({ label: "Color secundario", value: src.color2, onChange: (c) => app.edit(() => { src.color2 = c; }) }),
+        slider({ label: "Velocidad", min: 0, max: 4, step: 0.05, value: src.speed, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { src.speed = v; }) }),
+        slider({ label: "Escala", min: 0.2, max: 4, step: 0.05, value: src.scale, def: 1, fmt: fix(2), onInput: (v) => app.edit(() => { src.scale = v; }) })));
+    }
+    return wrap;
+  },
+};
+
+/** Girar la imagen dentro de la superficie y encajarla. */
+function rotateFitSection(app) {
+  const A = app.actions, look = app.lookSel();
+  const rot = look.fx.rotate || 0;
+  return section("Girar y encajar la imagen",
+    slider({ label: "Girar imagen", min: -180, max: 180, step: 1, value: rot, def: 0, fmt: (v) => Math.round(v) + "°", onInput: (v) => app.edit(() => { look.fx.rotate = v; }) }),
+    row(btn({ label: "⟲ 90°", kind: "wide", onClick: () => A.rotateContent(-90) }),
+      btn({ label: "⟳ 90°", kind: "wide", onClick: () => A.rotateContent(90) }),
+      btn({ label: "180°", kind: "wide", onClick: () => A.rotateContent(180) }),
+      btn({ label: "Recta", kind: "wide", onClick: () => A.rotateContent(0, true) })),
+    segmented({ options: [["stretch", "Estirar"], ["cover", "Llenar"], ["contain", "Ajustar"]], value: look.fit, onChange: (v) => app.edit(() => { look.fit = v; }) }),
+    btn({ label: "Pantalla completa (un toque)", ic: "fit", kind: "block primary", onClick: A.fillFrame }));
+}
+
 /* ---------------------------------------------------------------- Contenido */
 const SOURCE_TYPES = [
   { id: "media", label: "Video, foto o GIF", ic: "photo" },
@@ -148,8 +229,7 @@ const content = {
       wrap.append(section("Biblioteca", grid,
         btn({ label: "Importar video, imagen o GIF", ic: "upload", kind: "block primary", onClick: () => A.importMedia("selected") }),
         hint("Mantén pulsado un archivo para quitarlo. Formatos: MP4, WebM, MOV, JPG, PNG, WebP, GIF animado.")));
-      wrap.append(section("Encaje",
-        segmented({ options: [["stretch", "Estirar"], ["cover", "Recortar"], ["contain", "Ajustar"]], value: look.fit, onChange: (v) => app.edit(() => { look.fit = v; }) }),
+      wrap.append(section("Video",
         app.S.project.media.find(m => m.id === src.mediaId)?.kind === "video" ? h("div", {},
           slider({ label: "Velocidad", min: 0.25, max: 2, step: 0.05, value: look.rate, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { look.rate = v; }) }),
           slider({ label: "Volumen", min: 0, max: 1, value: look.volume, def: 0, fmt: pct, onInput: (v) => app.edit(() => { look.volume = v; }) }),
@@ -157,34 +237,7 @@ const content = {
     }
 
     if (src.type === "gen") {
-      // Catálogo: buscador + categorías + miniaturas reales.
-      const search = h("input", { type: "search", class: "text-in", placeholder: `Buscar entre ${ANIM_LIBRARY.length} animaciones…`, value: animUI.q });
-      const cats = h("div", { class: "chips" });
-      const grid = h("div", {});
-      const norm = (t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const renderGrid = () => {
-        const q = norm(animUI.q.trim());
-        const list = ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || a.cat === animUI.cat) && (!q || norm(a.name + " " + a.cat).includes(q)));
-        grid.innerHTML = "";
-        grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: animThumb(a) })), { cols: 4, onPick: (id) => {
-          const a = ANIM_LIBRARY.find(x => x.id === id);
-          app.edit(() => {
-            Object.assign(src, { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale });
-            if (a.fx) look.fx = { ...DEFAULT_FX(), ...a.fx };
-          });
-          app.renderPanel();
-          toast(a.name);
-        } }) : hint("Ninguna animación con ese nombre."));
-      };
-      for (const c of ["Todas", ...ANIM_CATEGORIES]) {
-        const b = h("button", { class: `chip ${animUI.cat === c ? "on" : ""}`, onclick: () => {
-          animUI.cat = c; cats.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); renderGrid();
-        } }, c);
-        cats.append(b);
-      }
-      search.addEventListener("input", () => { animUI.q = search.value; renderGrid(); });
-      renderGrid();
-      wrap.append(section(`Biblioteca de animaciones (${ANIM_LIBRARY.length})`, search, cats, grid));
+      wrap.append(animCatalog(app, (a) => applyAnim(app, a)));
       wrap.append(fold(`Animaciones base (${GENERATORS.length})`, false,
         tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: genThumbs()[g.id] })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) })));
       wrap.append(section("Colores",
@@ -236,6 +289,7 @@ const content = {
         btn({ label: "Activar borde neón", ic: "fx", kind: "block", onClick: () => { app.edit(() => { Object.assign(look.fx, { border: 0.015, borderAnim: "chase", borderGlow: 0.8 }); }); app.openTab("fx"); } })));
     }
 
+    if (src.type !== "none") wrap.append(rotateFitSection(app));
     wrap.append(section("Mezcla",
       slider({ label: "Opacidad", min: 0, max: 1, value: look.opacity, def: 1, fmt: pct, onInput: (v) => app.edit(() => { look.opacity = v; }) }),
       segmented({ options: BLEND_MODES, value: look.blend, small: true, onChange: (v) => app.edit(() => { look.blend = v; }) }),
@@ -373,7 +427,11 @@ const shape = {
         hint("Arrastra los puntos amarillos. Con dos dedos sobre la forma la escalas y giras. Usa la cruceta para mover el punto rojo píxel a píxel."),
         toggle({ label: "Unir esquinas que coinciden", hint: "Mueve juntas las caras de un cubo o fachada", value: S.linkCorners, onChange: (v) => { S.linkCorners = v; } }),
         row(btn({ ic: "flipH", label: "Espejo", kind: "wide", onClick: () => A.flip("h") }), btn({ ic: "flipV", label: "Voltear", kind: "wide", onClick: () => A.flip("v") }), btn({ ic: "rotate", label: "90°", kind: "wide", onClick: A.rotate90 })),
-        s.type === "quad" ? row(btn({ ic: "straight", label: "Enderezar", kind: "wide", onClick: A.straighten }), btn({ ic: "fit", label: "Pantalla entera", kind: "wide", onClick: A.fillFrame })) : null),
+        row(s.type === "quad" ? btn({ ic: "straight", label: "Enderezar", kind: "wide", onClick: A.straighten }) : null, btn({ ic: "fit", label: "Pantalla completa", kind: "wide", onClick: A.fillFrame }))),
+      section("Girar la superficie",
+        hint("Arrastra el círculo azul que aparece encima de la superficie para girarla a cualquier ángulo, o usa los botones."),
+        row(btn({ label: "−90°", kind: "wide", onClick: () => A.rotateBy(-90) }), btn({ label: "−15°", kind: "wide", onClick: () => A.rotateBy(-15) }), btn({ label: "−1°", kind: "wide", onClick: () => A.rotateBy(-1) })),
+        row(btn({ label: "+1°", kind: "wide", onClick: () => A.rotateBy(1) }), btn({ label: "+15°", kind: "wide", onClick: () => A.rotateBy(15) }), btn({ label: "+90°", kind: "wide", onClick: () => A.rotateBy(90) }))),
     );
     if (s.type === "quad") {
       wrap.append(section("Malla de deformación",
@@ -702,4 +760,4 @@ export function showHelp(app) {
   return dialog({ title: "Ayuda", content: c, wide: true });
 }
 
-export const PANELS = { add, draw, content, fx, shape, layers, scenes, audio, output, menu };
+export const PANELS = { add, anim, draw, content, fx, shape, layers, scenes, audio, output, menu };

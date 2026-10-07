@@ -573,7 +573,252 @@ vec4 generator3(vec2 uv, vec2 p, float t){
   return vec4(mix(B*0.15, mix(A, vec3(1.0, 0.85, 0.5), 0.3)*flick, win*on) + B*0.05*(1.0 - win), 1.0);
 }
 
+// ---- Animaciones virales (72+) ----
+vec4 generator4(vec2 uv, vec2 p, float t){
+  float s = u_gscale;
+  vec3 A = u_c1, B = u_c2;
+  float r = length(p), a = atan(p.y, p.x);
+  float bt = u_beat;
+  if(u_gen==72){ // Hipnosis
+    float v = fract(a/TAU*2.0 + log(r + 0.001)*1.6*s - t*0.6);
+    float k = smoothstep(0.45, 0.55, v) - smoothstep(0.95, 1.0, v);
+    return vec4(mix(B, A, k)*(0.85 + 0.3*bt), 1.0);
+  }
+  if(u_gen==73){ // Hiperespacio
+    vec3 c = B*0.05;
+    for(int l=0;l<3;l++){
+      float fl = float(l);
+      float cells = 90.0 + fl*40.0;
+      float ac = a/TAU*cells;
+      float id = floor(ac);
+      float h = hash(vec2(id, fl*7.0));
+      float z = fract(h*5.0 + t*(0.35 + fl*0.15)*(1.0 + bt));
+      float rp = z*z*0.9;
+      float len = 0.02 + z*0.25;
+      float streak = smoothstep(len, 0.0, abs(r - rp)) * smoothstep(0.5, 0.15, abs(fract(ac) - 0.5)) * step(0.55, hash(vec2(id, fl + 3.0)));
+      c += mix(A, vec3(1.0), z)*streak*z*1.6;
+    }
+    return vec4(c, 1.0);
+  }
+  if(u_gen==74){ // Agujero negro
+    vec3 c = vec3(step(0.995, hash(floor(p*240.0))))*0.6*smoothstep(0.2, 0.5, r);
+    float sw = a + 0.35/max(r, 0.02) - t*1.2;
+    float disk = exp(-abs(r - 0.32*s)*10.0)*(0.55 + 0.45*sin(sw*5.0 + fbm(vec2(sw, r*8.0))*4.0));
+    float ring = exp(-abs(r - 0.17*s)*60.0);
+    c += mix(B, A, smoothstep(0.1, 0.5, r))*disk*1.5 + mix(A, vec3(1.0), 0.6)*ring;
+    c *= smoothstep(0.13*s, 0.15*s, r);
+    return vec4(c, 1.0);
+  }
+  if(u_gen==75){ // ADN
+    float x = p.x*6.0*s + t*1.5;
+    float y = p.y*2.6;
+    float y1 = sin(x)*0.7, y2 = -y1;
+    float d1 = abs(y - y1), d2 = abs(y - y2);
+    float z1 = cos(x), w = 0.09;
+    vec3 c = B*0.08;
+    float rung = step(abs(fract(x/0.6) - 0.5), 0.08) * step(abs(y), abs(y1));
+    c += mix(A, B, 0.5)*rung*0.7;
+    c += A*smoothstep(w, 0.0, d1)*(0.6 + 0.4*z1) + B*smoothstep(w, 0.0, d2)*(0.6 - 0.4*z1);
+    return vec4(c + A*exp(-min(d1, d2)*12.0)*0.25, 1.0);
+  }
+  if(u_gen==76){ // Fractal Julia
+    vec2 z = p*2.6/s;
+    vec2 c = vec2(-0.8 + 0.12*sin(t*0.21), 0.156 + 0.08*cos(t*0.17));
+    float n = 0.0, m2 = 0.0;
+    for(int i=0;i<64;i++){
+      z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
+      m2 = dot(z, z);
+      if(m2 > 64.0) break;
+      n += 1.0;
+    }
+    if(n >= 64.0) return vec4(B*0.15, 1.0);
+    float sn = n - log2(log2(m2)) + 4.0;
+    float k = clamp(sn/28.0, 0.0, 1.0);
+    vec3 col = mix(B, A, k);
+    col = mix(col, hsv2rgb(vec3(fract(sn*0.035 + t*0.05), 0.75, 1.0)), 0.35);
+    return vec4(col*(0.25 + 1.1*k), 1.0);
+  }
+  if(u_gen==77){ // Metabolas (lámpara de lava)
+    float f = 0.0;
+    for(int i=0;i<6;i++){
+      float fi = float(i);
+      vec2 c = vec2(sin(t*0.4*(1.0 + fi*0.17) + fi*2.1)*0.45*u_aspect, sin(t*0.33*(1.0 + fi*0.11) + fi*1.3)*0.38);
+      f += (0.018*s*s + bt*0.004)/max(dot(p - c, p - c), 0.0005);
+    }
+    float body = smoothstep(0.9, 1.1, f);
+    return vec4(mix(B*0.15, mix(A, vec3(1.0), smoothstep(2.0, 6.0, f)*0.5), body) + A*0.15*smoothstep(0.4, 1.0, f)*(1.0 - body), 1.0);
+  }
+  if(u_gen==78){ // Metal líquido
+    float n = fbm(p*2.2*s + vec2(t*0.15, -t*0.1));
+    float m = fbm(p*2.2*s + n*2.0 + vec2(-t*0.12, t*0.08));
+    float v = 0.5 + 0.5*sin(m*14.0 + t);
+    float spec = pow(v, 6.0);
+    return vec4(mix(B*0.25, mix(A, vec3(0.9), 0.6), v)*0.8 + vec3(spec), 1.0);
+  }
+  if(u_gen==79){ // Bola disco
+    vec3 c = B*0.04;
+    vec2 q = p*7.0*s + vec2(t*0.8, sin(t*0.3)*0.5);
+    vec2 id = floor(q), f = fract(q) - 0.5;
+    vec2 o = vec2(hash(id), hash(id + 9.0)) - 0.5;
+    float spot = smoothstep(0.22, 0.0, length(f - o*0.5))*step(0.45, hash(id + 3.0));
+    c += mix(A, hsv2rgb(vec3(hash(id + 5.0), 0.6, 1.0)), 0.5)*spot*(0.6 + 0.6*bt);
+    float br = 0.2*s;
+    if(r < br){
+      vec2 fac = vec2(a*6.0/TAU*4.0 + t*0.6, r*30.0/s);
+      float g = hash(floor(fac));
+      float shade = sqrt(1.0 - (r/br)*(r/br));
+      c = mix(vec3(0.15), vec3(0.95), g*0.6 + 0.2)*shade + A*step(0.93, g)*1.5;
+    }
+    return vec4(c, 1.0);
+  }
+  if(u_gen==80){ // Portal
+    float sw = a + 4.0*r - t*2.0;
+    float rim = exp(-abs(r - 0.3*s)*25.0)*(0.7 + 0.3*sin(sw*7.0));
+    float inside = smoothstep(0.31*s, 0.28*s, r);
+    float swirl = 0.5 + 0.5*sin(sw*5.0 + fbm(p*4.0 + t*0.4)*5.0);
+    vec3 c = mix(B*0.02, mix(B, A, swirl)*0.7, inside) + mix(A, vec3(1.0), 0.4)*rim*1.6;
+    c += A*fbm(vec2(a*3.0, r*10.0 - t*3.0))*exp(-abs(r - 0.3*s)*8.0)*0.4;
+    return vec4(c, 1.0);
+  }
+  if(u_gen==81){ // Células neón (Voronoi)
+    vec2 q = p*5.0*s;
+    vec2 id = floor(q), f = fract(q);
+    float d1 = 8.0, d2 = 8.0; vec2 best = vec2(0.0);
+    for(int j=-1;j<=1;j++) for(int i=-1;i<=1;i++){
+      vec2 g = vec2(float(i), float(j));
+      vec2 o = 0.5 + 0.4*sin(t*0.8 + TAU*vec2(hash(id + g), hash(id + g + 13.0)));
+      float d = length(g + o - f);
+      if(d < d1){ d2 = d1; d1 = d; best = id + g; } else if(d < d2) d2 = d;
+    }
+    float edge = smoothstep(0.06, 0.0, d2 - d1);
+    return vec4(B*0.12*hash(best) + mix(A, B, hash(best))*edge*(1.0 + bt), 1.0);
+  }
+  if(u_gen==82){ // Logo rebotando (DVD)
+    vec2 box = vec2(0.24, 0.14)*s;
+    vec2 lim = vec2(u_aspect*0.5, 0.5) - box;
+    float tx = t*0.11, ty = t*0.083;
+    vec2 c = vec2((abs(fract(tx)*2.0 - 1.0)*2.0 - 1.0)*lim.x, (abs(fract(ty)*2.0 - 1.0)*2.0 - 1.0)*lim.y);
+    float bounces = floor(tx*2.0) + floor(ty*2.0);
+    vec3 col = hsv2rgb(vec3(fract(hash1(bounces)*0.7 + 0.1), 0.85, 1.0));
+    vec2 d = abs(p - c) - box;
+    float rr = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+    float logo = smoothstep(0.012, 0.0, rr - 0.02);
+    vec2 e = (p - c)/box;
+    float disc = smoothstep(0.06, 0.0, abs(length(e*vec2(0.9, 2.2) + vec2(0.0, -0.45)) - 0.55));
+    return vec4(B*0.04 + col*logo*(1.0 - 0.75*disc), 1.0);
+  }
+  if(u_gen==83){ // Osciloscopio (Lissajous)
+    float d = 9.0;
+    vec2 prev = vec2(0.0);
+    for(int i=0;i<=80;i++){
+      float u = float(i)/80.0*TAU;
+      vec2 q = vec2(sin(3.0*u + t*0.7)*0.42*u_aspect, sin(4.0*u + t*0.5)*0.4)*s;
+      if(i > 0){
+        vec2 pa = p - prev, ba = q - prev;
+        float h = clamp(dot(pa, ba)/max(dot(ba, ba), 1e-6), 0.0, 1.0);
+        d = min(d, length(pa - ba*h));
+      }
+      prev = q;
+    }
+    return vec4(B*0.05 + A*(exp(-d*160.0)*1.3 + exp(-d*25.0)*0.35)*(1.0 + bt), 1.0);
+  }
+  if(u_gen==84){ // Ecualizador pixel
+    float cols = 32.0*s, rows = 18.0*s;
+    vec2 q = vec2(uv.x*cols, (1.0 - uv.y)*rows);
+    vec2 id = floor(q), f = fract(q);
+    float hgt = (0.45 + 0.3*sin(id.x*0.45 + t*3.0) + 0.2*sin(id.x*1.3 - t*4.7))*(0.7 + 0.6*max(u_lev.x, bt));
+    float lit = step(id.y/rows, hgt)*step(0.12, f.x)*step(f.x, 0.88)*step(0.15, f.y)*step(f.y, 0.85);
+    vec3 col = mix(A, B, id.y/rows);
+    return vec4(mix(col*0.06, col, lit), 1.0);
+  }
+  if(u_gen==85){ // Glitch RGB
+    float band = floor(uv.y*14.0);
+    float g = step(0.6, hash(vec2(band, floor(t*7.0))))*(0.5 + bt);
+    float off = (hash(vec2(band, floor(t*13.0))) - 0.5)*0.15*g;
+    float ph = floor(uv.y*3.0)*0.33 + t*0.2;
+    vec3 c = vec3(step(0.5, fract((uv.x - off*1.5)*4.0*s + ph)), step(0.5, fract(uv.x*4.0*s + ph)), step(0.5, fract((uv.x + off*1.5)*4.0*s + ph)));
+    vec3 base = mix(B, A, (c.r + c.g + c.b)/3.0);
+    return vec4(mix(base, c, g*0.8) + vec3(step(0.97, hash(vec2(floor(uv.y*200.0), floor(t*20.0)))))*0.4, 1.0);
+  }
+  if(u_gen==86){ // Caleidoscopio vivo
+    float seg = TAU/8.0;
+    float aa = abs(mod(a + t*0.2, seg) - seg*0.5);
+    vec2 q = vec2(cos(aa), sin(aa))*r*3.0*s;
+    float n = fbm(q + vec2(t*0.3, -t*0.2));
+    float m = fbm(q*1.7 - n*2.0 + t*0.1);
+    vec3 c = mix(B, A, smoothstep(0.3, 0.7, m));
+    c = mix(c, hsv2rgb(vec3(fract(n + t*0.05), 0.7, 1.0)), 0.35);
+    return vec4(c*(0.8 + 0.4*bt), 1.0);
+  }
+  if(u_gen==87){ // Carretera arcoíris
+    vec3 c = mix(B*0.3, B*0.05, uv.y*2.0);
+    c += vec3(step(0.996, hash(floor(p*200.0))))*step(p.y, 0.0);
+    if(p.y > 0.02){
+      float z = 0.25/p.y;
+      float x = p.x*z;
+      float road = step(abs(x), 1.0*s);
+      vec3 rb = hsv2rgb(vec3(fract(x/(2.0*s) + 0.5), 0.9, 1.0));
+      float dash = step(0.5, fract(z*0.5 - t*1.5));
+      float edge = smoothstep(0.08, 0.0, abs(abs(x) - s));
+      c = mix(c, rb*(0.6 + 0.4*dash), road) + A*edge;
+      c *= smoothstep(0.0, 0.25, p.y) * 0.8 + 0.2;
+    }
+    return vec4(c, 1.0);
+  }
+  if(u_gen==88){ // Zoom infinito
+    float ang = t*0.3;
+    vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang))*p;
+    float m = max(abs(q.x), abs(q.y));
+    float k = log2(max(m, 0.0005))*2.0*s - t*0.8;
+    float id = floor(k);
+    float v = step(0.5, fract(k));
+    vec3 c = mix(B, A, v)*(0.7 + 0.3*hash1(id));
+    return vec4(c*smoothstep(0.0, 0.05, m), 1.0);
+  }
+  if(u_gen==89){ // Show de láseres
+    vec2 o = vec2(0.0, 0.55);
+    vec2 d = p - o;
+    float ang = atan(d.x, -d.y);
+    vec3 c = B*0.03 + A*0.05*fbm(p*3.0 + vec2(t*0.1, 0.0));
+    for(int i=0;i<10;i++){
+      float fi = float(i);
+      float ai = (fi/9.0 - 0.5)*1.6*s + sin(t*0.9 + fi*0.7)*0.25;
+      float w = abs(ang - ai);
+      vec3 lc = mod(fi, 2.0) < 1.0 ? A : mix(A, B, 0.6);
+      c += lc*(exp(-w*220.0) + exp(-w*30.0)*0.12)*(0.7 + 0.6*bt);
+    }
+    return vec4(c, 1.0);
+  }
+  if(u_gen==90){ // Visualizador circular
+    float n = 64.0;
+    float sa = (a/TAU + 0.5)*n;
+    float id = floor(sa);
+    float lv = 0.5 + 0.5*sin(id*0.7 + t*3.0)*sin(id*0.23 - t*1.7);
+    float len = (0.04 + 0.2*lv)*(0.6 + 0.8*max(u_lev.x, bt))*s;
+    float r0 = 0.2*s;
+    float bar = step(r0, r)*step(r, r0 + len)*step(0.2, fract(sa))*step(fract(sa), 0.8);
+    vec3 col = hsv2rgb(vec3(fract(id/n + t*0.05), 0.75, 1.0));
+    col = mix(col, A, 0.4);
+    float ring = exp(-abs(r - r0*0.85)*80.0);
+    return vec4(B*0.05 + col*bar + A*ring*(0.6 + bt), 1.0);
+  }
+  // 91: Flujo de partículas
+  vec3 c = B*0.06;
+  for(int l=0;l<2;l++){
+    float fl = float(l);
+    vec2 q = p*(7.0 + fl*5.0)*s;
+    q += vec2(fbm(q*0.2 + vec2(t*0.12, fl)), fbm(q*0.2 + vec2(5.0, -t*0.12)))*4.0;
+    q.x += t*(1.0 + fl*0.6);
+    vec2 id = floor(q), f = fract(q) - 0.5;
+    vec2 o = (vec2(hash(id + 1.0), hash(id + 7.0)) - 0.5)*0.5;
+    float pt = smoothstep(0.2, 0.0, length(f - o))*step(0.35, hash(id));
+    c += mix(A, B + 0.3, hash(id + 2.0))*pt*(1.2 - fl*0.4)*(1.0 + bt);
+  }
+  return vec4(c, 1.0);
+}
+
 vec4 generator(vec2 uv, vec2 p, float t){
+  if(u_gen >= 72) return generator4(uv, p, t);
   if(u_gen >= 47) return generator3(uv, p, t);
   if(u_gen >= 16) return generator2(uv, p, t);
   float s = u_gscale;

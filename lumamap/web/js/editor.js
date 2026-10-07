@@ -9,7 +9,7 @@ import { Compositor, sceneLayers } from "./compose.js";
 import { MediaPool, createRuntime, kindOf, getCamera, stopCamera } from "./sources.js";
 import { AudioEngine } from "./audio.js";
 import { Link, nativeBridge } from "./link.js";
-import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge } from "./overlay.js";
+import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge, ROT_OFF } from "./overlay.js";
 import { roundPt, newStrokeId, hitStroke } from "./drawing.js";
 import { icon } from "./icons.js";
 import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles } from "./ui.js";
@@ -17,7 +17,7 @@ import { PANELS, TABS, showHelp } from "./panels.js";
 import { buildCommands, keymap, keyOf, openPalette, openContextMenu, closeContextMenu } from "./commands.js";
 import {
   pointInPolygon, surfaceOutline, centroid, transformPoints, screenToUV, uvToScreen,
-  simplify, bbox, gridCornerIdx, surfaceCorners, gridFromCorners, resampleGrid, surfaceAspect, edgeHandles, dragEdge,
+  simplify, bbox, gridCornerIdx, surfaceCorners, gridFromCorners, resampleGrid, surfaceAspect, edgeHandles, dragEdge, rotateHandle,
 } from "./math.js";
 import { detectFromImageFile } from "./automap.js";
 import { initMIDI } from "./midi.js";
@@ -250,11 +250,35 @@ A.rotate90 = () => {
   s.points = transformPoints(s.points, centroid(s.points), 1, Math.PI / 2);
   changed(); commit();
 };
+/** Gira la superficie `deg` grados alrededor de su centro (cualquier ángulo). */
+A.rotateBy = (deg) => {
+  const s = surf();
+  if (!s || s.locked) return;
+  s.points = transformPoints(s.points, centroid(s.points), 1, deg * Math.PI / 180);
+  changed(); commit();
+};
+/** Gira solo la imagen dentro de la superficie. */
+A.rotateContent = (deg, absolute = false) => {
+  const l = lookSel();
+  if (!l) return;
+  let r = absolute ? deg : (l.fx.rotate || 0) + deg;
+  r = ((r + 540) % 360) - 180;
+  if (r === -180 && deg > 0) r = 180;
+  l.fx.rotate = r;
+  changed({ panel: true }); commit();
+};
+/** Un toque: la superficie ocupa toda la pantalla de salida y la imagen la llena. */
 A.fillFrame = () => {
   const s = surf();
-  if (!s || s.type !== "quad") return;
-  s.points = gridFromCorners(M.rectCorners(0, 0, S.project.width, S.project.height), s.cols, s.rows);
-  changed(); commit(); toast("Ocupa toda la salida");
+  if (!s) return;
+  const W = S.project.width, H = S.project.height;
+  if (s.type === "quad") {
+    s.points = gridFromCorners(M.rectCorners(0, 0, W, H), s.cols, s.rows);
+  } else {
+    const b = bbox(s.points);
+    s.points = s.points.map(q => ({ x: (q.x - b.x) / b.w * W, y: (q.y - b.y) / b.h * H }));
+  }
+  changed({ panel: true }); commit(); toast("Pantalla completa");
 };
 
 /* ---- máscara ---- */
@@ -1010,6 +1034,17 @@ function toProject(clientX, clientY) {
 }
 const hitRadius = (css = 26) => (css * DPR()) / currentView().sx;
 
+/** Asa de giro: por fuera del lado superior; si ahí no se ve (pantalla completa,
+ *  barra de botones), por dentro. */
+function rotHandle(s) {
+  const v = currentView(), d = DPR(), off = ROT_OFF * d / v.sx;
+  const out = rotateHandle(s, off);
+  if (!out) return null;
+  const c = $("#ov"), sy = out.y * v.sy + v.ty, sx = out.x * v.sx + v.tx;
+  const ok = sy > 100 * d && sy < c.height - 30 * d && sx > 30 * d && sx < c.width - 30 * d;
+  return ok ? out : rotateHandle(s, -off * 1.4);
+}
+
 function hitPoint(s, p, r) {
   let best = -1, bd = r;
   s.points.forEach((q, i) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = i; } });
@@ -1149,6 +1184,18 @@ function onDown(e) {
       return;
     }
   }
+  // Asa de giro: girar la superficie a cualquier ángulo.
+  if (s && !s.locked && !s.hidden) {
+    const rh = rotHandle(s);
+    if (rh && Math.hypot(rh.x - p.x, rh.y - p.y) < hitRadius(22)) {
+      const c = centroid(s.points);
+      G = { type: "rotate", s, start: s.points.map(q => ({ ...q })), c, a0: Math.atan2(p.y - c.y, p.x - c.x), deg: 0 };
+      S.point = -1;
+      haptic();
+      updateChrome();
+      return;
+    }
+  }
   // Asas de los lados: cambiar el tamaño sin girar.
   if (s && !s.locked && !s.hidden) {
     const r = hitRadius(22);
@@ -1222,6 +1269,17 @@ function onMove(e) {
       pts.forEach((q, i) => { G.s.points[i].x = q.x; G.s.points[i].y = q.y; });
       for (const l of G.links) { l.op.x = l.x0 + pts[l.i].x - G.start[l.i].x; l.op.y = l.y0 + pts[l.i].y - G.start[l.i].y; }
       G.moved = true; G.at = { x: G.h.x + (p.x - G.p0.x), y: G.h.y + (p.y - G.p0.y) };
+      changed();
+      break;
+    }
+    case "rotate": {
+      let deg = (Math.atan2(p.y - G.c.y, p.x - G.c.x) - G.a0) * 180 / Math.PI;
+      deg = ((deg + 540) % 360) - 180;
+      const snap = Math.round(deg / 45) * 45;
+      if (Math.abs(deg - snap) < 3) deg = snap;            // se «engancha» a 0°, 45°, 90°…
+      const pts = transformPoints(G.start, G.c, 1, deg * Math.PI / 180);
+      pts.forEach((q, i) => { G.s.points[i].x = q.x; G.s.points[i].y = q.y; });
+      G.deg = deg; G.moved = true;
       changed();
       break;
     }
@@ -1300,7 +1358,7 @@ function onUp(e) {
   }
   if (pointers.size > 0) return;
   switch (G.type) {
-    case "point": case "move": case "pinch": case "edge": if (G.moved) commit(); break;
+    case "point": case "move": case "pinch": case "edge": case "rotate": if (G.moved) commit(); break;
     case "mask": commit(); break;
     case "draw": {
       if (S.live) {
@@ -1441,6 +1499,8 @@ function updateChrome() {
   if (showSel) {
     sb.innerHTML = "";
     sb.append(
+      btn({ ic: "fit", kind: "icon", title: "Pantalla completa", onClick: A.fillFrame }),
+      btn({ ic: "rotate", kind: "icon", title: "Girar 90°", onClick: () => A.rotateBy(90) }),
       btn({ ic: "copy", kind: "icon", title: "Duplicar", onClick: A.duplicate }),
       btn({ ic: s.locked ? "lock" : "unlock", kind: "icon", title: s.locked ? "Desbloquear" : "Bloquear", onClick: () => A.toggleLock() }),
       btn({ ic: "trash", kind: "icon", title: "Eliminar", onClick: () => A.remove() }));
@@ -1508,7 +1568,8 @@ function renderPanel() {
   const def = PANELS[S.tab];
   if (!def) return;
   const head = $("#panelHead"), body = $("#panelBody");
-  const scroll = body.scrollTop;
+  const scroll = body.dataset.tab === S.tab ? body.scrollTop : 0;   // otra pestaña: empieza arriba
+  body.dataset.tab = S.tab;
   head.innerHTML = "";
   head.append(h("h2", {}, def.title(app)), btn({ ic: "close", kind: "icon", title: "Cerrar", onClick: () => openTab(null) }));
   body.innerHTML = "";
@@ -1660,7 +1721,7 @@ function drawOverlay(v, view) {
     drawGuides(ctx, P, view, {
       selectedId: S.mode === "edit" || S.mode === "mask" ? S.sel : null,
       pointIdx: S.point, scale: d, showAll: S.mode !== "draw",
-      edges: S.mode === "edit", edgeActive: G?.type === "edge" ? G.h.side : null,
+      edges: S.mode === "edit", edgeActive: G?.type === "edge" ? G.h.side : null, rot: S.mode === "edit" && surf() ? rotHandle(surf()) : null, rotActive: G?.type === "rotate" ? G.deg : null,
     });
   }
   const X = (p) => p.x * v.sx + v.tx, Y = (p) => p.y * v.sy + v.ty;

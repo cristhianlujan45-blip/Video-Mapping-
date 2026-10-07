@@ -3,6 +3,9 @@
 // alineación (contornos, puntos). Se usa en el editor y en la salida.
 import { surfaceOutline, gridCornerIdx, edgeHandles } from "./math.js";
 
+/** Distancia (px de pantalla) del asa de giro al borde superior. */
+export const ROT_OFF = 44;
+
 export const PATTERNS = [
   ["grid", "Cuadrícula"], ["white", "Blanco"], ["bars", "Barras"], ["red", "Rojo"],
   ["green", "Verde"], ["blue", "Azul"],
@@ -39,7 +42,7 @@ export function drawPattern(ctx, name, W, H) {
  * Guías de alineación: contorno de cada superficie y puntos de la seleccionada.
  * view = {sx, sy, tx, ty}; scale = tamaño de punto en px del canvas.
  */
-export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -1, scale = 1, showAll = true, edges = true, edgeActive = null } = {}) {
+export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -1, scale = 1, showAll = true, edges = true, edgeActive = null, rot = null, rotActive = null } = {}) {
   const X = (p) => p.x * view.sx + view.tx, Y = (p) => p.y * view.sy + view.ty;
   for (const s of project.surfaces) {
     if (s.hidden) continue;
@@ -79,6 +82,26 @@ export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -
         ctx.fill();
         ctx.lineWidth = 2 * scale; ctx.strokeStyle = "#000"; ctx.stroke();
         ctx.restore();
+      }
+    }
+    // Asa de giro (círculo con flecha encima del lado superior): gira a cualquier ángulo.
+    if (rot && !s.locked) {
+      const rh = rot;
+      {
+        const x = X(rh), y = Y(rh);
+        ctx.beginPath(); ctx.moveTo(X({ x: rh.bx }), Y({ y: rh.by })); ctx.lineTo(x, y);
+        ctx.lineWidth = 2 * scale; ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, 12 * scale, 0, Math.PI * 2);
+        ctx.fillStyle = rotActive != null ? "#ff2d55" : "#00e5ff"; ctx.fill();
+        ctx.lineWidth = 2 * scale; ctx.strokeStyle = "#000"; ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, 6 * scale, -Math.PI * 0.9, Math.PI * 0.5);
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 2 * scale; ctx.stroke();
+        if (rotActive != null) {
+          ctx.font = `bold ${14 * scale}px system-ui, sans-serif`; ctx.textAlign = "center";
+          const txt = Math.round(rotActive) + "°";
+          ctx.lineWidth = 4 * scale; ctx.strokeStyle = "#000"; ctx.strokeText(txt, x, y - 20 * scale);
+          ctx.fillStyle = "#fff"; ctx.fillText(txt, x, y - 20 * scale);
+        }
       }
     }
     const corners = s.type === "quad" ? new Set(gridCornerIdx(s.cols, s.rows)) : null;

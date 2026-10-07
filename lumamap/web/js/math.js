@@ -352,6 +352,13 @@ export function edgeHandles(s) {
   return out;
 }
 
+/** Asa de giro: por fuera del lado superior, a `off` unidades del borde. */
+export function rotateHandle(s, off) {
+  const t = edgeHandles(s).find(e => e.side === "top");
+  if (!t) return null;
+  return { x: t.x + t.nx * off, y: t.y + t.ny * off, bx: t.x, by: t.y };
+}
+
 /** Aplica el arrastre de un asa: start = puntos al empezar, (dx,dy) = desplazamiento total. */
 export function dragEdge(start, handle, dx, dy) {
   const d = dx * handle.nx + dy * handle.ny;

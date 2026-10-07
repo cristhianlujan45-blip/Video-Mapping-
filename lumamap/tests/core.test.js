@@ -178,9 +178,9 @@ await test("biblioteca de efectos: más de 100 y solo usa parámetros que existe
   const maps = new Set(M.COLORMAPS.map(c => c[0]));
   for (const e of M.FX_LIBRARY) if (e.fx.colormap) assert.ok(maps.has(e.fx.colormap), e.name);
 });
-await test("72 animaciones base con identificador único; «Calibrar» conserva su número", () => {
-  assert.equal(M.GENERATORS.length, 72);
-  assert.equal(new Set(M.GENERATORS.map(g => g.id)).size, 72);
+await test("92 animaciones base con identificador único; «Calibrar» conserva su número", () => {
+  assert.equal(M.GENERATORS.length, 92);
+  assert.equal(new Set(M.GENERATORS.map(g => g.id)).size, 92);
   assert.equal(M.GEN_INDEX.calib, 15);
 });
 await test("resoluciones de composición hasta 8K y ajustes de salida por defecto", () => {
@@ -194,7 +194,7 @@ await test("resoluciones de composición hasta 8K y ajustes de salida por defect
 });
 
 await test("catálogo de más de 100 animaciones, todas válidas y catalogadas", () => {
-  assert.ok(M.ANIM_LIBRARY.length >= 100, String(M.ANIM_LIBRARY.length));
+  assert.ok(M.ANIM_LIBRARY.length >= 180, String(M.ANIM_LIBRARY.length));
   assert.equal(new Set(M.ANIM_LIBRARY.map(a => a.id)).size, M.ANIM_LIBRARY.length);
   const cats = new Set(M.ANIM_CATEGORIES);
   for (const a of M.ANIM_LIBRARY) {

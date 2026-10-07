@@ -38,7 +38,10 @@ export function buildCommands(app) {
   add("Editar", "back", "Enviar al fondo", A.toBack, { keys: "Ctrl+[", ic: "down", needsSel: true });
   add("Editar", "nextSurf", "Seleccionar la siguiente superficie", () => A.selectNext(1), { keys: "N", ic: "right" });
   add("Editar", "center", "Centrar en la salida", () => A.center("both"), { keys: "C", ic: "target", needsSel: true });
-  add("Editar", "fill", "Ocupar toda la salida", A.fillFrame, { ic: "fit", needsSel: true });
+  add("Editar", "fill", "Pantalla completa (ocupar toda la salida)", A.fillFrame, { keys: "Shift+G", ic: "fit", needsSel: true });
+  add("Editar", "rotR15", "Girar 15° a la derecha", () => A.rotateBy(15), { keys: "E", ic: "rotate", needsSel: true });
+  add("Editar", "rotL15", "Girar 15° a la izquierda", () => A.rotateBy(-15), { keys: "Q", ic: "rotate", needsSel: true });
+  add("Editar", "rotImg", "Girar la imagen 90°", () => A.rotateContent(90), { keys: "Shift+E", ic: "rotate", needsSel: true });
   add("Editar", "straighten", "Enderezar (rectángulo)", A.straighten, { ic: "straight", needsSel: true });
   add("Editar", "flipH", "Espejo horizontal", () => A.flip("h"), { ic: "flipH", needsSel: true });
   add("Editar", "flipV", "Voltear vertical", () => A.flip("v"), { ic: "flipV", needsSel: true });
@@ -64,7 +67,7 @@ export function buildCommands(app) {
   add("Ver", "zoomIn", "Acercar vista", () => A.zoom(1.25), { keys: "+", ic: "plus" });
   add("Ver", "zoomOut", "Alejar vista", () => A.zoom(0.8), { keys: "-", ic: "fit" });
   add("Ver", "preview", "Vista previa sin guías", () => app.setMode(S.mode === "preview" ? "edit" : "preview"), { keys: "V", ic: "eye" });
-  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas", "scenes"], ["audio", "Panel Audio y ritmo", "audio"]])
+  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["anim", "Panel Animaciones", "wand"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas", "scenes"], ["audio", "Panel Audio y ritmo", "audio"]])
     add("Ver", "tab-" + id, label, () => app.openTab(id), { ic });
 
   add("Proyección", "output", "Proyectar (panel)", () => app.openTab("output"), { keys: "F", ic: "project" });

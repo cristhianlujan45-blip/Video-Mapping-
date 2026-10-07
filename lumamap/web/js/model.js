@@ -91,15 +91,77 @@ export const GENERATORS = [
   { id: "shooting", name: "Estrellas fugaces" },
   { id: "electric", name: "Electricidad" },
   { id: "windows",  name: "Ventanas" },
+  { id: "hypno",    name: "Hipnosis" },
+  { id: "warp",     name: "Hiperespacio" },
+  { id: "blackhole", name: "Agujero negro" },
+  { id: "dna",      name: "ADN" },
+  { id: "julia",    name: "Fractal" },
+  { id: "metaballs", name: "Lámpara de lava" },
+  { id: "chrome",   name: "Metal líquido" },
+  { id: "discoball", name: "Bola disco" },
+  { id: "portal",   name: "Portal" },
+  { id: "voronoi",  name: "Células neón" },
+  { id: "dvd",      name: "Logo rebotando" },
+  { id: "lissajous", name: "Osciloscopio" },
+  { id: "pixeleq",  name: "Ecualizador pixel ♪" },
+  { id: "rgbglitch", name: "Glitch RGB" },
+  { id: "kaleidolive", name: "Caleidoscopio vivo" },
+  { id: "rainbowroad", name: "Carretera arcoíris" },
+  { id: "infzoom",  name: "Zoom infinito" },
+  { id: "lasershow", name: "Show de láseres ♪" },
+  { id: "circleviz", name: "Visualizador circular ♪" },
+  { id: "particles", name: "Flujo de partículas" },
 ];
 /**
  * Catálogo de animaciones: cada una combina una animación base con su paleta,
  * velocidad, escala y, a veces, un efecto. Organizado por categorías para
- * encontrarlo rápido (más de 130).
+ * encontrarlo rápido (más de 180).
  */
 const AL = [];
 const ani = (cat, name, gen, color, color2, speed = 1, scale = 1, fx = null) =>
   AL.push({ id: "a" + AL.length, cat, name, gen, color, color2, speed, scale, fx });
+// Virales 🔥 (lo que más se ve en redes y en shows)
+ani("Virales 🔥", "Hipnosis", "hypno", "#ffffff", "#000000");
+ani("Virales 🔥", "Hipnosis neón", "hypno", "#ff00aa", "#00e5ff", 1.3);
+ani("Virales 🔥", "Hiperespacio", "warp", "#9fd8ff", "#000000");
+ani("Virales 🔥", "Salto a la velocidad luz", "warp", "#ffffff", "#1a0033", 2);
+ani("Virales 🔥", "Agujero negro", "blackhole", "#ffb000", "#ff3c00");
+ani("Virales 🔥", "Agujero de gusano", "blackhole", "#00e5ff", "#7a00ff", 1.4);
+ani("Virales 🔥", "Portal", "portal", "#00ff9c", "#003a2a");
+ani("Virales 🔥", "Portal de fuego", "portal", "#ffcc00", "#ff2d00", 1.3);
+ani("Virales 🔥", "Lámpara de lava", "metaballs", "#ff6a00", "#3a0010");
+ani("Virales 🔥", "Lámpara de lava azul", "metaballs", "#00e5ff", "#000a40");
+ani("Virales 🔥", "Metal líquido", "chrome", "#c8d6ff", "#20203a");
+ani("Virales 🔥", "Oro líquido", "chrome", "#ffcc33", "#3a2000");
+ani("Virales 🔥", "Logo DVD rebotando", "dvd", "#ffffff", "#000000");
+ani("Virales 🔥", "Zoom infinito", "infzoom", "#ffffff", "#000000");
+ani("Virales 🔥", "Zoom infinito color", "infzoom", "#ff00aa", "#00e5ff", 1.4, 1, { hueCycle: 0.6 });
+ani("Virales 🔥", "Carretera arcoíris", "rainbowroad", "#ffffff", "#14002a");
+ani("Virales 🔥", "Glitch RGB", "rgbglitch", "#ffffff", "#000000");
+ani("Virales 🔥", "Glitch vaporwave", "rgbglitch", "#ff71ce", "#01cdfe", 1, 1, { scanlines: 0.6 });
+ani("Virales 🔥", "Fractal infinito", "julia", "#00e5ff", "#ff00aa");
+ani("Virales 🔥", "Fractal dorado", "julia", "#ffcc00", "#3a1000", 0.7);
+ani("Virales 🔥", "Caleidoscopio vivo", "kaleidolive", "#ff3cac", "#2b86c5");
+ani("Virales 🔥", "Caleidoscopio psicodélico", "kaleidolive", "#b6ff00", "#7a00ff", 1.5, 1, { hueCycle: 0.8 });
+ani("Virales 🔥", "Visualizador circular", "circleviz", "#00e5ff", "#000000");
+ani("Virales 🔥", "Show de láseres", "lasershow", "#00ff3c", "#000000");
+// Nuevas ✨
+ani("Nuevas ✨", "ADN", "dna", "#00e5ff", "#ff00aa");
+ani("Nuevas ✨", "ADN verde", "dna", "#00ff66", "#ffffff", 0.7);
+ani("Nuevas ✨", "Bola disco", "discoball", "#ffffff", "#0a0014");
+ani("Nuevas ✨", "Bola disco de colores", "discoball", "#ff00aa", "#000000", 1.5);
+ani("Nuevas ✨", "Células neón", "voronoi", "#00e5ff", "#7a00ff");
+ani("Nuevas ✨", "Células de lava", "voronoi", "#ffcc00", "#ff2d00", 0.7, 0.7);
+ani("Nuevas ✨", "Osciloscopio", "lissajous", "#00ff66", "#000000");
+ani("Nuevas ✨", "Osciloscopio retro", "lissajous", "#ffb000", "#100800", 1, 1, { crt: 0.6, scanlines: 0.5 });
+ani("Nuevas ✨", "Ecualizador pixel", "pixeleq", "#00ff66", "#ff2d55");
+ani("Nuevas ✨", "Ecualizador pixel azul", "pixeleq", "#00e5ff", "#bf5af2", 1.3);
+ani("Nuevas ✨", "Flujo de partículas", "particles", "#00e5ff", "#ff00aa");
+ani("Nuevas ✨", "Luciérnagas", "particles", "#ffee66", "#0a1a00", 0.5, 0.7);
+ani("Nuevas ✨", "Láseres azules", "lasershow", "#00a2ff", "#ff00aa", 1.3);
+ani("Nuevas ✨", "Visualizador arcoíris", "circleviz", "#ffffff", "#000000", 1.5, 1.2, { hueCycle: 1 });
+ani("Nuevas ✨", "Túnel hipnótico", "hypno", "#00ff9c", "#000000", 0.6, 2);
+ani("Nuevas ✨", "Galaxia de lava", "metaballs", "#ff00aa", "#000000", 0.6, 0.7);
 // Abstracto
 ani("Abstracto", "Plasma eléctrico", "plasma", "#00e5ff", "#ff00aa");
 ani("Abstracto", "Plasma fuego", "plasma", "#ffcc00", "#ff2d55", 1.3);

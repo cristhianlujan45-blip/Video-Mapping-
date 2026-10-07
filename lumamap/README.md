@@ -38,9 +38,17 @@ cualquier navegador moderno.
   referencia en el editor para trazar las formas.
 
 **Contenido**
-- Biblioteca de **144 animaciones** catalogadas (Abstracto, Geométrico, Naturaleza,
-  Espacio, Neón y retro, Luces y show, Fiesta, Música ♪, Calibración) con buscador
-  y miniaturas, sobre 72 animaciones base en GPU.
+- Pestaña **Animaciones** con **184 animaciones** catalogadas (Virales 🔥, Nuevas ✨,
+  Abstracto, Geométrico, Naturaleza, Espacio, Neón y retro, Luces y show, Fiesta,
+  Música ♪, Calibración) con buscador y miniaturas, sobre 92 animaciones base en GPU:
+  hipnosis, hiperespacio, agujero negro, portal, lámpara de lava, metal líquido,
+  fractal, logo DVD rebotando, zoom infinito, carretera arcoíris, show de láseres,
+  visualizador circular… Sin superficie seleccionada, tocar una animación la pone
+  a pantalla completa.
+- **Girar**: asa circular encima de la superficie para girarla a cualquier ángulo
+  (se engancha a 0°, 45°, 90°…), botones ±1°/±15°/±90° y atajos Q / E; la imagen
+  se gira aparte dentro de la superficie (deslizador y ⟲/⟳ 90°).
+- **Pantalla completa en un toque** (barra de la superficie, Contenido o Shift+G).
 - Biblioteca de **122 efectos** (color, retro, glitch, distorsión, caleidoscopio,
   movimiento, luz y cámara: chroma key, luma key, bordes, térmica, visión nocturna…).
 - Videos, fotos y **GIF animados** (también WebP/APNG animados).

@@ -115,6 +115,45 @@ await test("asa lateral: arrastrar el lado derecho ensancha sin mover el izquier
   assert.deepEqual(L(after), L(before), "lado izquierdo fijo");
   assert.ok(after[1].x > before[1].x + 20 && Math.abs(after[1].y - before[1].y) < 0.01, "lado derecho se aleja en horizontal");
 });
+await test("asa de giro: arrastrar el círculo gira la superficie a cualquier ángulo", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.actions.addShape("rect"); });
+  const info = await page.evaluate(async () => {
+    const { rotateHandle, centroid } = await import("./js/math.js");
+    const { ROT_OFF } = await import("./js/overlay.js");
+    const app = window.__lumamap, P = app.S.project, st = document.querySelector("#stage"), d = Math.min(devicePixelRatio, 2);
+    const s = Math.min(st.clientWidth * d / P.width, st.clientHeight * d / P.height) * 0.92 * app.S.view.zoom;
+    const sf = app.surf();
+    return { h: rotateHandle(sf, ROT_OFF * d / s), c: centroid(sf.points), p: sf.points.map(q => ({ ...q })) };
+  });
+  const [hx, hy] = await toScreen([info.h.x, info.h.y]);
+  const [cx, cy] = await toScreen([info.c.x, info.c.y]);
+  // gira 90° alrededor del centro (en pantalla)
+  const tx = cx - (hy - cy), ty = cy + (hx - cx);
+  await page.mouse.move(hx, hy); await page.mouse.down();
+  for (let k = 1; k <= 8; k++) {
+    const a = (Math.PI / 2) * k / 8, dx = hx - cx, dy = hy - cy;
+    await page.mouse.move(cx + dx * Math.cos(a) - dy * Math.sin(a), cy + dx * Math.sin(a) + dy * Math.cos(a));
+  }
+  await page.mouse.move(tx, ty); await page.mouse.up();
+  const after = await page.evaluate(() => window.__lumamap.surf().points);
+  const ang = (a, b) => Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+  const turned = ((ang(after[0], after[1]) - ang(info.p[0], info.p[1]) + 540) % 360) - 180;
+  assert.ok(Math.abs(turned - 90) < 2, "giró " + turned);
+  await page.keyboard.press("Control+z");
+});
+await test("pestaña Animaciones: sin selección crea una superficie a pantalla completa", async () => {
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => { const a = window.__lumamap; a.select?.(null); a.S.sel = null; a.openTab("anim"); });
+  const n0 = await page.evaluate(() => window.__lumamap.S.project.surfaces.length);
+  await page.locator(".tile", { hasText: "Hiperespacio" }).first().click();
+  const r = await page.evaluate(() => { const a = window.__lumamap; const s = a.surf(); const xs = s.points.map(p => p.x), ys = s.points.map(p => p.y);
+    return { n: a.S.project.surfaces.length, gen: a.lookSel().source.gen, w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys), W: a.S.project.width, H: a.S.project.height }; });
+  assert.equal(r.n, n0 + 1); assert.equal(r.gen, "warp");
+  assert.equal(Math.round(r.w), r.W); assert.equal(Math.round(r.h), r.H);
+  await page.evaluate(() => { window.__lumamap.actions.rotateContent(90); window.__lumamap.actions.rotateContent(-90); window.__lumamap.actions.rotateContent(180); });
+  assert.equal(await page.evaluate(() => window.__lumamap.lookSel().fx.rotate), 180);
+  await page.evaluate(() => window.__lumamap.openTab("anim"));
+});
 await test("biblioteca de efectos: aplicar «Contorno neón» y combinar «Espejo selfie»", async () => {
   await page.evaluate(() => window.__lumamap.openTab("fx"));
   await page.locator(".fxlib .chip", { hasText: "Contorno neón" }).first().click();
@@ -133,7 +172,7 @@ await test("catálogo de animaciones y texto animado desde el panel", async () =
   await page.locator(".chip", { hasText: "Ola" }).first().click();
   assert.equal(await page.evaluate(() => window.__lumamap.lookSel().source.textAnim), "wave");
 });
-await test("las 72 animaciones base, el catálogo y los efectos compilan y dibujan sin errores de GPU", async () => {
+await test("las 92 animaciones base, el catálogo y los efectos compilan y dibujan sin errores de GPU", async () => {
   const errs = await page.evaluate(async () => {
     const { Renderer } = await import("./js/renderer.js");
     const M = await import("./js/model.js");
