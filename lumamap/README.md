@@ -61,10 +61,15 @@ cualquier navegador moderno.
   desplazamiento, ondas, caleidoscopio, espejos, pixelado, separación RGB,
   desenfoque, ruido y estroboscopio. Opacidad y 4 modos de mezcla.
 
-**Audio reactivo**
-- Micrófono con análisis de graves, medios, agudos, volumen y golpes (beat), con
-  ganancia automática. Sin micrófono, pulso por BPM con botón **TAP**.
-- Cada superficie puede mover brillo, opacidad, zoom, color, borde o destellos.
+**Audio y ritmo**
+- El micrófono analiza graves, medios, agudos y volumen con ganancia automática,
+  detecta cada **golpe (beat)** y calcula el **BPM** de la música.
+- **Modo ritmo** (se activa solo al encender el micrófono): todo el mapping late
+  con cada golpe: destello de luz, golpe de zoom, cambio de color, aceleración de
+  las animaciones y parpadeo, con intensidad regulable. Puede **cambiar de escena
+  cada N golpes**.
+- Sin micrófono, el pulso sigue el BPM marcado con el botón **TAP**.
+- Además, cada superficie puede reaccionar por su cuenta a una banda concreta.
 
 **Show**
 - Escenas: mismo mapeo con distinto contenido; fundido o corte, duración, avance
@@ -100,6 +105,22 @@ Compilar desde la raíz del repositorio:
 GitHub Actions lo compila en cada push y lo publica como artefacto
 **`lumamap-debug-apk`** (pestaña *Actions*). Requiere Android 8.0+ y Android
 System WebView / Chrome actualizado (WebGL2).
+
+## Windows (PC)
+
+`desktop/` empaqueta la misma app con Electron. Descarga
+`LumaMap-<versión>-Windows-x64.zip` (artefacto **`lumamap-windows-x64`** de
+GitHub Actions), descomprímelo y abre **`LumaMap.exe`**; no requiere instalación.
+Conecta el proyector como pantalla extendida (**Win + P → Extender**) y pulsa
+*Proyectar → Abrir ventana de salida*: se abre sola a pantalla completa en el
+proyector y se recoloca si lo reconectas.
+
+```bash
+cd lumamap/desktop
+npm install
+npm start            # probar en tu PC
+npm run dist:win     # dist/LumaMap-<versión>-Windows-x64.zip
+```
 
 ## Navegador (PC, tablet, PWA)
 
@@ -144,6 +165,7 @@ lumamap/
 │       ├── audio.js     análisis del micrófono y tempo
 │       └── link.js      canal editor ↔ salida (BroadcastChannel / Android)
 ├── android/             app Android (WebView + Presentation)
+├── desktop/             app de escritorio (Electron: Windows, macOS, Linux)
 ├── server/              servidor opcional: estáticos, mando remoto, OSC
 └── tests/
 ```

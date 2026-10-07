@@ -423,7 +423,7 @@ export class Renderer {
 
   /**
    * Dibuja una superficie con su look.
-   * o = { view, time, alpha, tex:{tex,w,h}|null, levels, master }
+   * o = { view, time, alpha, tex:{tex,w,h}|null, levels, master, react }
    */
   drawSurface(s, look, o) {
     const gl = this.gl, L = this.loc, fx = look.fx, src = look.source;
@@ -431,8 +431,10 @@ export class Renderer {
     const lv = o.levels || { bass: 0, mid: 0, high: 0, level: 0, beat: 0 };
     const { aspect } = surfaceAspect(s);
 
-    // Audio reactivo: modula un parámetro del look.
+    // Audio reactivo por superficie: modula el parámetro elegido.
     let bri = fx.brightness, alpha = look.opacity * o.alpha, zoom = fx.zoom, hue = fx.hue, border = fx.border, strobe = fx.strobe;
+    let rot = (fx.rotate || 0) * Math.PI / 180 + (fx.spin || 0) * o.time;
+    let gtime = o.time * (src.speed ?? 1);
     if (look.audio?.enabled) {
       const a = (lv[look.audio.band] ?? 0) * (look.audio.amount ?? 1);
       switch (look.audio.target) {
@@ -443,6 +445,18 @@ export class Renderer {
         case "border": border = Math.max(border, 0.004) * (1 + a * 4); break;
         case "strobe": if (lv.beat < 0.5 * (look.audio.amount ?? 1)) alpha *= 0.05; break;
       }
+      gtime += lv.beat * 0.3;
+    }
+    // Modo ritmo global: todo el mapping late con los golpes y el BPM.
+    const R = o.react;
+    if (R?.enabled) {
+      const k = R.amount ?? 1, beat = lv.beat || 0, n = lv.count || 0;
+      if (R.pulse) bri *= 1 + beat * 0.9 * k;
+      if (R.zoom) zoom *= 1 + beat * 0.14 * k;
+      if (R.color) hue += ((n * 0.13 * Math.min(1, k)) % 1);
+      if (R.motion) { gtime += (n - beat) * 0.45 * k; rot += beat * 0.06 * k; } // acelera en cada golpe
+      if (R.flash) alpha *= Math.min(1, 0.15 + beat * 1.2);
+      if (border > 0) border *= 1 + beat * 1.5 * k;
     }
     if (strobe > 0 && Math.floor(o.time * strobe * 2) % 2 === 1) alpha *= 0.0;
     if (alpha <= 0.002) return;
@@ -472,7 +486,7 @@ export class Renderer {
     gl.uniform3fv(L.u_c1, hexToRgb(src.color));
     gl.uniform3fv(L.u_c2, hexToRgb(src.color2));
     gl.uniform1f(L.u_gscale, src.scale || 1);
-    gl.uniform1f(L.u_gtime, o.time * (src.speed ?? 1) + (look.audio?.enabled ? lv.beat * 0.3 : 0));
+    gl.uniform1f(L.u_gtime, gtime);
     gl.uniform1f(L.u_aspect, aspect);
     gl.uniform1f(L.u_time, o.time);
     gl.uniform1f(L.u_alpha, Math.min(1, alpha) * (o.master ?? 1));
@@ -489,7 +503,7 @@ export class Renderer {
     gl.uniform1f(L.u_kal, fx.kaleido || 0);
     gl.uniform1f(L.u_wave, fx.wave);
     gl.uniform1f(L.u_zoom, zoom);
-    gl.uniform1f(L.u_rot, (fx.rotate || 0) * Math.PI / 180 + (fx.spin || 0) * o.time);
+    gl.uniform1f(L.u_rot, rot);
     gl.uniform2f(L.u_scroll, ((fx.scrollX || 0) * o.time) % 1, ((fx.scrollY || 0) * o.time) % 1);
     gl.uniform1f(L.u_border, border);
     gl.uniform1f(L.u_glow, fx.borderGlow ?? 0.5);

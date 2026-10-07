@@ -231,3 +231,6 @@ body.projecting #projbar.show{display:flex;}
   .cta span{display:none;}
   .cta{width:46px;padding:0;justify-content:center;}
 }
+.bpmrow{display:flex;align-items:center;gap:14px;margin:12px 0 6px;}
+.bpmrow .bpm{font-size:34px;font-weight:900;color:var(--acc2);font-variant-numeric:tabular-nums;}
+.beatlamp{width:42px;height:42px;border-radius:50%;background:radial-gradient(circle,#fff,var(--acc2) 55%,transparent 72%);flex:none;opacity:.15;}

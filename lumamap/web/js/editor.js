@@ -53,7 +53,7 @@ const S = {
   extDisplays: 0,
   levels: { bass: 0, mid: 0, high: 0, level: 0, beat: 0 },
   ref: { url: null, opacity: 0.5, camera: false },
-  dirty: true, saveDue: 0, lastState: 0, lastSync: 0,
+  dirty: true, saveDue: 0, lastState: 0, lastSync: 0, lastCount: 0, beatsInScene: 0,
 };
 
 const history = new History();
@@ -611,8 +611,13 @@ A.refCamera = async (on) => {
    ====================================================================== */
 A.toggleMic = async () => {
   try {
-    if (audio.active) audio.stop(); else await audio.start();
-    toast(audio.active ? "Micrófono activo · las superficies con «Audio» reaccionan" : "Micrófono apagado (pulso por BPM)");
+    if (audio.active) audio.stop();
+    else {
+      await audio.start();
+      const R = S.project.settings.react;
+      if (!R.enabled) { R.enabled = true; changed(); commit(); }
+    }
+    toast(audio.active ? "Micrófono activo · todo el mapping sigue el ritmo" : "Micrófono apagado (pulso por BPM)");
   } catch (e) { toast("Micrófono no disponible: " + e.message, "err"); }
   renderPanel();
 };
@@ -1316,6 +1321,12 @@ function tick(now) {
   fpsAvg = fpsAvg * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
   if (S.playing) S.clock += dt;
   S.levels = audio.update(now);
+  // Cambio de escena al ritmo: cada N golpes.
+  const R = S.project.settings.react;
+  if (S.levels.count !== S.lastCount) {
+    S.lastCount = S.levels.count;
+    if (S.playing && R.enabled && R.sceneBeats > 0 && S.project.scenes.length > 1 && ++S.beatsInScene >= R.sceneBeats) { S.beatsInScene = 0; A.stepScene(1); }
+  }
 
   // Auto-avance de escenas
   const sc = scene();

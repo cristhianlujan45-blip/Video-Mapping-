@@ -345,10 +345,16 @@ const scenes = {
 };
 
 /* ---------------------------------------------------------------- Audio */
+const REACT_PARTS = [
+  ["pulse", "Destello de luz"], ["zoom", "Golpe de zoom"], ["color", "Cambio de color"],
+  ["motion", "Acelerar animación"], ["flash", "Parpadeo"],
+];
+
 const audio = {
-  title: () => "Audio reactivo",
+  title: () => "Audio y ritmo",
   render(app) {
-    const S = app.S, A = app.actions, au = app.audio();
+    const S = app.S, A = app.actions, au = app.audio(), R = S.project.settings.react;
+    // Medidores en vivo
     const meters = h("div", {});
     const bars = {};
     for (const [k, label] of AUDIO_BANDS) {
@@ -356,32 +362,54 @@ const audio = {
       bars[k] = b;
       meters.append(h("div", { class: "meter" }, label, h("div", {}, b)));
     }
-    const beat = h("b");
-    meters.append(h("div", { class: "meter" }, "Golpe", h("div", {}, beat)));
+    const beatBar = h("b");
+    meters.append(h("div", { class: "meter" }, "Golpe", h("div", {}, beatBar)));
+    const bpmOut = h("output", { class: "bpm" }, "—");
+    const bpmSrc = h("small", {});
+    const lamp = h("span", { class: "beatlamp" });
     const loop = () => {
       if (!meters.isConnected) return;
-      for (const k of Object.keys(bars)) bars[k].style.width = Math.round((S.levels[k] || 0) * 100) + "%";
-      beat.style.width = Math.round((S.levels.beat || 0) * 100) + "%";
+      const L = S.levels;
+      for (const k of Object.keys(bars)) bars[k].style.width = Math.round((L[k] || 0) * 100) + "%";
+      beatBar.style.width = Math.round((L.beat || 0) * 100) + "%";
+      lamp.style.opacity = 0.15 + (L.beat || 0) * 0.85;
+      bpmOut.textContent = Math.round(L.bpm || au.bpm);
+      bpmSrc.textContent = au.active ? (au.detected ? "detectado por el micrófono" : "escuchando… pon música con golpes marcados") : "tempo manual (TAP)";
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
-    const bpmOut = h("output", {}, au.bpm);
-    const tap = h("button", { class: "tapbtn", onclick: () => { bpmOut.textContent = A.tap(); } }, "TAP");
+    const setR = (k) => (v) => app.edit(() => { R[k] = v; });
+
+    const parts = h("div", { class: "chips" });
+    for (const [k, label] of REACT_PARTS) {
+      const b = h("button", { class: `chip ${R[k] ? "on" : ""}`, onclick: () => { app.edit(() => { R[k] = !R[k]; }); b.classList.toggle("on", R[k]); } }, label);
+      parts.append(b);
+    }
+    const tap = h("button", { class: "tapbtn", onclick: () => { A.tap(); } }, "TAP");
+
     const wrap = h("div", {},
-      section("Fuente",
-        btn({ label: au.active ? "Micrófono activo · apagar" : "Escuchar con el micrófono", ic: "mic", kind: `bigbtn ${au.active ? "on" : "primary"}`, onClick: A.toggleMic }),
-        hint(au.active ? "Pon la música cerca del dispositivo." : "Sin micrófono, el pulso sigue el tempo (BPM) de abajo."),
+      section("Micrófono",
+        btn({ label: au.active ? "Micrófono activo · apagar" : "Escuchar la música con el micrófono", ic: "mic", kind: `bigbtn ${au.active ? "on" : "primary"}`, onClick: A.toggleMic }),
+        h("div", { class: "bpmrow" }, lamp, h("div", {}, h("div", {}, bpmOut, " BPM"), bpmSrc)),
         meters,
-        au.active ? slider({ label: "Sensibilidad", min: 0.3, max: 3, value: au.gain, def: 1, fmt: fix(1), onInput: (v) => { au.gain = v; } }) : null),
-      section("Tempo",
-        h("div", { class: "sl-head" }, h("span", { class: "lab" }, "BPM"), bpmOut),
+        slider({ label: "Sensibilidad", min: 0.3, max: 3, value: au.gain, def: 1, fmt: fix(1), onInput: (v) => { au.gain = v; } }),
+        hint("Si no detecta los golpes, acerca el dispositivo al altavoz o sube la sensibilidad.")),
+      section("Todo reacciona al ritmo",
+        toggle({ label: "Modo ritmo", hint: "Todas las superficies cambian con cada golpe", value: R.enabled, onChange: (v) => { app.edit(() => { R.enabled = v; }); } }),
+        slider({ label: "Intensidad", min: 0.2, max: 2, value: R.amount, def: 1, fmt: pct, onInput: setR("amount") }),
+        h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Qué cambia en cada golpe")),
+        parts,
+        stepper({ label: "Cambiar de escena cada (golpes, 0 = no)", value: R.sceneBeats, min: 0, max: 64, onChange: setR("sceneBeats") }),
+        S.project.scenes.length < 2 && R.sceneBeats ? hint("Crea al menos 2 escenas para que cambien al ritmo.") : null),
+      section("Tempo manual",
         tap,
-        hint("Toca TAP al ritmo de la música (4 veces o más).")));
+        hint("Sin micrófono, toca TAP 4 veces al ritmo de la música y todo late a ese tempo.")));
+
     const s = app.surf();
     if (s) {
       const look = app.lookSel(), a = look.audio;
-      wrap.append(section(`Reacción · ${s.name}`,
-        toggle({ label: "Reaccionar al audio", value: a.enabled, onChange: (v) => { app.edit(() => { a.enabled = v; }); } }),
+      wrap.append(section(`Solo esta superficie · ${s.name}`,
+        toggle({ label: "Reacción propia al audio", value: a.enabled, onChange: (v) => { app.edit(() => { a.enabled = v; }); } }),
         h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Escuchar")),
         segmented({ options: AUDIO_BANDS, value: a.band, small: true, onChange: (v) => app.edit(() => { a.band = v; }) }),
         h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Para mover")),
@@ -391,7 +419,7 @@ const audio = {
           app.edit(() => { for (const o of S.project.surfaces) lookOf(app.scene(), o.id).audio = { ...a, enabled: true }; });
           toast("Todas las superficies reaccionan al audio");
         } })));
-    } else wrap.append(hint("Selecciona una superficie para hacer que reaccione a la música."));
+    }
     return wrap;
   },
 };
@@ -409,8 +437,11 @@ const output = {
         hint(n ? `Pantalla externa detectada${window.LumaNative.externalSize ? " · " + window.LumaNative.externalSize() : ""}.` : "Conecta el proyector con un adaptador USB-C → HDMI. Se detecta automáticamente."),
         btn({ label: S.output === "native" ? "Detener proyección" : "Proyectar en pantalla externa", ic: "project", kind: `bigbtn ${S.output === "native" ? "danger" : "primary"}`, disabled: !n && S.output !== "native", onClick: A.projectExternal })));
     } else {
-      wrap.append(section("Otra pantalla",
-        hint("Abre la salida en una ventana, llévala al proyector (pantalla extendida) y pulsa «Pantalla completa»."),
+      const desktop = /Electron/.test(navigator.userAgent);
+      wrap.append(section(desktop ? "Proyector (segunda pantalla)" : "Otra pantalla",
+        hint(desktop
+          ? "Conecta el proyector como pantalla extendida (en Windows: tecla Win + P → Extender). La salida se abre sola a pantalla completa en el proyector."
+          : "Abre la salida en una ventana, llévala al proyector (pantalla extendida) y pulsa «Pantalla completa»."),
         btn({ label: S.outWin && !S.outWin.closed ? "Ventana de salida abierta" : "Abrir ventana de salida", ic: "screen", kind: "bigbtn primary", onClick: A.openWindow })));
     }
     wrap.append(section("Esta pantalla",

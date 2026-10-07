@@ -66,7 +66,7 @@ export class Compositor {
         const look = scene.looks[s.id];
         if (!look || look.hidden || alpha <= 0) continue;
         const tex = this.textureFor(scene, s, look, o);
-        this.r.drawSurface(s, look, { view: o.view, time: o.time, alpha, tex, levels: o.levels, master: o.master });
+        this.r.drawSurface(s, look, { view: o.view, time: o.time, alpha, tex, levels: o.levels, master: o.master, react: project.settings.react });
       }
     }
   }

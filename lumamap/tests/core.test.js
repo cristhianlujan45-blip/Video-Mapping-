@@ -8,6 +8,7 @@ import * as M from "../web/js/model.js";
 import { History } from "../web/js/history.js";
 import { hitStroke, isAnimated, strokesSignature } from "../web/js/drawing.js";
 import { detectQuads } from "../web/js/automap.js";
+import { estimateBpm, foldBpm } from "../web/js/audio.js";
 import { test, report } from "./harness.js";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -177,6 +178,19 @@ await test("firma de trazos detecta cambios y animaciones", () => {
   assert.notEqual(strokesSignature(a), strokesSignature([...a, { id: "y", pts: [] }]));
   assert.equal(isAnimated(a), false);
   assert.equal(isAnimated([{ id: "z", anim: "pulse", pts: [] }]), true);
+});
+
+console.log("== Ritmo ==");
+await test("estima el BPM con golpes desplazados por los fotogramas (±16 ms)", () => {
+  const t = []; let x = 0;
+  for (let i = 0; i < 16; i++) { t.push(Math.round((x + (i % 3 - 1) * 16) * 10) / 10); x += 60000 / 128; }
+  assert.ok(Math.abs(estimateBpm(t) - 128) < 3, String(estimateBpm(t)));
+});
+await test("tolera golpes perdidos y lleva el tempo al rango musical", () => {
+  const p = 60000 / 100, t = [0, p, 3 * p, 4 * p, 5 * p, 7 * p, 8 * p];
+  assert.ok(Math.abs(estimateBpm(t) - 100) < 1.5, String(estimateBpm(t)));
+  assert.equal(Math.round(foldBpm(60000 / 60)), 120);
+  assert.equal(estimateBpm([0, 500]), null);
 });
 
 console.log("== Detección de superficies en foto (experimental) ==");

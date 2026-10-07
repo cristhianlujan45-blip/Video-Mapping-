@@ -159,6 +159,14 @@ export function createScene(name = "Escena 1") {
   return { id: uid("scene"), name, duration: 0, transition: "fade", looks: {} };
 }
 
+/** Ajustes del proyecto. react = modo ritmo global (todo late con la música). */
+export function defaultSettings() {
+  return {
+    transitionMs: 800, autoAdvance: false, loopScenes: true, bpm: 120,
+    react: { enabled: false, amount: 1, pulse: true, zoom: true, color: true, motion: true, flash: false, sceneBeats: 0 },
+  };
+}
+
 export function createProject(name = "Mi mapping", width = 1920, height = 1080) {
   const scene = createScene("Escena 1");
   return {
@@ -166,7 +174,7 @@ export function createProject(name = "Mi mapping", width = 1920, height = 1080) 
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     surfaces: [], scenes: [scene], sceneId: scene.id,
     media: [],   // metadatos; los archivos viven en IndexedDB (store.js)
-    settings: { transitionMs: 800, autoAdvance: false, loopScenes: true, bpm: 120 },
+    settings: defaultSettings(),
   };
 }
 
@@ -311,7 +319,8 @@ export function normalizeProject(json) {
     throw new Error("El proyecto no contiene superficies o escenas");
   json.width = json.width || 1920; json.height = json.height || 1080;
   json.media = Array.isArray(json.media) ? json.media : [];
-  json.settings = { transitionMs: 800, autoAdvance: false, loopScenes: true, bpm: 120, ...(json.settings || {}) };
+  const st = json.settings || {};
+  json.settings = { ...defaultSettings(), ...st, react: { ...defaultSettings().react, ...(st.react || {}) } };
   if (!json.scenes.length) json.scenes.push(createScene());
   if (!json.scenes.some(s => s.id === json.sceneId)) json.sceneId = json.scenes[0].id;
   for (const s of json.surfaces) {

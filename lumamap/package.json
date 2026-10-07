@@ -1,6 +1,6 @@
 {
   "name": "lumamap",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Video mapping táctil: editor + salida a proyector + mando remoto. Web (PWA) y Android.",
   "type": "module",
   "scripts": {
