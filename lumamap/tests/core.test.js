@@ -250,6 +250,41 @@ await test("analiza ffmpeg y decide conservar, re-empaquetar o convertir", async
   assert.equal(decide({ codec: null }, ".mp4", T).action, "keep");
 });
 
+console.log("== Mezcla en vivo, pantallas y sensores ==");
+await test("cubierta B: fader manual, fundido por tiempo y contenido de B", async () => {
+  const { mixOf, deckB } = await import("../web/js/compose.js");
+  const look = M.createLook({ type: "gen", gen: "plasma" });
+  look.next = { source: { ...M.DEFAULT_SOURCE(), type: "gen", gen: "warp", color: "#ffffff" }, fx: null, fit: null };
+  look.mix = 0.3;
+  assert.equal(mixOf(look, 10), 0.3);
+  look.fade = { t0: 10, dur: 2 };
+  assert.equal(mixOf(look, 10), 0); assert.equal(mixOf(look, 11), 0.5); assert.equal(mixOf(look, 20), 1);
+  const b = deckB(look);
+  assert.equal(b.source.gen, "warp"); assert.equal(b.next, null); assert.equal(b.fx, look.fx, "sin fx propio usa los de A");
+});
+await test("el proyecto conserva lo «siguiente», las pantallas y los sensores", () => {
+  const p = M.createProject();
+  const s = M.createQuad({ corners: M.rectCorners(0, 0, 100, 100) });
+  M.addSurface(p, s);
+  s.screen = 2;
+  p.scenes[0].looks[s.id].next = { source: { type: "gen", gen: "dna" } };
+  p.settings.screens = { 2: { on: false } };
+  p.settings.sensors = [{ id: "x", action: "beat" }];
+  const n = M.normalizeProject(JSON.parse(JSON.stringify(p)));
+  const l = n.scenes[0].looks[s.id];
+  assert.equal(l.next.source.gen, "dna"); assert.equal(l.next.source.speed, 1, "completa la fuente de B");
+  assert.equal(n.surfaces[0].screen, 2);
+  assert.equal(n.settings.screens[2].on, false); assert.equal(n.settings.screens[2].master, 1);
+  assert.equal(n.settings.screens[4].on, true);
+  assert.equal(n.settings.sensors[0].action, "beat");
+});
+await test("efectos de pantalla y umbral de sensores", () => {
+  for (const [id] of M.SCREEN_FX) assert.equal(typeof M.screenFilter(id, 1.5), "string");
+  assert.equal(M.screenFilter("none"), "");
+  assert.match(M.screenFilter("hue", 1), /hue-rotate\(60deg\)/);
+  assert.ok(M.sensorThreshold({ sens: 1 }) < M.sensorThreshold({ sens: 0 }), "más sensible = umbral más bajo");
+});
+
 console.log("== Historial ==");
 await test("deshacer / rehacer por instantáneas", () => {
   const h = new History();

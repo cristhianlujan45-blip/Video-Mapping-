@@ -48,6 +48,25 @@ cualquier navegador moderno.
 - **Girar**: asa circular encima de la superficie para girarla a cualquier ángulo
   (se engancha a 0°, 45°, 90°…), botones ±1°/±15°/±90° y atajos Q / E; la imagen
   se gira aparte dentro de la superficie (deslizador y ⟲/⟳ 90°).
+- **Mezcla en vivo (pestaña En vivo)**: cada superficie o pantalla tiene AHORA y
+  SIGUIENTE; eliges lo siguiente (animación, video, cámara o cuerpo), lo mezclas
+  con el fader A⟷B o pulsas GO para fundir (corte, ½ s … 8 s). GO todas, todas al
+  azar y mezcla automática al ritmo cada 4/8/16/32 golpes. Atajos: Enter = GO
+  todas, Shift+Enter = todas al azar, Z = siguiente al azar, X = GO.
+- **Varias pantallas (P1-P4)**: cada superficie elige por qué salida sale; cada
+  pantalla se enciende/apaga por separado y tiene su brillo, estrobo y efecto
+  (blanco y negro, invertir, sepia, colores vivos, arcoíris, desenfoque…). En
+  Windows cada pantalla se abre sola en el siguiente monitor/proyector libre.
+- **Cuerpo en animación (como Kinect)**: una cámara apuntando a la persona o al
+  artista convierte su silueta en animación en tiempo real con IA (MediaPipe,
+  incluida en la app, funciona sin internet): silueta animada, contorno neón,
+  estela de movimiento, sombra, persona sin fondo o solo movimiento. Sin IA usa
+  la detección de movimiento.
+- **Varias cámaras**: cada fuente elige su cámara (USB, capturadora, la del móvil,
+  trasera o frontal); unas para proyectar con efectos, otras como cuerpo y otras
+  como **sensores**: cuando alguien se mueve en una zona (izquierda, centro,
+  derecha, arriba, abajo) cambia la animación, hace un golpe de luz, cambia de
+  escena o enciende/apaga superficies.
 - **Pantalla completa en un toque** (barra de la superficie, Contenido o Shift+G).
 - Biblioteca de **122 efectos** (color, retro, glitch, distorsión, caleidoscopio,
   movimiento, luz y cámara: chroma key, luma key, bordes, térmica, visión nocturna…).

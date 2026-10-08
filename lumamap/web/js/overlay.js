@@ -119,8 +119,8 @@ export function drawGuides(ctx, project, view, { selectedId = null, pointIdx = -
 /* ---------------- Ajustes de salida (proyector) ---------------- */
 
 /** Corrección de color y orientación del proyector (techo / retroproyección) vía CSS. */
-export function applyOutputCSS(els, o) {
-  const f = `brightness(${o.brightness ?? 1}) contrast(${o.contrast ?? 1}) saturate(${o.saturation ?? 1})`;
+export function applyOutputCSS(els, o, extra = "") {
+  const f = `brightness(${o.brightness ?? 1}) contrast(${o.contrast ?? 1}) saturate(${o.saturation ?? 1})` + (extra ? " " + extra : "");
   const t = `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1}) rotate(${o.rotate === 180 ? 180 : 0}deg)`;
   for (const el of els) {
     if (!el) continue;

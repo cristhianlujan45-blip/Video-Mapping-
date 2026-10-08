@@ -7,9 +7,12 @@ import { Compositor, sceneLayers } from "./compose.js";
 import { MediaPool } from "./sources.js";
 import { Link } from "./link.js";
 import { drawPattern, drawGuides, applyOutputCSS, drawSoftEdge } from "./overlay.js";
-import { normalizeProject, usedMediaIds } from "./model.js";
+import { normalizeProject, usedMediaIds, screenFilter, defaultScreen } from "./model.js";
 
 const glCanvas = document.getElementById("out");
+/** Número de pantalla de esta salida (?screen=N); la de Android/Presentation es la 1. */
+const SCREEN = Math.max(1, +new URLSearchParams(location.search).get("screen") || 1);
+if (SCREEN > 1) document.title = `LumaMap · Pantalla ${SCREEN}`;
 const ov = document.getElementById("ov");
 const octx = ov.getContext("2d");
 const hud = document.getElementById("hud");
@@ -46,7 +49,7 @@ const link = new Link("output", async (m) => {
     if (prevScene && prevScene !== project.sceneId && m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - (m.tr.elapsed || 0), dur: m.tr.dur };
     for (const id of usedMediaIds(project)) pool.ensure(id);
     for (const id of [...pool.items.keys()]) if (!project.media.some(md => md.id === id)) pool.remove(id);
-    hud.querySelector("small").textContent = `${project.name} · ${project.width}×${project.height}`;
+    hud.querySelector("small").textContent = `${SCREEN > 1 ? "Pantalla " + SCREEN + " · " : ""}${project.name} · ${project.width}×${project.height}`;
     resize();
   } else if (m.t === "state") {
     const wasPlaying = st.playing;
@@ -112,15 +115,19 @@ function tick() {
   if (oc.fps && oc.fps < 120 && now - lastDraw < 1000 / oc.fps - 2) return;
   lastDraw = now;
   resize();
-  applyOutputCSS([glCanvas, ov], oc);
   const time = st.playing ? now / 1000 + timeOffset : frozenTime;
+  // Control de esta pantalla: encendida, brillo, estrobo y efecto propio.
+  const sc = project.settings.screens?.[SCREEN] || defaultScreen();
+  const strobeOff = sc.strobe > 0 && Math.floor(now / 1000 * sc.strobe * 2) % 2 === 1;
+  applyOutputCSS([glCanvas], oc, screenFilter(sc.fx, now / 1000));
+  applyOutputCSS([ov], oc);
   const W = project.width, H = project.height;
   const k = renderer.fitScale(W, H, oc.renderScale || 1);
   const view = { sx: k, sy: k, tx: 0, ty: 0 };
   if (tr && now - tr.start > tr.dur) tr = null;
   comp.frame(project, {
     layers: sceneLayers(project, tr, now), time, levels: liveLevels(now), view,
-    master: st.master, blackout: st.blackout || !!st.pattern, clear: [0, 0, 0, 1], live: st.live || null,
+    master: st.master * (sc.master ?? 1), blackout: st.blackout || !!st.pattern || !sc.on || strobeOff, clear: [0, 0, 0, 1], live: st.live || null, screen: SCREEN,
   });
   octx.setTransform(ovk, 0, 0, ovk, 0, 0);
   octx.clearRect(0, 0, W, H);

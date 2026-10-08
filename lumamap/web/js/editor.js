@@ -5,8 +5,9 @@ import * as M from "./model.js";
 import * as Store from "./store.js";
 import { History } from "./history.js";
 import { Renderer, webgl2Supported } from "./renderer.js";
-import { Compositor, sceneLayers } from "./compose.js";
-import { MediaPool, createRuntime, kindOf, getCamera, stopCamera } from "./sources.js";
+import { Compositor, sceneLayers, deckB } from "./compose.js";
+import { MediaPool, createRuntime, kindOf, getCamera, stopCamera, cameraIfReady } from "./sources.js";
+import { motionSensor } from "./body.js";
 import { AudioEngine } from "./audio.js";
 import { Link, nativeBridge } from "./link.js";
 import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge, ROT_OFF } from "./overlay.js";
@@ -42,6 +43,8 @@ const S = {
   view: { zoom: 1, panX: 0, panY: 0 },
   playing: true,
   clock: 0,             // segundos de animación (avanza solo en reproducción)
+  liveFade: 2,          // duración del fundido del mezclador en vivo (s)
+  autoMix: 0, autoMixCount: 0,
   master: 1, blackout: false, pattern: null, guides: false, muted: false,
   tr: null,             // transición de escena {fromId, start, dur}
   sceneStart: 0,        // reloj en que empezó la escena actual (auto-avance)
@@ -280,6 +283,139 @@ A.fillFrame = () => {
   }
   changed({ panel: true }); commit(); toast("Pantalla completa");
 };
+
+/** Por qué pantalla de salida sale una superficie (0 = todas). */
+A.setScreen = (id, n) => {
+  const s = S.project.surfaces.find(x => x.id === id);
+  if (!s) return;
+  s.screen = n || 0;
+  changed({ panel: true }); commit();
+};
+/** Qué pantalla se ve en el editor (0 = todas). */
+A.setViewScreen = (n) => { S.viewScreen = n || 0; changed({ panel: true }); };
+
+/* ---- pantallas de salida: encender/apagar, brillo, efecto ---- */
+A.setScreenCfg = (n, patch, live = false) => {
+  const sc = S.project.settings.screens[n];
+  Object.assign(sc, patch);
+  if (live) { changed(); commitSoon(); } else { changed({ panel: true }); commit(); }
+};
+A.allScreens = (on) => { for (const n of [1, 2, 3, 4]) S.project.settings.screens[n].on = on; changed({ panel: true }); commit(); };
+
+/* ---- sensores de cámara (interacción) ---- */
+const sensorFired = new Map();       // id -> último disparo (ms)
+const sensorWanted = new Set();
+S.sensorLevels = {};
+A.addSensor = () => {
+  S.project.settings.sensors.push({ id: M.uid("sen"), camId: "", zone: "all", sens: 0.5, action: "next", target: "all", cooldown: 2 });
+  changed({ panel: true }); commit();
+};
+A.updateSensor = (id, patch, live = false) => {
+  const r = S.project.settings.sensors.find(x => x.id === id);
+  if (!r) return;
+  Object.assign(r, patch);
+  if (live) { changed(); commitSoon(); } else { changed({ panel: true }); commit(); }
+};
+A.removeSensor = (id) => {
+  S.project.settings.sensors = S.project.settings.sensors.filter(x => x.id !== id);
+  changed({ panel: true }); commit();
+};
+function fireSensor(r) {
+  const ids = r.target === "all" ? S.project.surfaces.filter(x => !x.hidden).map(x => x.id) : [r.target];
+  switch (r.action) {
+    case "next": for (const id of ids) if (S.project.surfaces.some(x => x.id === id)) A.randomNext(id, true); break;
+    case "go": for (const id of ids) if (S.project.surfaces.some(x => x.id === id)) A.go(id); break;
+    case "beat": audio.fire(); break;
+    case "scene": A.stepScene(1); break;
+    case "black": for (const id of ids) if (S.project.surfaces.some(x => x.id === id)) A.toggleSurfaceBlack(id); break;
+  }
+}
+function tickSensors(now) {
+  const list = S.project.settings.sensors;
+  if (!list || !list.length) return;
+  for (const r of list) {
+    const ck = r.camId || "default";
+    const cam = cameraIfReady(ck);
+    if (!cam) {
+      if (!sensorWanted.has(ck)) { sensorWanted.add(ck); getCamera(ck).catch(e => toast("Cámara del sensor: " + e.message, "err")).finally(() => setTimeout(() => sensorWanted.delete(ck), 4000)); }
+      continue;
+    }
+    const lv = motionSensor(ck).update(cam.el)[r.zone || "all"] || 0;
+    S.sensorLevels[r.id] = lv;
+    if (lv > M.sensorThreshold(r) && now - (sensorFired.get(r.id) || 0) > (r.cooldown ?? 2) * 1000) {
+      sensorFired.set(r.id, now);
+      S.sensorHit = { id: r.id, at: now };
+      fireSensor(r);
+    }
+  }
+}
+
+/* ---- mezclador en vivo (cubierta A = lo que suena, B = lo siguiente) ---- */
+const lookOfId = (id) => M.lookOf(scene(), id);
+const takeTimers = new Map();
+/** Prepara lo siguiente que entrará en una superficie. */
+A.setNext = (id, next) => {
+  const l = lookOfId(id);
+  l.next = { source: { ...M.DEFAULT_SOURCE(), ...next.source }, fx: next.fx ? { ...M.DEFAULT_FX(), ...next.fx } : null, fit: next.fit || null };
+  l.mix = 0; l.fade = null;
+  changed({ panel: true }); commit();
+};
+/** B pasa a ser A. */
+A.take = (id) => {
+  clearTimeout(takeTimers.get(id)); takeTimers.delete(id);
+  const l = lookOfId(id);
+  if (!l.next) return;
+  const b = deckB(l);
+  l.source = b.source; l.fx = b.fx; l.fit = b.fit;
+  l.next = null; l.mix = 0; l.fade = null;
+  changed({ panel: true }); commit();
+};
+/** Fader manual A↔B. */
+A.setMix = (id, v) => {
+  const l = lookOfId(id);
+  if (!l.next) return;
+  l.fade = null; l.mix = v;
+  if (v >= 0.999) A.take(id); else changed();
+};
+/** Fundido automático hacia lo siguiente (dur en segundos; 0 = corte). */
+A.go = (id, dur = S.liveFade) => {
+  const l = lookOfId(id);
+  if (!l.next) return false;
+  if (!dur || !S.playing) { A.take(id); return true; }
+  l.fade = { t0: S.clock, dur }; l.mix = 0;
+  changed();
+  clearTimeout(takeTimers.get(id));
+  takeTimers.set(id, setTimeout(() => A.take(id), dur * 1000 + 30));
+  return true;
+};
+A.goAll = (dur = S.liveFade) => {
+  let n = 0;
+  for (const s of S.project.surfaces) if (!s.hidden && A.go(s.id, dur)) n++;
+  if (!n) toast("Prepara primero lo «siguiente» en alguna pantalla");
+};
+/** Animación al azar del catálogo como siguiente (y opcionalmente entra ya). */
+A.randomNext = (id, goNow = false) => {
+  const list = M.ANIM_LIBRARY.filter(a => a.cat !== "Calibración");
+  const cur = lookOfId(id).source;
+  let a;
+  do a = list[Math.floor(Math.random() * list.length)]; while (list.length > 1 && a.gen === cur.gen && a.color === cur.color);
+  const anim = { gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale };
+  // En una superficie de cuerpo (Kinect) cambia la animación de dentro, no la cámara.
+  if (cur.type === "body" && cur.bodyMode !== "persona") A.setNext(id, { source: { ...cur, ...anim } });
+  else A.setNext(id, { source: { type: "gen", ...anim }, fx: a.fx || null });
+  if (goNow) A.go(id);
+  return a;
+};
+A.randomAll = () => {
+  for (const s of S.project.surfaces) if (!s.hidden) A.randomNext(s.id, true);
+};
+A.toggleSurfaceBlack = (id) => {
+  const l = lookOfId(id);
+  l.hidden = !l.hidden;
+  changed({ panel: true }); commit();
+};
+/** Mezcla automática: cada N golpes, una animación nueva al azar en cada pantalla. */
+A.setAutoMix = (beats) => { S.autoMix = beats; S.autoMixCount = 0; renderPanel(); toast(beats ? `Mezcla automática cada ${beats} golpes` : "Mezcla automática apagada"); };
 
 /* ---- máscara ---- */
 A.editMask = () => {
@@ -670,7 +806,7 @@ A.refClear = () => {
 A.refCamera = async (on) => {
   try {
     if (on) { const cam = await getCamera(); $("#refCam").srcObject = cam.stream; $("#refCam").play().catch(() => {}); }
-    else { $("#refCam").srcObject = null; if (!S.project.scenes.some(sc => Object.values(sc.looks).some(l => l.source.type === "camera"))) stopCamera(); }
+    else { $("#refCam").srcObject = null; if (!S.project.scenes.some(sc => Object.values(sc.looks).some(l => l.source.type === "camera" || l.source.type === "body")) && !(S.project.settings.sensors || []).length) stopCamera("default"); }
     S.ref.camera = on;
   } catch (e) { toast("Cámara no disponible: " + e.message, "err"); S.ref.camera = false; }
   renderPanel();
@@ -753,9 +889,19 @@ A.projectExternal = () => {
   updateChrome(); renderPanel();
 };
 
-A.openWindow = () => {
+A.openWindow = (n = 1) => {
+  if (typeof n !== "number" || n < 1) n = 1;
+  if (n > 1) {
+    S.outWins = S.outWins || {};
+    const w = S.outWins[n];
+    if (w && !w.closed) { w.focus(); return; }
+    S.outWins[n] = window.open(`output.html?screen=${n}`, `lumamap-output-${n}`, "popup,width=1280,height=720");
+    if (!S.outWins[n]) return toast("El navegador bloqueó la ventana emergente. Permite ventanas emergentes.", "err");
+    if (!S.project.surfaces.some(x => x.screen === n)) toast(`Pantalla ${n} abierta: en «En vivo» elige qué superficies salen por P${n}`);
+    return;
+  }
   if (S.outWin && !S.outWin.closed) { S.outWin.focus(); return; }
-  S.outWin = window.open("output.html", "lumamap-output", "popup,width=1280,height=720");
+  S.outWin = window.open("output.html?screen=1", "lumamap-output", "popup,width=1280,height=720");
   if (!S.outWin) return toast("El navegador bloqueó la ventana emergente. Permite ventanas emergentes.", "err");
   S.output = "window";
   toast("Arrastra la ventana al proyector y pulsa «Pantalla completa»");
@@ -1586,6 +1732,7 @@ function bindKeys() {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && document.activeElement.type !== "range") return;
     if (document.getElementById("modal").classList.contains("show") && e.key !== "Escape") return;
     const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+    if (k === "Enter" && document.activeElement?.tagName === "BUTTON") return;   // Enter pulsa el botón enfocado
     // Movimiento fino y teclas de edición directa.
     const m = e.shiftKey ? 10 : 1;
     switch (k) {
@@ -1656,8 +1803,16 @@ function tick(now) {
   if (S.levels.count !== S.lastCount) {
     S.lastCount = S.levels.count;
     if (S.playing && R.enabled && R.sceneBeats > 0 && S.project.scenes.length > 1 && ++S.beatsInScene >= R.sceneBeats) { S.beatsInScene = 0; A.stepScene(1); }
+    if (S.playing && S.autoMix > 0 && ++S.autoMixCount >= S.autoMix) { S.autoMixCount = 0; A.randomAll(); }
   }
 
+  tickSensors(now);
+  if (S.tab === "live" && S.project.settings.sensors.length) {
+    for (const m of document.querySelectorAll(".meter[data-sensor]")) {
+      m.querySelector("i").style.width = Math.round((S.sensorLevels[m.dataset.sensor] || 0) * 100) + "%";
+      m.classList.toggle("hit", !!S.sensorHit && S.sensorHit.id === m.dataset.sensor && now - S.sensorHit.at < 400);
+    }
+  }
   // Auto-avance de escenas
   const sc = scene();
   if (S.playing && S.project.settings.autoAdvance && sc.duration > 0 && S.clock - S.sceneStart >= sc.duration) A.stepScene(1);
@@ -1668,8 +1823,9 @@ function tick(now) {
   const view = { sx: v.sx, sy: v.sy, tx: v.tx, ty: v.ty };
   const layers = sceneLayers(S.project, S.tr, now);
   comp.frame(S.project, {
-    layers, time: S.clock, levels: S.levels, view, master: S.master,
-    blackout: S.blackout, clear: S.projecting ? [0, 0, 0, 1] : [0, 0, 0, 0],
+    layers, time: S.clock, levels: S.levels, view, screen: S.viewScreen || 0,
+    master: S.master * (S.viewScreen ? S.project.settings.screens[S.viewScreen].master : 1),
+    blackout: S.blackout || (S.viewScreen ? !S.project.settings.screens[S.viewScreen].on : false), clear: S.projecting ? [0, 0, 0, 1] : [0, 0, 0, 0],
     live: S.live,
   });
   pool.applyLookAudio(layers.flatMap(l => Object.values(l.scene.looks)), S.muted || !!S.output);

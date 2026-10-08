@@ -156,26 +156,56 @@ export class MediaPool {
 
 /* ---------------- Cámara ---------------- */
 
-let camera = null;
-/** Video de la cámara trasera (una sola instancia por ventana). */
-export async function getCamera() {
-  if (camera) return camera;
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador no permite usar la cámara");
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false,
-  });
-  const v = document.createElement("video");
-  v.muted = true; v.playsInline = true; v.setAttribute("playsinline", "");
-  v.srcObject = stream;
-  await v.play().catch(() => {});
-  camera = { el: v, stream, source: () => v, frameKey: () => v.currentTime, kind: "camera" };
-  return camera;
+// Varias cámaras a la vez: «default» sigue la preferencia trasera/frontal y
+// cualquier otra clave es el deviceId de una cámara concreta (USB, capturadora,
+// cámara del móvil…). Cada una se abre una sola vez por ventana.
+const cams = new Map();      // clave -> { el, stream, source, frameKey, kind, key }
+const opening = new Map();   // clave -> Promise
+let facing = (() => { try { return localStorage.getItem("lumamap:camFacing") || "environment"; } catch { return "environment"; } })();
+export const cameraFacing = () => facing;
+/** Clave de la cámara que usa una fuente. */
+export const camKey = (src) => (src && src.camId) || "default";
+/** Cambia entre cámara trasera («environment») y frontal («user»). */
+export function setCameraFacing(f) {
+  facing = f === "user" ? "user" : "environment";
+  try { localStorage.setItem("lumamap:camFacing", facing); } catch {}
+  stopCamera("default");
 }
-export function cameraIfReady() { return camera; }
-export function stopCamera() {
-  if (!camera) return;
-  camera.stream.getTracks().forEach(t => t.stop());
-  camera = null;
+/** Video de una cámara (se abre una vez y se comparte). */
+export function getCamera(key = "default") {
+  if (cams.has(key)) return Promise.resolve(cams.get(key));
+  if (opening.has(key)) return opening.get(key);
+  const p = (async () => {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador no permite usar la cámara");
+    const size = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    const video = key === "default" ? { facingMode: { ideal: facing }, ...size } : { deviceId: { exact: key }, ...size };
+    const stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    const v = document.createElement("video");
+    v.muted = true; v.playsInline = true; v.setAttribute("playsinline", "");
+    v.srcObject = stream;
+    await v.play().catch(() => {});
+    const cam = { el: v, stream, key, source: () => v, frameKey: () => v.currentTime, kind: "camera" };
+    cams.set(key, cam);
+    return cam;
+  })().finally(() => opening.delete(key));
+  opening.set(key, p);
+  return p;
+}
+export function cameraIfReady(key = "default") { return cams.get(key) || null; }
+/** Cierra una cámara (o todas si no se indica). */
+export function stopCamera(key) {
+  for (const [k, c] of [...cams]) {
+    if (key && k !== key) continue;
+    c.stream.getTracks().forEach(t => t.stop());
+    cams.delete(k);
+  }
+}
+/** Cámaras conectadas: [{ id, label }]. Los nombres aparecen tras dar permiso. */
+export async function listCameras() {
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return all.filter(d => d.kind === "videoinput" && d.deviceId).map((d, i) => ({ id: d.deviceId, label: d.label || `Cámara ${i + 1}` }));
+  } catch { return []; }
 }
 
 /* ---------------- Texto ---------------- */

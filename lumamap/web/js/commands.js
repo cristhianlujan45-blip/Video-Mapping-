@@ -67,11 +67,16 @@ export function buildCommands(app) {
   add("Ver", "zoomIn", "Acercar vista", () => A.zoom(1.25), { keys: "+", ic: "plus" });
   add("Ver", "zoomOut", "Alejar vista", () => A.zoom(0.8), { keys: "-", ic: "fit" });
   add("Ver", "preview", "Vista previa sin guías", () => app.setMode(S.mode === "preview" ? "edit" : "preview"), { keys: "V", ic: "eye" });
-  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["anim", "Panel Animaciones", "wand"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas", "scenes"], ["audio", "Panel Audio y ritmo", "audio"]])
+  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["anim", "Panel Animaciones", "wand"], ["live", "Panel En vivo (mezcla)", "live"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas", "scenes"], ["audio", "Panel Audio y ritmo", "audio"]])
     add("Ver", "tab-" + id, label, () => app.openTab(id), { ic });
 
   add("Proyección", "output", "Proyectar (panel)", () => app.openTab("output"), { keys: "F", ic: "project" });
-  add("Proyección", "outWindow", "Abrir ventana de salida", A.openWindow, { keys: "Ctrl+Shift+F", ic: "screen" });
+  add("Proyección", "outWindow", "Abrir ventana de salida", () => A.openWindow(1), { keys: "Ctrl+Shift+F", ic: "screen" });
+  for (const n of [2, 3, 4]) add("Proyección", "outWindow" + n, `Abrir pantalla ${n}`, () => A.openWindow(n), { ic: "screen" });
+  add("En vivo", "goAll", "GO: fundir todas las pantallas a lo siguiente", () => A.goAll(), { keys: "Enter", ic: "play" });
+  add("En vivo", "randomAll", "Todas las pantallas al azar", () => A.randomAll(), { keys: "Shift+Enter", ic: "shuffle" });
+  add("En vivo", "randomSel", "Siguiente al azar en la superficie", () => S.sel && A.randomNext(S.sel), { keys: "Z", ic: "shuffle", needsSel: true });
+  add("En vivo", "goSel", "GO en la superficie seleccionada", () => S.sel && A.go(S.sel), { keys: "X", ic: "play", needsSel: true });
   add("Proyección", "here", "Pantalla completa aquí", () => A.projectHere(!S.projecting), { keys: "P", ic: "fit" });
   add("Proyección", "guides", "Guías en el proyector", A.toggleGuides, { keys: "G", ic: "grid" });
   add("Proyección", "blackout", "Apagón", A.blackout, { keys: "B", ic: "blackout" });

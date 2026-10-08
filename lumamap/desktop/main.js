@@ -17,6 +17,7 @@ const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".svg": "image/svg+xml",
   ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+  ".wasm": "application/wasm", ".tflite": "application/octet-stream",
 };
 
 protocol.registerSchemesAsPrivileged([{
@@ -43,6 +44,19 @@ function projectorDisplay() {
   return all.find(d => d.id !== mine.id) || null;
 }
 
+/** Pantalla física para la salida N (1 = la elegida o la primera libre; 2, 3… las siguientes). */
+function displayForScreen(n) {
+  if (n <= 1) return projectorDisplay();
+  const all = screen.getAllDisplays();
+  if (!editor) return null;
+  const mine = screen.getDisplayMatching(editor.getBounds());
+  const first = projectorDisplay();
+  const free = all.filter(d => d.id !== mine.id && d.id !== first?.id);
+  return free[n - 2] || null;
+}
+const screenOf = (url) => +(String(url).match(/[?&]screen=(\d+)/)?.[1] || 1);
+const extraOutputs = new Map();   // pantalla 2, 3, 4 → ventana
+
 function placeOutput(win) {
   const d = projectorDisplay();
   if (d) {
@@ -62,12 +76,13 @@ function createEditor() {
   editor.once("ready-to-show", () => { editor.maximize(); editor.show(); });
   editor.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith(ORIGIN) && url.includes("output.html")) {
-      const d = projectorDisplay();
+      const n = screenOf(url);
+      const d = displayForScreen(n);
       return {
         action: "allow",
         overrideBrowserWindowOptions: {
           ...(d ? { ...d.bounds, fullscreen: true, frame: false } : { width: 1280, height: 720 }),
-          backgroundColor: "#000000", title: "LumaMap · Salida", autoHideMenuBar: true,
+          backgroundColor: "#000000", title: n > 1 ? `LumaMap · Pantalla ${n}` : "LumaMap · Salida", autoHideMenuBar: true,
           webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false },
         },
       };
@@ -75,7 +90,13 @@ function createEditor() {
     shell.openExternal(url);
     return { action: "deny" };
   });
-  editor.webContents.on("did-create-window", (win) => {
+  editor.webContents.on("did-create-window", (win, details) => {
+    const n = screenOf(details?.url || win.webContents.getURL());
+    if (n > 1) {
+      extraOutputs.set(n, win);
+      win.on("closed", () => { if (extraOutputs.get(n) === win) extraOutputs.delete(n); });
+      return;
+    }
     output = win;
     win.on("closed", () => { if (output === win) output = null; });
   });
@@ -134,10 +155,15 @@ function buildMenu() {
       cmd("Encajar vista", "fit", "Home"), cmd("Acercar", "zoomIn", "+"), cmd("Alejar", "zoomOut", "-"),
       cmd("Vista previa sin guías", "preview", "V"),
       { type: "separator" },
-      cmd("Panel Añadir", "tab-add"), cmd("Panel Animaciones", "tab-anim"), cmd("Panel Contenido", "tab-content"), cmd("Panel Efectos", "tab-fx"),
+      cmd("Panel Añadir", "tab-add"), cmd("Panel Animaciones", "tab-anim"), cmd("Panel En vivo", "tab-live"), cmd("Panel Contenido", "tab-content"), cmd("Panel Efectos", "tab-fx"),
       cmd("Panel Forma", "tab-shape"), cmd("Panel Capas", "tab-layers"), cmd("Panel Escenas", "tab-scenes"), cmd("Panel Audio y ritmo", "tab-audio"),
       { type: "separator" },
       { label: "Pantalla completa del editor", role: "togglefullscreen", accelerator: "F11" },
+    ] },
+    { label: "En vivo", submenu: [
+      cmd("Panel de mezcla en vivo", "tab-live"),
+      cmd("GO: fundir todas a lo siguiente", "goAll", "Enter"), cmd("Todas al azar", "randomAll", "Shift+Enter"),
+      cmd("Siguiente al azar (seleccionada)", "randomSel", "Z"), cmd("GO en la seleccionada", "goSel", "X"),
     ] },
     { label: "Proyección", submenu: [
       cmd("Abrir ventana de salida en el proyector", "outWindow", "Ctrl+Shift+F"),
@@ -148,6 +174,7 @@ function buildMenu() {
           type: "radio", checked: chosenDisplay === d.id, click: () => setOutputDisplay(d.id),
         })),
       ] },
+      cmd("Abrir pantalla 2", "outWindow2"), cmd("Abrir pantalla 3", "outWindow3"), cmd("Abrir pantalla 4", "outWindow4"),
       cmd("Pantalla completa aquí", "here", "P"),
       { type: "separator" },
       cmd("Guías en el proyector", "guides", "G"), cmd("Apagón", "blackout", "B"), cmd("Sonido de los videos", "mute", "Ctrl+M"),

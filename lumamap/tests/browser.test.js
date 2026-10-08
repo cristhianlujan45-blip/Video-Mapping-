@@ -27,8 +27,9 @@ function makePng(file) {
 const srv = createServer({ port: 0, osc: false });
 await new Promise(r => srv.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${srv.address().port}/`;
-const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
+  "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera"] });
 const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", e => errors.push(e.message));
@@ -200,6 +201,68 @@ await test("resolución personalizada y ajustes del proyector", async () => {
   await page.locator("summary", { hasText: "Orientación del proyector" }).click();
   await page.locator(".toggle", { hasText: "Retroproyección" }).click();
   assert.equal(await page.evaluate(() => window.__lumamap.S.project.settings.output.flipH), true);
+});
+await test("mezcla en vivo: preparar lo siguiente, fader y GO por pantalla", async () => {
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => { const a = window.__lumamap; a.select(a.S.project.surfaces[0].id); a.actions.setSource({ type: "gen", gen: "plasma" }); a.openTab("live"); });
+  const id = await page.evaluate(() => window.__lumamap.S.project.surfaces[0].id);
+  await page.locator(".livecard .slot.b").first().click();
+  await page.locator("#modal .tile", { hasText: "Hiperespacio" }).first().click();
+  const next = await page.evaluate((id) => window.__lumamap.S.project.scenes[0].looks[id].next?.source.gen, id);
+  assert.equal(next, "warp");
+  await page.evaluate((id) => window.__lumamap.actions.setMix(id, 0.5), id);
+  assert.equal(await page.evaluate((id) => window.__lumamap.S.project.scenes[0].looks[id].mix, id), 0.5);
+  await page.locator(".livecard button", { hasText: "Corte" }).first().click();
+  const after = await page.evaluate((id) => { const l = window.__lumamap.S.project.scenes[0].looks[id]; return [l.source.gen, l.next, l.mix]; }, id);
+  assert.deepEqual(after, ["warp", null, 0]);
+});
+await test("pantallas: cada superficie sale solo por la suya y se puede apagar", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, P = a.S.project;
+    const [s1, s2] = P.surfaces;
+    a.actions.setScreen(s1.id, 2);
+    const { Compositor } = await import("./js/compose.js");
+    const drawn = [];
+    const fake = { begin() {}, drawSurface: (s) => drawn.push(s.id), texture: () => null };
+    const c = new Compositor(fake, { get: () => null, ensure() {} });
+    const layers = [{ scene: P.scenes[0], alpha: 1 }];
+    c.frame(P, { layers, time: 0, screen: 1 }); const on1 = drawn.splice(0);
+    c.frame(P, { layers, time: 0, screen: 2 }); const on2 = drawn.splice(0);
+    a.actions.setScreenCfg(2, { on: false, fx: "bw" });
+    return { s1: s1.id, s2: s2.id, on1, on2, cfg: P.settings.screens[2] };
+  });
+  assert.ok(!r.on1.includes(r.s1) && r.on1.includes(r.s2), "P1 no muestra la de P2");
+  assert.ok(r.on2.includes(r.s1) && r.on2.includes(r.s2), "P2 muestra la suya y las de «todas»");
+  assert.equal(r.cfg.on, false); assert.equal(r.cfg.fx, "bw");
+});
+await test("cuerpo (Kinect) con la cámara: la IA carga y se dibuja sin errores de GPU", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.select(a.S.project.surfaces[0].id); a.actions.setSource({ type: "body", gen: "galaxy", bodyGlow: 0.5, bodyTrail: 0.3 }); });
+  let st = "";
+  for (let i = 0; i < 40 && st !== "ai"; i++) {
+    await page.waitForTimeout(250);
+    st = await page.evaluate(async () => (await import("./js/body.js")).bodyTracker("default").status);
+  }
+  assert.equal(st, "ai");
+  for (const mode of ["contorno", "estela", "sombra", "persona", "movimiento"]) {
+    await page.evaluate((m) => window.__lumamap.actions.setSource({ bodyMode: m }), mode);
+    await page.waitForTimeout(300);
+  }
+  const err = await page.evaluate(async () => { const r = document.querySelector("#stage canvas"); const gl = r.getContext("webgl2"); return gl ? gl.getError() : 0; });
+  assert.equal(err, 0);
+});
+await test("sensor de cámara: mide movimiento y dispara un golpe", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap;
+    a.actions.addSensor();
+    const sen = a.S.project.settings.sensors.at(-1);
+    a.actions.updateSensor(sen.id, { action: "beat", sens: 1, cooldown: 0.3 });
+    const c0 = a.S.levels.count;
+    await new Promise(r => setTimeout(r, 2500));
+    return { level: a.S.sensorLevels[sen.id], fired: a.S.levels.count > c0 };
+  });
+  assert.ok(r.level > 0, "nivel " + r.level);
+  assert.ok(r.fired, "el sensor disparó");
+  await page.evaluate(() => { const a = window.__lumamap; for (const s of [...a.S.project.settings.sensors]) a.actions.removeSensor(s.id); });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

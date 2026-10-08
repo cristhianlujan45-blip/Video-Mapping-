@@ -21,7 +21,7 @@ const MIME = {
   ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
   ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".gif": "image/gif",
   ".webmanifest": "application/manifest+json", ".ico": "image/x-icon",
-  ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+  ".mp4": "video/mp4", ".wasm": "application/wasm", ".tflite": "application/octet-stream", ".mjs": "text/javascript; charset=utf-8", ".webm": "video/webm", ".mp3": "audio/mpeg", ".wav": "audio/wav",
 };
 
 /* ---------------- WebSocket (RFC 6455, mínimo y correcto) ---------------- */

@@ -3,19 +3,21 @@
 // (estado + acciones de editor.js) y devuelve un nodo DOM.
 import {
   GENERATORS, ANIM_LIBRARY, ANIM_CATEGORIES, FX_LIBRARY, FX_CATEGORIES, COLORMAPS, RECORD_QUALITIES, BLEND_MODES, BORDER_ANIMS, AUDIO_TARGETS, AUDIO_BANDS,
-  DRAW_TOOLS, DRAW_ANIMS, SHAPES, DEFAULT_FX, lookOf,
+  DRAW_TOOLS, DRAW_ANIMS, SHAPES, DEFAULT_FX, lookOf, SCREEN_FX, SENSOR_ACTIONS, sensorThreshold,
 } from "./model.js";
-import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog } from "./ui.js";
+import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog } from "./ui.js";
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
 import { genThumbs, animThumb } from "./thumbs.js";
-import { TEXT_ANIMS } from "./sources.js";
+import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./sources.js";
+import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
 
 const animUI = { cat: "Todas", q: "" };
 
 export const TABS = [
   { id: "add", label: "Añadir", ic: "plus" },
   { id: "anim", label: "Animaciones", ic: "wand" },
+  { id: "live", label: "En vivo", ic: "live" },
   { id: "draw", label: "Dibujar", ic: "pen" },
   { id: "content", label: "Contenido", ic: "content" },
   { id: "fx", label: "Efectos", ic: "fx" },
@@ -56,11 +58,12 @@ const add = {
           { id: "draw", label: "Dibujar", ic: "pen" },
           { id: "text", label: "Texto", ic: "text" },
           { id: "camera", label: "Cámara", ic: "camera" },
+          { id: "body", label: "Cuerpo (Kinect)", ic: "body" },
         ], { onPick: async (id) => {
           if (id === "media") return A.importMedia("new");
           if (id === "draw") return app.openTab("draw");
           A.addShape("rect");
-          A.setSource(id === "text" ? { type: "text" } : { type: "camera" });
+          A.setSource({ type: id });
           app.openTab("content");
         } })),
       section("Superficies",
@@ -187,6 +190,153 @@ function rotateFitSection(app) {
     btn({ label: "Pantalla completa (un toque)", ic: "fit", kind: "block primary", onClick: A.fillFrame }));
 }
 
+/* ---------------------------------------------------------------- En vivo */
+/** Selector de cámara: la predeterminada (trasera / frontal) o cualquier cámara conectada. */
+function cameraPicker(app, value, onChange) {
+  const sel = h("select", { class: "sel" }, h("option", { value: "" }, "Predeterminada del dispositivo"));
+  sel.value = value;
+  sel.addEventListener("change", () => onChange(sel.value));
+  listCameras().then((list) => {
+    list.forEach((c) => sel.append(h("option", { value: c.id }, c.label)));
+    if (value && !list.some(c => c.id === value)) sel.append(h("option", { value }, "Cámara no conectada"));
+    sel.value = value;
+  });
+  return h("div", {},
+    h("div", { class: "lbl" }, "Cámara (puedes usar varias: USB, capturadora, la del móvil…)"), sel,
+    value ? null : segmented({ options: [["environment", "Trasera"], ["user", "Frontal"]], value: cameraFacing(), small: true, onChange: (v) => { setCameraFacing(v); app.renderPanel(); } }));
+}
+
+/** Miniatura de un contenido (para las cubiertas A / B del mezclador). */
+function sourceThumb(app, src, fx) {
+  if (src.type === "gen") {
+    const key = `k:${src.gen}:${src.color}:${src.color2}:${src.speed}:${src.scale}:${fx ? JSON.stringify(fx) : ""}`;
+    return { img: animThumb({ id: key, gen: src.gen, color: src.color, color2: src.color2, speed: src.speed, scale: src.scale, fx }), label: GENERATORS.find(g => g.id === src.gen)?.name || "Animación" };
+  }
+  if (src.type === "media") {
+    const m = app.S.project.media.find(x => x.id === src.mediaId);
+    return { img: m?.thumb || "", label: m?.name || "Video / foto" };
+  }
+  const names = { text: "Texto: " + (src.text || "").slice(0, 16), camera: "Cámara en vivo", body: "Cuerpo (cámara)", drawing: "Dibujo", color: "Color", none: "Solo borde" };
+  return { img: "", label: names[src.type] || src.type };
+}
+
+/** Elegir lo «siguiente» para una pantalla: animaciones, videos/fotos o cámara. */
+function pickNext(app, id) {
+  const A = app.actions;
+  const done = (next) => { A.setNext(id, next); closeDialog(); };
+  animUI.q = "";
+  const media = app.S.project.media;
+  const content = h("div", {},
+    media.length ? section("Tus videos, fotos y GIF",
+      tiles(media.map(m => ({ id: m.id, label: m.name, img: m.thumb })), { cols: 4, onPick: (mid) => done({ source: { type: "media", mediaId: mid }, fit: "cover" }) })) : null,
+    section("En vivo",
+      tiles([{ id: "camera", label: "Cámara", ic: "camera" }, { id: "body", label: "Cuerpo en animación", ic: "body" }], { cols: 4, onPick: (t) => done({ source: { type: t } }) })),
+    animCatalog(app, (a) => done({ source: { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale }, fx: a.fx || null })));
+  dialog({ title: "Siguiente para «" + (app.S.project.surfaces.find(x => x.id === id)?.name || "") + "»", content, wide: true, buttons: [] });
+}
+
+const SCREEN_OPTS = [[0, "Todas"], [1, "P1"], [2, "P2"], [3, "P3"], [4, "P4"]];
+
+const live = {
+  title: () => "Mezcla en vivo",
+  render(app) {
+    const A = app.actions, S = app.S, P = S.project;
+    const wrap = h("div", {});
+    if (!P.surfaces.length) return needSelection(app, "Añade superficies (una por pantalla o zona) y aquí podrás poner una animación distinta en cada una y mezclarlas en vivo.");
+    wrap.append(section("Todas las pantallas",
+      hint("Cada superficie tiene AHORA (lo que se ve) y SIGUIENTE (lo que preparas). Pulsa GO para fundir, o mueve el fader a mano."),
+      h("div", { class: "lbl" }, "Duración del fundido"),
+      segmented({ options: [[0, "Corte"], [0.5, "½ s"], [1, "1 s"], [2, "2 s"], [4, "4 s"], [8, "8 s"]], value: S.liveFade, small: true, onChange: (v) => { S.liveFade = v; } }),
+      row(btn({ label: "GO todas", ic: "play", kind: "wide primary", onClick: () => A.goAll() }),
+        btn({ label: "Todas al azar", ic: "shuffle", kind: "wide", onClick: () => A.randomAll() })),
+      h("div", { class: "lbl" }, "Mezcla automática al ritmo (cambia sola cada N golpes)"),
+      segmented({ options: [[0, "No"], [4, "4"], [8, "8"], [16, "16"], [32, "32"]], value: S.autoMix || 0, small: true, onChange: (v) => A.setAutoMix(v) }),
+      P.surfaces.some(x => x.screen) ? h("div", {}, h("div", { class: "lbl" }, "Ver en el editor"),
+        segmented({ options: SCREEN_OPTS, value: S.viewScreen || 0, small: true, onChange: (v) => A.setViewScreen(v) })) : null));
+
+    // Pantallas de salida: encender / apagar, brillo, estrobo y efecto de cada una.
+    const scr = h("div", { class: "screens" });
+    for (const n of [1, 2, 3, 4]) {
+      const c = P.settings.screens[n];
+      const used = P.surfaces.filter(x => (x.screen || 0) === n).length;
+      scr.append(h("div", { class: `screencard ${c.on ? "" : "off"}` },
+        h("div", { class: "livehead" },
+          h("strong", {}, `Pantalla ${n}`),
+          h("small", {}, used ? `${used} sup.` : "todas"),
+          btn({ label: c.on ? "ON" : "OFF", kind: c.on ? "primary" : "danger", onClick: () => A.setScreenCfg(n, { on: !c.on }) })),
+        slider({ label: "Brillo", min: 0, max: 1, value: c.master ?? 1, def: 1, fmt: pct, onInput: (v) => A.setScreenCfg(n, { master: v }, true) }),
+        slider({ label: "Estrobo", min: 0, max: 12, step: 0.5, value: c.strobe || 0, def: 0, fmt: (v) => v ? v + " Hz" : "No", onInput: (v) => A.setScreenCfg(n, { strobe: v }, true) }),
+        (() => { const sel = h("select", { class: "sel" }, ...SCREEN_FX.map(([v, l]) => { const o = h("option", { value: v }, l); if (v === c.fx) o.selected = true; return o; }));
+          sel.addEventListener("change", () => A.setScreenCfg(n, { fx: sel.value })); return sel; })(),
+        window.LumaNative
+          ? (n === 1 ? btn({ label: S.output === "native" ? "Proyectando por HDMI" : "Proyectar por HDMI", ic: "project", kind: "block", onClick: A.projectExternal }) : hint("En Android sale una pantalla externa (P1); P2-P4 se usan desde Windows o el navegador."))
+          : btn({ label: "Abrir ventana", ic: "screen", kind: "block", onClick: () => A.openWindow(n) })));
+    }
+    wrap.append(fold("Pantallas: encender, apagar y efectos", false,
+      hint("Cada salida (P1 = proyector principal / HDMI del móvil; P2-P4 = otras ventanas o monitores) se controla por separado."),
+      row(btn({ label: "Encender todas", kind: "wide", onClick: () => A.allScreens(true) }), btn({ label: "Apagar todas", kind: "wide danger", onClick: () => A.allScreens(false) })),
+      scr));
+
+    // Sensores: una cámara vigila una zona; si alguien se mueve, cambia la proyección.
+    const sens = P.settings.sensors;
+    const sensBox = h("div", {});
+    for (const r of sens) {
+      const meter = h("div", { class: "meter" }, h("i", {}), h("b", {}));
+      meter.dataset.sensor = r.id;
+      meter.querySelector("b").style.left = Math.min(100, sensorThreshold(r) * 100) + "%";
+      const targetSel = h("select", { class: "sel" }, h("option", { value: "all" }, "Todas las superficies"),
+        ...P.surfaces.map(x => h("option", { value: x.id }, x.name)));
+      targetSel.value = r.target || "all";
+      targetSel.addEventListener("change", () => A.updateSensor(r.id, { target: targetSel.value }));
+      sensBox.append(h("div", { class: "livecard" },
+        h("div", { class: "livehead" }, h("strong", {}, "Sensor de movimiento"), btn({ ic: "trash", kind: "icon", title: "Quitar sensor", onClick: () => A.removeSensor(r.id) })),
+        cameraPicker(app, r.camId || "", (v) => A.updateSensor(r.id, { camId: v })),
+        h("div", { class: "lbl" }, "Zona que vigila"),
+        segmented({ options: SENSOR_ZONES, value: r.zone || "all", small: true, onChange: (v) => A.updateSensor(r.id, { zone: v }) }),
+        meter,
+        slider({ label: "Sensibilidad", min: 0, max: 1, value: r.sens ?? 0.5, def: 0.5, fmt: pct, onInput: (v) => { A.updateSensor(r.id, { sens: v }, true); meter.querySelector("b").style.left = Math.min(100, sensorThreshold(r) * 100) + "%"; } }),
+        h("div", { class: "lbl" }, "Cuando detecta movimiento"),
+        segmented({ options: SENSOR_ACTIONS, value: r.action || "next", cols: 2, small: true, onChange: (v) => A.updateSensor(r.id, { action: v }) }),
+        h("div", { class: "lbl" }, "En"), targetSel,
+        slider({ label: "Espera entre disparos", min: 0.3, max: 10, step: 0.1, value: r.cooldown ?? 2, def: 2, fmt: (v) => v.toFixed(1) + " s", onInput: (v) => A.updateSensor(r.id, { cooldown: v }, true) })));
+    }
+    wrap.append(fold(`Sensores de cámara (interacción)${sens.length ? " · " + sens.length : ""}`, sens.length > 0,
+      hint("Usa cualquier cámara como sensor: cuando alguien pasa o se mueve en la zona elegida, cambia la animación, hace un golpe de luz, cambia de escena o enciende/apaga. Puedes poner varias cámaras, cada una con su función."),
+      sensBox,
+      btn({ label: "Añadir sensor", ic: "plus", kind: "block", onClick: A.addSensor })));
+
+    for (const s of P.surfaces) {
+      const look = app.S.project.scenes.find(x => x.id === P.sceneId).looks[s.id];
+      if (!look) continue;
+      const a = sourceThumb(app, look.source, look.fx);
+      const slot = (cls, tag, t, onClick) => {
+        const el = h("button", { class: `slot ${cls}`, onclick: onClick });
+        el.innerHTML = (t.img ? `<img src="${t.img}" alt="">` : "") + `<b>${tag}</b><span></span>`;
+        el.querySelector("span").textContent = t.label;
+        return el;
+      };
+      const b = look.next ? sourceThumb(app, look.next.source, look.next.fx) : { img: "", label: "+ Elegir" };
+      const card = h("div", { class: `livecard ${S.sel === s.id ? "on" : ""} ${look.hidden ? "black" : ""}` },
+        h("div", { class: "livehead" },
+          h("strong", { onclick: () => app.select(s.id) }, s.name),
+          btn({ ic: look.hidden ? "eyeoff" : "eye", kind: "icon", title: look.hidden ? "Mostrar" : "Negro (ocultar)", onClick: () => A.toggleSurfaceBlack(s.id) })),
+        h("div", { class: "deck" },
+          slot("a", "AHORA", a, () => { app.select(s.id); app.openTab("content"); }),
+          slot("b", "SIGUIENTE", b, () => pickNext(app, s.id))),
+        look.next ? slider({ label: "A ⟷ B", min: 0, max: 1, step: 0.01, value: look.mix || 0, def: 0, fmt: (v) => Math.round(v * 100) + "%", onInput: (v) => A.setMix(s.id, v) }) : null,
+        row(btn({ label: "GO", ic: "play", kind: "wide primary", disabled: !look.next, onClick: () => A.go(s.id) }),
+          btn({ label: "Corte", kind: "wide", disabled: !look.next, onClick: () => A.go(s.id, 0) }),
+          btn({ ic: "shuffle", kind: "icon", title: "Al azar", onClick: () => A.randomNext(s.id) }),
+          btn({ ic: "wand", kind: "icon", title: "Elegir siguiente", onClick: () => pickNext(app, s.id) })),
+        slider({ label: "Opacidad", min: 0, max: 1, value: look.opacity, def: 1, fmt: pct, onInput: (v) => app.edit(() => { look.opacity = v; }) }),
+        h("div", { class: "lbl" }, "Sale por"),
+        segmented({ options: SCREEN_OPTS, value: s.screen || 0, small: true, onChange: (v) => A.setScreen(s.id, v) }));
+      wrap.append(card);
+    }
+    return wrap;
+  },
+};
+
 /* ---------------------------------------------------------------- Contenido */
 const SOURCE_TYPES = [
   { id: "media", label: "Video, foto o GIF", ic: "photo" },
@@ -195,6 +345,7 @@ const SOURCE_TYPES = [
   { id: "text", label: "Texto", ic: "text" },
   { id: "drawing", label: "Dibujo", ic: "pen" },
   { id: "camera", label: "Cámara", ic: "camera" },
+  { id: "body", label: "Cuerpo (Kinect)", ic: "body" },
   { id: "none", label: "Solo borde", ic: "shape" },
 ];
 
@@ -282,7 +433,30 @@ const content = {
       wrap.append(section("Dibujo", hint(`${src.strokes?.length || 0} trazos.`), btn({ label: "Dibujar aquí", ic: "pen", kind: "primary block", onClick: () => app.openTab("draw") })));
     }
     if (src.type === "camera") {
-      wrap.append(section("Cámara", hint("Proyecta en vivo lo que ve la cámara trasera del dispositivo (permite el acceso cuando se pida).")));
+      wrap.append(section("Cámara",
+        hint("Proyecta en vivo lo que ve la cámara (permite el acceso cuando se pida). Ponle efectos en la pestaña Efectos: térmica, contorno neón, caleidoscopio, chroma key…"),
+        cameraPicker(app, src.camId || "", (v) => app.actions.setSource({ camId: v }))));
+    }
+    if (src.type === "body") {
+      const tracker = bodyTracker(src.camId || "default");
+      const st = tracker.status;
+      tracker.onStatus = () => { if (app.S.tab === "content") app.renderPanel(); };
+      const stTxt = { off: "Esperando la cámara…", loading: "Cargando la IA de detección de personas…", ai: "IA activa: detecta la silueta de las personas.", motion: "Sin IA en este equipo: detecta lo que se mueve.", error: "No se pudo iniciar la detección." }[st] || "";
+      wrap.append(section("Cuerpo en animación (como Kinect)",
+        hint("Apunta una cámara a la persona o al artista: su silueta se convierte en animación en tiempo real. " + stTxt),
+        segmented({ options: BODY_MODES, value: src.bodyMode || "silueta", cols: 2, onChange: (v) => app.edit(() => { src.bodyMode = v; }) }),
+        slider({ label: "Contorno de neón", min: 0, max: 1, value: src.bodyGlow ?? 0, def: 0, fmt: pct, onInput: (v) => app.edit(() => { src.bodyGlow = v; }) }),
+        slider({ label: "Estela de movimiento", min: 0, max: 1, value: src.bodyTrail ?? 0, def: 0, fmt: pct, onInput: (v) => app.edit(() => { src.bodyTrail = v; }) }),
+        slider({ label: "Sensibilidad", min: 0, max: 1, value: src.bodySens ?? 0.5, def: 0.5, fmt: pct, onInput: (v) => app.edit(() => { src.bodySens = v; }) }),
+        toggle({ label: "Espejo (como un espejo frente a la persona)", value: !!src.bodyMirror, onChange: (v) => app.edit(() => { src.bodyMirror = v; }) }),
+        cameraPicker(app, src.camId || "", (v) => app.actions.setSource({ camId: v }))));
+      if (src.bodyMode !== "persona") {
+        wrap.append(section("Animación dentro del cuerpo",
+          tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: genThumbs()[g.id] })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) }),
+          swatches({ label: "Color principal (contorno)", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
+          swatches({ label: "Color secundario", value: src.color2, onChange: (c) => app.edit(() => { src.color2 = c; }) }),
+          slider({ label: "Velocidad", min: 0, max: 4, step: 0.05, value: src.speed, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { src.speed = v; }) })));
+      }
     }
     if (src.type === "none") {
       wrap.append(section("Solo borde", hint("La superficie no muestra relleno: ve a Efectos → Borde para crear líneas de neón animadas sobre el contorno."),
@@ -624,7 +798,13 @@ const output = {
         hint(desktop
           ? "Conecta el proyector como pantalla extendida (en Windows: tecla Win + P → Extender). La salida se abre sola a pantalla completa en el proyector."
           : "Abre la salida en una ventana, llévala al proyector (pantalla extendida) y pulsa «Pantalla completa»."),
-        btn({ label: S.outWin && !S.outWin.closed ? "Ventana de salida abierta" : "Abrir ventana de salida", ic: "screen", kind: "bigbtn primary", onClick: A.openWindow })));
+        btn({ label: S.outWin && !S.outWin.closed ? "Ventana de salida abierta" : "Abrir ventana de salida", ic: "screen", kind: "bigbtn primary", onClick: () => A.openWindow(1) })));
+      const used = new Set(S.project.surfaces.map(x => x.screen || 0));
+      wrap.append(section("Varias pantallas (P2, P3, P4)",
+        hint(desktop
+          ? "Cada superficie elige por qué pantalla sale (pestaña En vivo → «Sale por»). Con varios proyectores o TV conectados, cada pantalla se abre sola en el siguiente monitor libre."
+          : "Cada superficie elige por qué pantalla sale (pestaña En vivo → «Sale por»). Abre una ventana por pantalla y llévala a su proyector."),
+        row(...[2, 3, 4].map(n => btn({ label: `Pantalla ${n}` + (used.has(n) ? " ●" : ""), ic: "screen", kind: "wide", onClick: () => A.openWindow(n) })))));
       if (desktop && window.LumaDesktop) {
         // Elegir en qué pantalla sale la imagen (proyector, TV, segundo monitor).
         const box = h("div", { class: "list" }, hint("Buscando pantallas…"));
@@ -760,4 +940,4 @@ export function showHelp(app) {
   return dialog({ title: "Ayuda", content: c, wide: true });
 }
 
-export const PANELS = { add, anim, draw, content, fx, shape, layers, scenes, audio, output, menu };
+export const PANELS = { add, anim, live, draw, content, fx, shape, layers, scenes, audio, output, menu };

@@ -23,7 +23,7 @@ precision highp float;
 in vec3 v_uvh;
 out vec4 outColor;
 uniform sampler2D u_tex;
-uniform int u_src;            // 0 nada · 1 textura · 2 color · 3 generador
+uniform int u_src;            // 0 nada · 1 textura · 2 color · 3 generador · 4 cuerpo (máscara + generador)
 uniform vec4 u_fit;           // escala.xy, desplazamiento.xy
 uniform int u_contain;
 uniform int u_gen;
@@ -1019,6 +1019,12 @@ void main(){
   if(u_src==1) c = sampleTex(cuv);
   else if(u_src==2) c = vec4(u_c1, 1.0);
   else if(u_src==3) c = generator(fract(cuv), gp, u_gtime);
+  else if(u_src==4){ // cuerpo: R = silueta con la animación, G = contorno, B = estela
+    vec4 m = sampleTex(cuv);
+    vec4 g = generator(fract(cuv), gp, u_gtime);
+    vec3 trail = hsv2rgb(vec3(fract(m.b*0.9 + u_time*0.08), 0.75, 1.0));
+    c = vec4(g.rgb*m.r + mix(g.rgb, u_c1, 0.5)*m.g*1.8 + trail*m.b*0.9, 1.0);
+  }
   if(outside) c = vec4(0.0, 0.0, 0.0, 1.0);
   // ---- recortes: croma (fondo verde/azul) y luma (quitar el negro) ----
   if(u_key.x > 0.0) c.a *= smoothstep(u_key.x, u_key.x + u_key.y + 0.001, distance(c.rgb, u_keyCol));
@@ -1298,11 +1304,12 @@ export class Renderer {
     let srcType = 0;
     if (src.type === "color") srcType = 2;
     else if (src.type === "gen") srcType = 3;
+    else if (src.type === "body" && o.tex) srcType = src.bodyMode === "persona" ? 1 : 4;
     else if (o.tex) srcType = 1;
     if (srcType === 0 && border <= 0) return;
 
     gl.uniform1i(L.u_src, srcType);
-    if (srcType === 1) {
+    if (srcType === 1 || srcType === 4) {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, o.tex.tex);
       gl.uniform1i(L.u_tex, 0);

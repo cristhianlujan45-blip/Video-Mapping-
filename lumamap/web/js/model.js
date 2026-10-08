@@ -379,6 +379,7 @@ export const DEFAULT_SOURCE = () => ({
   gen: "plasma", color: "#00e5ff", color2: "#ff00aa", speed: 1, scale: 1,
   text: "LUMAMAP", font: "Impact, 'Arial Black', sans-serif", textColor: "#ffffff", textBg: "#00000000",
   textAnim: "none", textSpeed: 1, textGlow: 0, textOutline: 0, textOutlineColor: "#000000", textColor2: "#ffcc00",
+  bodyMode: "silueta", bodyGlow: 0, bodyTrail: 0, bodyMirror: false, bodySens: 0.5, camId: "",
   strokes: [],
 });
 
@@ -592,8 +593,42 @@ export function defaultSettings() {
     },
     // Grabación / transmisión
     record: { height: 1080, fps: 30, mbps: 12 },
+    // Pantallas de salida 1-4: encendida, brillo y efecto propio de cada una.
+    screens: Object.fromEntries([1, 2, 3, 4].map(n => [n, defaultScreen()])),
+    // Sensores de cámara (interacción): [{ id, camId, zone, sens, action, target, cooldown }]
+    sensors: [],
   };
 }
+
+export const defaultScreen = () => ({ on: true, master: 1, fx: "none", strobe: 0 });
+
+/** Efectos por pantalla (se aplican a toda la imagen de esa salida). */
+export const SCREEN_FX = [
+  ["none", "Normal"], ["bw", "Blanco y negro"], ["invert", "Invertir"], ["sepia", "Sepia"],
+  ["vivid", "Colores vivos"], ["hue", "Arcoíris"], ["blur", "Desenfoque"], ["dark", "Oscuro"], ["contrast", "Contraste"],
+];
+
+/** Filtro CSS de un efecto de pantalla (t = segundos, para los animados). */
+export function screenFilter(fx, t = 0) {
+  switch (fx) {
+    case "bw": return "grayscale(1)";
+    case "invert": return "invert(1)";
+    case "sepia": return "sepia(1)";
+    case "vivid": return "saturate(2.2) contrast(1.1)";
+    case "hue": return `hue-rotate(${Math.round((t * 60) % 360)}deg)`;
+    case "blur": return "blur(6px)";
+    case "dark": return "brightness(0.45)";
+    case "contrast": return "contrast(1.8)";
+    default: return "";
+  }
+}
+
+/** Umbral de disparo de un sensor según su sensibilidad (más sensible = basta menos movimiento). */
+export const sensorThreshold = (r) => 0.04 + (1 - (r.sens ?? 0.5)) * 0.5;
+
+export const SENSOR_ACTIONS = [
+  ["next", "Animación nueva"], ["go", "GO (fundir a lo siguiente)"], ["beat", "Golpe de luz"], ["scene", "Siguiente escena"], ["black", "Encender / apagar"],
+];
 
 /** Resoluciones de composición (las de los media servers profesionales). */
 export const RESOLUTIONS = [
@@ -771,6 +806,8 @@ export function normalizeProject(json) {
     react: { ...D.react, ...(st.react || {}) },
     output: { ...D.output, ...(st.output || {}), softEdge: { ...D.output.softEdge, ...(st.output?.softEdge || {}) } },
     record: { ...D.record, ...(st.record || {}) },
+    screens: Object.fromEntries([1, 2, 3, 4].map(n => [n, { ...defaultScreen(), ...(st.screens?.[n] || {}) }])),
+    sensors: Array.isArray(st.sensors) ? st.sensors : [],
   };
   if (!json.scenes.length) json.scenes.push(createScene());
   if (!json.scenes.some(s => s.id === json.sceneId)) json.sceneId = json.scenes[0].id;
@@ -789,6 +826,8 @@ export function normalizeProject(json) {
       const base = createLook();
       sc.looks[id] = { ...base, ...l, source: { ...base.source, ...(l.source || {}) },
         fx: { ...base.fx, ...(l.fx || {}) }, audio: { ...base.audio, ...(l.audio || {}) } };
+      const n = sc.looks[id].next;
+      sc.looks[id].next = n && n.source ? { source: { ...base.source, ...n.source }, fx: n.fx ? { ...base.fx, ...n.fx } : null, fit: n.fit || null } : null;
     }
   }
   return json;
