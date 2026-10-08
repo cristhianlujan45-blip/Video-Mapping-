@@ -55,6 +55,7 @@ export class ParameterEngine {
   private modifiers = new Set<string>();
   private learnTarget: string | null = null;
   private learnCallback: ((r: LearnResult) => void) | null = null;
+  private learnKinds: Set<string> = new Set(['midi', 'osc', 'dmx', 'keyboard', 'gamepad']);
   activeBank = '';
 
   // ---------------------------------------------------------------- registration
@@ -89,6 +90,11 @@ export class ParameterEngine {
 
   get(id: string): Param | undefined {
     return this.params.get(id);
+  }
+
+  /** Base value written by the UI (what gets saved), without live modulation. */
+  baseValue(id: string): number | undefined {
+    return this.contributions.get(id)?.get('ui')?.value;
   }
 
   value(id: string, fallback = 0): number {
@@ -336,9 +342,11 @@ export class ParameterEngine {
   // ---------------------------------------------------------------- learn
 
   /** Arms learn mode: the next input event creates a mapping to `paramId`. */
-  startLearn(paramId: string, cb: (r: LearnResult) => void) {
+  startLearn(paramId: string, cb: (r: LearnResult) => void, kinds?: InputAddress['kind'][]) {
     this.learnTarget = paramId;
     this.learnCallback = cb;
+    // Continuous sources (audio, tracking) are only learned when explicitly requested.
+    this.learnKinds = new Set(kinds ?? ['midi', 'osc', 'dmx', 'keyboard', 'gamepad']);
   }
 
   cancelLearn() {
@@ -361,7 +369,7 @@ export class ParameterEngine {
     const relativeTicks = extra?.ticks;
     for (const l of this.inputListeners) l(address, normalized);
 
-    if (this.learnTarget) {
+    if (this.learnTarget && this.learnKinds.has(address.kind)) {
       // Ignore note-off / zero values so releasing a pad does not learn twice.
       const isRelease = address.control.startsWith('note:') && normalized === 0;
       if (!isRelease && this.params.has(this.learnTarget)) {
