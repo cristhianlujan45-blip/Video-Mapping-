@@ -1,4 +1,4 @@
-# LUJAN MAPPING
+# Luma map
 
 Projection mapping para Android: colocas videos e imágenes sobre superficies reales
 (paredes, fachadas, cajas, escenarios) deformando sus esquinas con el dedo, y envías la
