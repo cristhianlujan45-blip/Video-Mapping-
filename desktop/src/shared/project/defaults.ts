@@ -304,7 +304,7 @@ export function createProject(name = 'Proyecto sin título'): Project {
     audio: { inputDeviceId: null, gain: 1, smoothing: 0.6, bassHz: 250, trebleHz: 4000, beatSensitivity: 1.4 },
     osc: { enabled: false, inPort: 8000, outHost: '127.0.0.1', outPort: 9000, feedback: false },
     remote: { enabled: false, port: 8787, pin: String(Math.floor(100000 + Math.random() * 900000)) },
-    midi: { disabledInputs: [], disabledOutputs: [], clockOutput: null, banks: ['VJ', 'Efectos', 'Mapping', 'Cámaras', 'Iluminación', 'Show', '3D'] },
+    midi: { disabledInputs: [], disabledOutputs: [], clockOutput: null, banks: ['VJ', 'Efectos', 'Mapping', 'Cámaras', 'Iluminación', 'Show', '3D'], routes: [] },
     drawings: [],
     mappings: [],
     params: {},

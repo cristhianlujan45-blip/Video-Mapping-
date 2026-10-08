@@ -667,6 +667,16 @@ export interface MidiSettings {
   /** Device that receives clock / MTC out. */
   clockOutput: string | null;
   banks: string[];
+  /** MIDI thru / routing between devices. */
+  routes: { id: Id; from: string; to: string; channels: number[]; enabled: boolean }[];
+}
+
+export interface SavedStroke {
+  id: number;
+  /** Full brush settings used (StrokeBrush). */
+  brush: Record<string, unknown>;
+  /** Flat x, y, pressure, t samples. */
+  points: number[];
 }
 
 export interface DrawingLayerDef {
@@ -674,6 +684,8 @@ export interface DrawingLayerDef {
   name: string;
   width: number;
   height: number;
+  /** Non-destructive stroke list (replayed on the GPU when loading / undoing). */
+  strokes: SavedStroke[];
 }
 
 export interface Project {

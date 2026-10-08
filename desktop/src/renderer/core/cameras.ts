@@ -213,6 +213,24 @@ export class CameraManager {
     return () => this.trackTaps.delete(`${cameraId}|${consumer}`);
   }
 
+  /** One frame of a camera as RGBA ImageData at the requested size (calibration / AI). */
+  async grab(cameraId: string, width: number, height: number): Promise<ImageData | null> {
+    const track = this.streams.get(cameraId)?.getVideoTracks()[0];
+    if (!track || track.readyState !== 'live') return null;
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.srcObject = new MediaStream([track]);
+    await v.play().catch(() => {});
+    await new Promise<void>((r) => v.requestVideoFrameCallback(() => r()));
+    const c = new OffscreenCanvas(width, height);
+    const g = c.getContext('2d', { willReadFrequently: true })!;
+    g.drawImage(v, 0, 0, width, height);
+    v.pause();
+    v.srcObject = null;
+    return g.getImageData(0, 0, width, height);
+  }
+
   stopAll() {
     for (const id of [...this.streams.keys()]) this.close(id);
     for (const [id] of this.state) this.setState(id, { status: 'disabled' });

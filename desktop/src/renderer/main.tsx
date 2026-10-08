@@ -7,6 +7,9 @@ import { logToMain, lujan } from './api';
 window.addEventListener('error', (e) => logToMain('ERROR', 'ui', `${e.message} @ ${e.filename}:${e.lineno}`));
 window.addEventListener('unhandledrejection', (e) => logToMain('ERROR', 'ui', `Promesa rechazada: ${String(e.reason?.stack ?? e.reason)}`));
 
+// test/automation hook (used by the e2e suite and remote diagnostics)
+(window as unknown as { __show: typeof show }).__show = show;
+
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
 

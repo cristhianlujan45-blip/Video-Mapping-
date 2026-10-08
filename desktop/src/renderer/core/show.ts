@@ -22,6 +22,7 @@ import { TrackingManager } from './tracking';
 import { OutputWindows } from './outputWindows';
 import { TimelinePlayer } from './timeline';
 import { Assistant } from './assistant';
+import { ExportManager } from './exporter';
 import { requestPorts, waitPort } from './ports';
 import { lujan, logToMain } from '../api';
 import type { QualitySettings } from '../worker/protocol';
@@ -62,6 +63,7 @@ export class Show {
   tracking!: TrackingManager;
   outputs!: OutputWindows;
   timeline!: TimelinePlayer;
+  exporter!: ExportManager;
   rules: RuleEngine;
   macros: MacroRunner;
   recorder = new AutomationRecorder();
@@ -128,7 +130,7 @@ export class Show {
 
   async start() {
     this.info = (await lujan?.invoke<AppInfo>('app:info')) ?? null;
-    const settings = (await lujan?.invoke<{ uiMode: 'simple' | 'pro'; previewScale: number; previewFps: number }>('settings:get')) ?? null;
+    const settings = (await lujan?.invoke<{ uiMode: 'simple' | 'pro'; previewScale: number; previewFps: number; shortcuts: Record<string, string> }>('settings:get')) ?? null;
     if (settings) {
       this.ui.mode = settings.uiMode;
       this.quality.previewScale = settings.previewScale;
@@ -138,6 +140,7 @@ export class Show {
     const dmxRender = await waitPort('dmx:render', 4000);
     this.render = new RenderClient(dmxRender, this.quality);
     this.render.previewScale = this.quality.previewScale;
+    if (settings?.shortcuts && Object.keys(settings.shortcuts).length) this.render.send({ type: 'shortcuts', map: settings.shortcuts });
     this.render.on((m) => {
       if (m.type === 'pick') {
         this.ui.selectedObject = m.objectId;
@@ -158,6 +161,7 @@ export class Show {
       }
     });
     this.media = new MediaHost(this.render);
+    this.exporter = new ExportManager(this);
     this.cameras = new CameraManager(this.render);
     this.midi = new MidiManager(this.engine);
     this.dmx = new DmxClient(this.engine);
@@ -259,6 +263,17 @@ export class Show {
     if (this.render) {
       this.render.send({ type: 'project', project: p });
       this.lastSentProject = p;
+      // Drawing layers are non-destructive stroke lists: replay on load / undo / redo.
+      for (const d of p.drawings) {
+        const before = prev.drawings.find((x) => x.id === d.id);
+        const fresh = p.id !== prev.id || p === prev;
+        if (!fresh && before?.strokes === d.strokes) continue;
+        if (this.liveStroke === d.id && before && d.strokes.length === before.strokes.length + 1) {
+          this.liveStroke = null;
+          continue;
+        }
+        this.render.send({ type: 'drawingCommand', layerId: d.id, command: 'rebuild', strokes: d.strokes.map((st) => ({ layerId: d.id, brush: st.brush as never, points: new Float32Array(st.points), start: true, end: true, strokeId: st.id })) });
+      }
       this.media.sync(p);
       this.cameras.sync(p.cameras);
       this.tracking.sync(p.tracking);
@@ -268,6 +283,7 @@ export class Show {
       this.timeline.source = p.sync.source;
       this.midi.disabledInputs = new Set(p.midi.disabledInputs);
       this.midi.disabledOutputs = new Set(p.midi.disabledOutputs);
+      this.midi.routes = p.midi.routes.map((r) => ({ ...r, channels: [...r.channels] }));
       const iface = this.interfaces.find((i) => i.name === p.dmx.interfaceName && i.address === p.dmx.interfaceAddress) ?? null;
       this.dmx.sync(p, iface);
       void this.net.sync(p);
@@ -332,6 +348,8 @@ export class Show {
     }
     // timeline / sync
     this.timeline.tick(p.timeline, p.sync.offsetSec, this.midi.clock.bpm || null, this.midi.clock.running, this.midi.clock.beats);
+    // MIDI clock (24 ppqn at the show BPM) and MTC out, from the common show clock
+    if (p.midi.clockOutput) this.sendClock(p.midi.clockOutput, now);
     // transitions (TAKE)
     const tp = this.transitionProgress();
     if (this.ui.transition && tp !== null && tp >= 1) this.finishTransition();
@@ -350,6 +368,28 @@ export class Show {
     if (now - this.lastRemote > 300) {
       this.lastRemote = now;
       this.net.publishRemote(this.remoteState());
+    }
+  }
+
+  private clockAcc = 0;
+  private lastClockT = 0;
+  private lastMtcT = 0;
+
+  private sendClock(device: string, now: number) {
+    const p = this.project;
+    const dt = this.lastClockT ? (now - this.lastClockT) / 1000 : 0;
+    this.lastClockT = now;
+    if (this.media.playing || this.timeline.playing) {
+      this.clockAcc += dt * ((this.engine.value('sync.bpm', p.sync.bpm) * 24) / 60);
+      while (this.clockAcc >= 1) {
+        this.midi.sendClockTick(device);
+        this.clockAcc -= 1;
+      }
+    }
+    if (this.timeline.playing && now - this.lastMtcT >= (2 * 1000) / p.sync.timecodeFps) {
+      // a full quarter-frame cycle covers two frames
+      this.lastMtcT = now;
+      this.midi.sendMtc(device, this.timeline.time, p.sync.timecodeFps);
     }
   }
 
@@ -889,6 +929,8 @@ export class Show {
   }
 
   exportStop: (() => void) | null = null;
+  /** Set while a stroke drawn live is committed (it is already on the GPU, no replay). */
+  liveStroke: string | null = null;
 }
 
 export const show = new Show();

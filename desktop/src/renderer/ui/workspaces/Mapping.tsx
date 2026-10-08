@@ -393,7 +393,7 @@ function SurfaceInspector({ output, surface: sf, maskEdit, setMaskEdit }: { outp
 
 // ------------------------------------------------------------------ canvas overlay with handles
 
-function MappingOverlay({ output, surface, mode, maskId }: { output: Output; surface: Surface | null; mode: EditMode; maskId: string | null }) {
+export function MappingOverlay({ output, surface, mode, maskId }: { output: Output; surface: Surface | null; mode: EditMode; maskId: string | null }) {
   const s = useShow();
   const svg = useRef<SVGSVGElement>(null);
   const [selPoint, setSelPoint] = useState<number>(-1);

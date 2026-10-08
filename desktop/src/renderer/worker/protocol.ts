@@ -74,6 +74,7 @@ export type ToRender =
   | { type: 'exportStart'; id: number; target: { kind: 'program' | 'output' | 'composition'; id?: string }; width: number; height: number; fps: number; codec: 'avc' | 'hevc'; bitrate: number; durationSec: number | null }
   | { type: 'exportStop'; id: number }
   | { type: 'quality'; quality: QualitySettings }
+  | { type: 'shortcuts'; map: Record<string, string> }
   | { type: 'trackingPort'; port: MessagePort }
   | { type: 'dmxPort'; port: MessagePort }
   | { type: 'uiState'; selectedObject: string | null; transitionProgress: number | null; transitionKind: import('../../shared/project/model').TransitionKind | null }

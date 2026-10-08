@@ -558,6 +558,9 @@ self.onmessage = (e: MessageEvent<ToRender>) => {
         transitionKind = m.transitionKind;
         projectDirty = true;
         break;
+      case 'shortcuts':
+        stage.shortcuts = { ...stage.shortcuts, ...m.map };
+        break;
       case 'trackingPort':
         m.port.onmessage = (ev: MessageEvent<{ type: 'tracking'; cameraId: string; people: import('../../shared/tracking/pose').TrackedPerson[]; mask: ImageBitmap | null }>) => {
           trackingFx.setData(ev.data.cameraId, ev.data.people, ev.data.mask);

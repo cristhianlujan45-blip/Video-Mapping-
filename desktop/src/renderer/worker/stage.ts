@@ -624,8 +624,16 @@ export class Stage {
     this.emit({ type: 'pick', viewId, objectId: mesh.userData.objectId ?? null, face });
   }
 
-  key(viewId: string, key: string, code: string, mods: { shift: boolean; ctrl: boolean; alt: boolean }) {
+  /** Configurable shortcuts (action → KeyboardEvent.code). Defaults follow Blender. */
+  shortcuts: Record<string, string> = { ...DEFAULT_SHORTCUTS };
+
+  key(viewId: string, key: string, rawCode: string, mods: { shift: boolean; ctrl: boolean; alt: boolean }) {
     const v = this.viewState(viewId);
+    // translate the pressed key to its action, then to the canonical Blender code used below
+    const action = Object.entries(this.shortcuts).find(([, c]) => c === rawCode)?.[0];
+    const code = action ? CANONICAL[action] : rawCode in CANONICAL_REVERSE ? '' : rawCode;
+    if (action === 'grab' || action === 'rotate' || action === 'scale') key = { grab: 'g', rotate: 'r', scale: 's' }[action];
+    else if (!action && rawCode in CANONICAL_REVERSE && this.shortcuts[CANONICAL_REVERSE[rawCode]] !== rawCode) key = '';
     // Numpad navigation (Blender)
     const presets: Record<string, [number, number]> = { Numpad1: [0, 0], Numpad3: [90, 0], Numpad7: [0, 89.99] };
     if (code in presets && !this.modal) {
@@ -794,3 +802,17 @@ export class Stage {
 }
 
 const round = (v: number) => Math.round(v * 10000) / 10000;
+
+export const DEFAULT_SHORTCUTS: Record<string, string> = {
+  front: 'Numpad1',
+  right: 'Numpad3',
+  top: 'Numpad7',
+  persp: 'Numpad5',
+  projector: 'Numpad0',
+  focus: 'NumpadDecimal',
+  grab: 'KeyG',
+  rotate: 'KeyR',
+  scale: 'KeyS',
+};
+const CANONICAL: Record<string, string> = { front: 'Numpad1', right: 'Numpad3', top: 'Numpad7', persp: 'Numpad5', projector: 'Numpad0', focus: 'NumpadDecimal', grab: 'KeyG', rotate: 'KeyR', scale: 'KeyS' };
+const CANONICAL_REVERSE: Record<string, string> = Object.fromEntries(Object.entries(CANONICAL).map(([a, c]) => [c, a]));

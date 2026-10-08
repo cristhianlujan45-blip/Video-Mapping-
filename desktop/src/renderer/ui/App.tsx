@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { useShow, useTicker, useParamValue } from './hooks';
 import { Icon } from './icons';
+import { ViewCanvas } from './ViewCanvas';
 import { LearnButton, Modal, Slider } from './controls';
 import { show } from '../core/show';
 import { lujan } from '../api';
@@ -361,7 +362,6 @@ function PerfProgram() {
   return <ProgramView />;
 }
 
-import { ViewCanvas } from './ViewCanvas';
 function ProgramView() {
   return <ViewCanvas spec={{ kind: 'program' }} label="Program" labelClass="program" style={{ height: '100%' }} />;
 }
