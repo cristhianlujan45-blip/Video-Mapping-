@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b0d12">
+<title>LumaMap · Mando</title>
+<style>
+  body{background:#0b0d12;color:#e8eef8;font:16px system-ui,sans-serif;margin:0;min-height:100vh;
+       display:flex;flex-direction:column;align-items:center;padding:16px;gap:14px;user-select:none;}
+  h1{font-size:22px;margin:4px 0 0;background:linear-gradient(90deg,#00e5ff,#ff2d8a);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  #net{color:#8e9ab0;font-size:13px;}
+  #state{background:#12161e;border:1px solid #2a3346;border-radius:14px;padding:12px 16px;min-width:280px;text-align:center;}
+  .grid{display:grid;grid-template-columns:repeat(3,96px);gap:10px;}
+  button{background:#1a2030;color:#e8eef8;border:1px solid #2a3346;border-radius:16px;font-size:26px;height:72px;cursor:pointer;}
+  button:active{background:#00e5ff;color:#000;}
+  button.warn{border-color:#ff453a;color:#ff8a80;font-size:15px;font-weight:700;}
+  #scenes{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:340px;}
+  #scenes button{height:48px;font-size:14px;padding:0 14px;}
+  #scenes button.on{border-color:#00e5ff;color:#00e5ff;}
+  input[type=range]{width:300px;}
+  .lbl{font-size:13px;color:#8e9ab0;}
+</style>
+</head>
+<body>
+<h1>LumaMap · Mando</h1>
+<div id="net">conectando…</div>
+<div id="state">—</div>
+<div class="grid">
+  <button data-c="prev">⏮</button>
+  <button data-c="play">▶</button>
+  <button data-c="next">⏭</button>
+  <button data-c="pause">⏸</button>
+  <button data-c="stop">⏹</button>
+  <button class="warn" data-c="blackout">APAGÓN</button>
+</div>
+<div id="scenes"></div>
+<div><div class="lbl">Brillo general</div><input id="bri" type="range" min="0" max="1" step="0.01" value="1"></div>
+<script type="module">
+import { Remote } from "./js/remote.js";
+const netEl = document.getElementById("net"), stateEl = document.getElementById("state"), scenesEl = document.getElementById("scenes");
+const remote = new Remote({
+  role: "controller", name: "Mando " + Math.floor(Math.random() * 1000),
+  onStatus: s => netEl.textContent = s,
+  onState: st => {
+    stateEl.innerHTML = `<b>${st.project}</b><br>Escena ${st.sceneIndex + 1}/${st.sceneCount}: ${st.scene}<br>` +
+      `${st.blackout ? "■ APAGÓN" : st.playing ? "▶ reproduciendo" : "⏸ en pausa"} · ${st.fps} FPS · ${st.resolution}`;
+    const names = st.scenes || [];
+    if (scenesEl.dataset.sig !== names.join("|") + st.sceneIndex) {
+      scenesEl.dataset.sig = names.join("|") + st.sceneIndex;
+      scenesEl.innerHTML = "";
+      names.forEach((n, i) => {
+        const b = document.createElement("button");
+        b.textContent = `${i + 1}. ${n}`;
+        if (i === st.sceneIndex) b.className = "on";
+        b.onclick = () => remote.sendControl("goto", i);
+        scenesEl.append(b);
+      });
+    }
+  },
+});
+remote.connect();
+document.querySelectorAll("[data-c]").forEach(b => b.addEventListener("click", () => remote.sendControl(b.dataset.c)));
+document.getElementById("bri").addEventListener("input", e => remote.sendControl("brightness", Number(e.target.value)));
+</script>
+</body>
+</html>

@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # Número de compilación: versión 2.3.N (Android versionCode 1000+N). El
+  # actualizador de la app compara este número con el publicado.
+  LUMAMAP_BUILD: ${{ github.run_number }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,17 +22,124 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: LumaMap tests (motor, modelo, audio, servidor)
+        working-directory: lumamap
+        run: npm test
 
       - name: Unit tests (core + app)
         run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
 
-      - name: Build debug APK
-        run: ./gradlew --no-daemon :app:assembleDebug
+      - name: Build APKs
+        run: ./gradlew --no-daemon :app:assembleDebug :lumamap:assembleRelease
 
-      - name: Upload debug APK
+      - name: Upload LUJAN MAPPING debug APK
         uses: actions/upload-artifact@v4
         with:
           name: lujan-mapping-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Upload LumaMap APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumamap-android
+          path: lumamap/android/build/outputs/apk/release/lumamap-release.apk
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build LumaMap Windows installer
+        working-directory: lumamap/desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm ci --no-audit --no-fund
+          npm version "2.3.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+          npm run installer:win
+
+      # Prueba real: instala en silencio, comprueba los archivos y abre la app.
+      - name: Install and launch on Windows
+        shell: pwsh
+        working-directory: lumamap/desktop/dist
+        run: |
+          $setup = Get-ChildItem LumaMap-Setup*.exe | Select-Object -First 1
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/S'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\LumaMap\LumaMap.exe'
+          if (-not (Test-Path $exe)) { throw "No se instaló $exe" }
+          Write-Host "Instalado: $exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "LumaMap se cerró al arrancar (código $($p.ExitCode))" }
+          Write-Host "LumaMap sigue abierto tras 15 s"
+          Get-Process LumaMap -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Upload LumaMap Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumamap-windows-installer
+          path: lumamap/desktop/dist/LumaMap-Setup*.exe
+          if-no-files-found: error
+
+  # Descarga directa (sin zips): publica el instalador y el APK en una versión
+  # preliminar «lumamap-latest» de la página Releases del repositorio.
+  publish:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [build, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Rename downloads
+        run: |
+          mkdir release
+          cp out/lumamap-windows-installer/*.exe release/LumaMap-Setup.exe
+          cp out/lumamap-android/lumamap-release.apk release/LumaMap-Android.apk
+          BASE="https://github.com/${{ github.repository }}/releases/download/lumamap-latest"
+          NOTES=$(echo "${{ github.event.head_commit.message }}" | head -n1 | sed 's/"/\\"/g')
+          cat > release/version.json <<JSON
+          {
+            "version": "2.3.${LUMAMAP_BUILD}",
+            "build": ${LUMAMAP_BUILD},
+            "commit": "${{ github.sha }}",
+            "notes": "${NOTES}",
+            "android": { "versionCode": $((1000 + LUMAMAP_BUILD)), "url": "${BASE}/LumaMap-Android.apk" },
+            "windows": { "version": "2.3.${LUMAMAP_BUILD}", "url": "${BASE}/LumaMap-Setup.exe" }
+          }
+          JSON
+          cat release/version.json
+          python3 -c "import json;json.load(open('release/version.json'))"
+          ls -la release
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lumamap-latest
+          name: LumaMap (última versión)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Última compilación de LumaMap desde la rama `${{ github.ref_name }}` (commit ${{ github.sha }}).
+
+            Versión **2.3.${{ github.run_number }}**. La app avisa sola de las versiones nuevas (Menú → Buscar actualizaciones).
+
+            - **Windows:** descarga `LumaMap-Setup.exe`, ábrelo e instala (si aparece «Windows protegió su PC»: *Más información → Ejecutar de todas formas*).
+            - **Android:** descarga `LumaMap-Android.apk` e instálalo (permite «instalar apps desconocidas»).
+          files: release/*
+          fail_on_unmatched_files: true

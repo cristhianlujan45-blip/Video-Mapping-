@@ -1,0 +1,22 @@
+{
+  "name": "lumamap-desktop",
+  "productName": "LumaMap",
+  "version": "2.3.0",
+  "description": "LumaMap: video mapping para PC (Windows, macOS, Linux)",
+  "main": "main.js",
+  "license": "MIT",
+  "author": "LumaMap",
+  "scripts": {
+    "start": "node build.mjs --stage && electron .stage",
+    "dist:win": "node build.mjs win32 x64",
+    "installer:win": "node build.mjs installer"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "44.6.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0"
+  }
+}

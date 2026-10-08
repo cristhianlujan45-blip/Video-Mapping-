@@ -18,3 +18,7 @@ rootProject.name = "LujanMapping"
 
 include(":core")
 include(":app")
+
+// LumaMap: app de video mapping táctil (motor web WebGL2 + salida HDMI nativa).
+include(":lumamap")
+project(":lumamap").projectDir = file("lumamap/android")
