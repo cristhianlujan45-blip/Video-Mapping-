@@ -54,6 +54,7 @@ await test("MIDI LEARN: mover un knob crea el mapeo con dispositivo, canal y CC"
   P.input(cc(7, 90));
   const m = await pending;
   assert.equal(m.device, "Mi Controlador"); assert.equal(m.channel, 1); assert.equal(m.key, "cc:7"); assert.equal(m.mode, "absolute");
+  assert.match(m.id || "", /^map_/, "el mapeo nuevo tiene id (sin id el diálogo de aprender no se cerraba)");
   assert.equal(app.S.project.settings.control.mappings.length, 1);
   // A partir de ahí el knob controla el brillo (con soft takeover: primero alcanza el valor actual = 100 %).
   P.input(cc(7, 127)); P.input(cc(7, 64));

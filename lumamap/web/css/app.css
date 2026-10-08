@@ -88,8 +88,12 @@ small{color:var(--dim);font-size:12px;}
 @media (min-width:820px) and (orientation:landscape), (min-width:1100px){
   #main{flex-direction:row;}
   #panel{width:360px;max-height:none;border-top:0;border-left:1px solid var(--line);order:2;}
-  #dock{position:relative;justify-content:center;}
-  #dock button{flex:0 0 auto;min-width:92px;font-size:12.5px;}
+  #dock{position:relative;}
+  /* Centrado que no corta las primeras pestañas cuando no caben todas (modo profesional). */
+  #dock button:first-child{margin-left:auto;}
+  #dock button:last-child{margin-right:auto;}
+  #dock button{flex:0 1 92px;min-width:64px;font-size:12.5px;}
+  #dock button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 }
 @media (max-height:520px) and (orientation:landscape){
   #main{flex-direction:row;}

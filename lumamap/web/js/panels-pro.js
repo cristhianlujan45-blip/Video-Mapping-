@@ -308,7 +308,7 @@ const perfPanel = {
     clearInterval(perfTimer);
     perfTimer = setInterval(draw, 700);
     window.LumaDesktop?.perfWatch?.(true);
-    draw();
+    setTimeout(draw, 0);   // cuando el panel ya está en pantalla (si no, se daría por cerrado)
     const S = app.S;
     return h("div", {},
       section("Render", box,

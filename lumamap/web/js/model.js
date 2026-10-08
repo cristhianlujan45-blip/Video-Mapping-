@@ -600,9 +600,10 @@ export function normalizeControl(c) {
 export function normalizeMapping(m) {
   if (!m || !m.src || !m.target) return null;
   return {
-    id: m.id || uid("map"), name: "", src: m.src, device: "*", channel: 0, key: "", target: m.target,
+    name: "", src: m.src, device: "*", channel: 0, key: "", target: m.target,
     min: 0, max: 1, mode: "absolute", merge: "override", rel: "twos", sens: 1, bank: "", mod: "",
     invert: false, feedback: true, takeover: true, enabled: true, ...m,
+    id: m.id || uid("map"),   // después de ...m: un id vacío o undefined no debe borrar el generado
   };
 }
 
