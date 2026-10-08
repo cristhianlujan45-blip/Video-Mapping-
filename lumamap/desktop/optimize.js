@@ -72,6 +72,17 @@ function hardwareEncoders() {
   return encodersCache;
 }
 
+/** Codificadores por hardware que de verdad funcionan en este equipo (prueba de 1 fotograma). */
+let usableCache = null;
+function usableEncoders() {
+  if (usableCache) return usableCache;
+  usableCache = hardwareEncoders().then((list) => Promise.all(list.map((enc) => new Promise((resolve) => {
+    execFile(ffmpegPath(), ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=256x144:d=0.2", "-frames:v", "1", "-c:v", enc, "-f", "null", "-"],
+      { timeout: 15000 }, (err) => resolve(err ? null : enc));
+  })))).then((r) => r.filter(Boolean));
+  return usableCache;
+}
+
 function encoderArgs(enc) {
   const gop = ["-g", "30", "-bf", "0"];
   switch (enc) {
@@ -133,4 +144,4 @@ async function optimize(input, target, outDir, onProgress) {
   throw lastErr || new Error("No se pudo convertir el video");
 }
 
-module.exports = { optimize, probe, decide, parseProbe, ffmpegPath };
+module.exports = { optimize, probe, decide, parseProbe, ffmpegPath, usableEncoders };

@@ -9,22 +9,28 @@
   body{background:#0b0d12;color:#e8eef8;font:16px system-ui,sans-serif;margin:0;min-height:100vh;
        display:flex;flex-direction:column;align-items:center;padding:16px;gap:14px;user-select:none;}
   h1{font-size:22px;margin:4px 0 0;background:linear-gradient(90deg,#00e5ff,#ff2d8a);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  h2{font-size:13px;color:#8e9ab0;text-transform:uppercase;letter-spacing:.08em;margin:8px 0 0;}
   #net{color:#8e9ab0;font-size:13px;}
   #state{background:#12161e;border:1px solid #2a3346;border-radius:14px;padding:12px 16px;min-width:280px;text-align:center;}
   .grid{display:grid;grid-template-columns:repeat(3,96px);gap:10px;}
   button{background:#1a2030;color:#e8eef8;border:1px solid #2a3346;border-radius:16px;font-size:26px;height:72px;cursor:pointer;}
   button:active{background:#00e5ff;color:#000;}
   button.warn{border-color:#ff453a;color:#ff8a80;font-size:15px;font-weight:700;}
-  #scenes{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:340px;}
-  #scenes button{height:48px;font-size:14px;padding:0 14px;}
-  #scenes button.on{border-color:#00e5ff;color:#00e5ff;}
+  button.on{border-color:#00e5ff;color:#00e5ff;}
+  .wrap{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:340px;}
+  .wrap button{height:48px;font-size:14px;padding:0 14px;}
   input[type=range]{width:300px;}
   .lbl{font-size:13px;color:#8e9ab0;}
+  #pinbox{display:none;flex-direction:column;align-items:center;gap:10px;}
+  #pinbox input{font-size:28px;width:160px;text-align:center;background:#12161e;color:#fff;border:1px solid #2a3346;border-radius:12px;padding:8px;}
+  section{display:flex;flex-direction:column;align-items:center;gap:10px;}
 </style>
 </head>
 <body>
 <h1>LumaMap · Mando</h1>
 <div id="net">conectando…</div>
+<div id="pinbox"><div class="lbl">Escribe el PIN que muestra LumaMap (Menú → Mando remoto)</div><input id="pin" inputmode="numeric" maxlength="6"><button id="pinok" style="height:52px;font-size:18px;padding:0 24px">Conectar</button></div>
+<div id="ui" style="display:contents">
 <div id="state">—</div>
 <div class="grid">
   <button data-c="prev">⏮</button>
@@ -34,34 +40,72 @@
   <button data-c="stop">⏹</button>
   <button class="warn" data-c="blackout">APAGÓN</button>
 </div>
-<div id="scenes"></div>
-<div><div class="lbl">Brillo general</div><input id="bri" type="range" min="0" max="1" step="0.01" value="1"></div>
+<h2>Escenas</h2>
+<div id="scenes" class="wrap"></div>
+<section>
+  <div><div class="lbl">Brillo general</div><input id="bri" type="range" min="0" max="1" step="0.01" value="1"></div>
+  <div><div class="lbl">Crossfader A ⟷ B (superficie seleccionada)</div><input id="mix" type="range" min="0" max="1" step="0.01" value="0"></div>
+  <div class="wrap"><button data-p="global/goAll">GO todas</button><button data-p="global/randomAll">Todas al azar</button><button data-p="global/tap">TAP</button></div>
+</section>
+<h2>Macros</h2>
+<div id="macros" class="wrap"></div>
+<h2>Luces</h2>
+<section>
+  <div class="wrap"><button id="lplay" data-p="dmx/enabled">PLAY luces</button><button class="warn" data-p="dmx/blackout">Apagón luces</button></div>
+  <div><div class="lbl">Master de luces</div><input id="lmaster" type="range" min="0" max="1" step="0.01" value="1"></div>
+  <div id="snaps" class="wrap"></div>
+</section>
+</div>
 <script type="module">
 import { Remote } from "./js/remote.js";
-const netEl = document.getElementById("net"), stateEl = document.getElementById("state"), scenesEl = document.getElementById("scenes");
-const remote = new Remote({
-  role: "controller", name: "Mando " + Math.floor(Math.random() * 1000),
-  onStatus: s => netEl.textContent = s,
-  onState: st => {
-    stateEl.innerHTML = `<b>${st.project}</b><br>Escena ${st.sceneIndex + 1}/${st.sceneCount}: ${st.scene}<br>` +
-      `${st.blackout ? "■ APAGÓN" : st.playing ? "▶ reproduciendo" : "⏸ en pausa"} · ${st.fps} FPS · ${st.resolution}`;
-    const names = st.scenes || [];
-    if (scenesEl.dataset.sig !== names.join("|") + st.sceneIndex) {
-      scenesEl.dataset.sig = names.join("|") + st.sceneIndex;
-      scenesEl.innerHTML = "";
-      names.forEach((n, i) => {
-        const b = document.createElement("button");
-        b.textContent = `${i + 1}. ${n}`;
-        if (i === st.sceneIndex) b.className = "on";
-        b.onclick = () => remote.sendControl("goto", i);
-        scenesEl.append(b);
-      });
-    }
-  },
-});
-remote.connect();
+const $ = (id) => document.getElementById(id);
+const netEl = $("net"), stateEl = $("state");
+let pin = new URLSearchParams(location.search).get("pin") || localStorage.getItem("lumamap:pin") || "";
+let remote;
+function start() {
+  remote?.close();
+  remote = new Remote({
+    role: "controller", name: "Mando " + Math.floor(Math.random() * 1000), pin,
+    onStatus: s => netEl.textContent = s,
+    onAuth: (m) => {
+      $("pinbox").style.display = m.ok ? "none" : "flex";
+      $("ui").style.display = m.ok ? "contents" : "none";
+      if (!m.ok) netEl.textContent = pin ? "PIN incorrecto" : "Se necesita el PIN";
+      else if (pin) localStorage.setItem("lumamap:pin", pin);
+    },
+    onState: st => {
+      stateEl.innerHTML = `<b>${esc(st.project)}</b><br>Escena ${st.sceneIndex + 1}/${st.sceneCount}: ${esc(st.scene)}<br>` +
+        `${st.blackout ? "■ APAGÓN" : st.playing ? "▶ reproduciendo" : "⏸ en pausa"} · ${st.fps} FPS · ${st.resolution}` +
+        (st.timecode ? `<br>TC ${st.timecode}` : "") + (st.cue ? ` · Cue: ${esc(st.cue)}` : "");
+      list("scenes", (st.scenes || []).map((n, i) => ({ label: `${i + 1}. ${n}`, on: i === st.sceneIndex, run: () => remote.sendControl("goto", i) })));
+      list("macros", (st.macros || []).map(m => ({ label: m.name, run: () => remote.sendControl("param", 1, "macro/" + m.id) })));
+      const L = st.lights || {};
+      list("snaps", (L.snapshots || []).map(s => ({ label: s.name, on: s.id === L.active, run: () => remote.sendControl("param", 1, s.id === L.active ? "dmx/snapshot/off" : "dmx/snapshot/" + s.id) })));
+      $("lplay").textContent = L.enabled ? "■ Detener luces" : "▶ PLAY luces";
+      $("lplay").classList.toggle("on", !!L.enabled);
+      if (document.activeElement !== $("bri")) $("bri").value = st.master ?? 1;
+      if (document.activeElement !== $("mix")) $("mix").value = st.mix ?? 0;
+      if (document.activeElement !== $("lmaster")) $("lmaster").value = L.master ?? 1;
+      $("mix").disabled = !st.hasNext;
+    },
+  });
+  remote.connect();
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function list(id, items) {
+  const el = $(id), sig = JSON.stringify(items.map(i => [i.label, i.on]));
+  if (el.dataset.sig === sig) return;
+  el.dataset.sig = sig; el.innerHTML = "";
+  for (const it of items) { const b = document.createElement("button"); b.textContent = it.label; if (it.on) b.className = "on"; b.onclick = it.run; el.append(b); }
+  if (!items.length) el.innerHTML = `<span class="lbl">—</span>`;
+}
 document.querySelectorAll("[data-c]").forEach(b => b.addEventListener("click", () => remote.sendControl(b.dataset.c)));
-document.getElementById("bri").addEventListener("input", e => remote.sendControl("brightness", Number(e.target.value)));
+document.querySelectorAll("[data-p]").forEach(b => b.addEventListener("click", () => remote.sendControl("param", undefined, b.dataset.p)));
+$("bri").addEventListener("input", e => remote.sendControl("brightness", Number(e.target.value)));
+$("mix").addEventListener("input", e => remote.sendControl("param", Number(e.target.value), "surf/sel/mix"));
+$("lmaster").addEventListener("input", e => remote.sendControl("param", Number(e.target.value), "dmx/master"));
+$("pinok").onclick = () => { pin = $("pin").value.trim(); start(); };
+start();
 </script>
 </body>
 </html>

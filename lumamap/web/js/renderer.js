@@ -54,6 +54,8 @@ uniform int u_shapeN;
 uniform vec2 u_mask[${MAXP}];
 uniform int u_maskN, u_maskInv;
 uniform float u_maskFeather;
+uniform vec4 u_tr;      // transición: modo (0 nada, 1 disolver, 2 cortinilla →, 3 cortinilla ↓, 4 iris), progreso, papel (0 sale, 1 entra)
+uniform vec4 u_frame;   // rectángulo de la salida en píxeles del lienzo (x, y desde abajo, ancho, alto)
 
 const float TAU = 6.28318530718;
 
@@ -1094,6 +1096,17 @@ void main(){
   }
   c.a *= u_alpha;
   if(u_maskN >= 3) c.a *= maskCoverage(uv);
+  if(u_tr.x > 0.5){
+    vec2 sp = (gl_FragCoord.xy - u_frame.xy) / max(u_frame.zw, vec2(1.0));
+    float t, s = 0.03;
+    if(u_tr.x < 1.5){ t = fract(sin(dot(floor((gl_FragCoord.xy - u_frame.xy) / 3.0), vec2(12.9898, 78.233))) * 43758.5453); s = 0.0; }
+    else if(u_tr.x < 2.5) t = sp.x;
+    else if(u_tr.x < 3.5) t = 1.0 - sp.y;
+    else t = length((sp - 0.5) * vec2(u_frame.z / max(u_frame.w, 1.0), 1.0)) / length(vec2(0.5 * u_frame.z / max(u_frame.w, 1.0), 0.5));
+    float p = u_tr.y * (1.0 + 2.0 * s) - s;
+    float vis = 1.0 - smoothstep(p - s, p + s + 1e-5, t);
+    c.a *= u_tr.z > 0.5 ? vis : 1.0 - vis;
+  }
   c.rgb = clamp(c.rgb, 0.0, 1.0);
   if(c.a <= 0.002) discard;
   outColor = vec4(c.rgb * c.a, c.a);   // alfa premultiplicado
@@ -1102,7 +1115,7 @@ void main(){
 const UNIFORMS = ["u_tex", "u_src", "u_fit", "u_contain", "u_gen", "u_c1", "u_c2", "u_gscale", "u_gtime",
   "u_aspect", "u_time", "u_alpha", "u_bri", "u_con", "u_sat", "u_hue", "u_rgb", "u_pix", "u_blur", "u_noise",
   "u_inv", "u_mirror", "u_kal", "u_wave", "u_zoom", "u_rot", "u_scroll", "u_border", "u_glow", "u_bcol",
-  "u_banim", "u_beat", "u_lev", "u_d1", "u_d2", "u_c3", "u_c4", "u_c5", "u_duoA", "u_duoB", "u_key", "u_keyCol", "u_flip", "u_texel", "u_shape", "u_shapeN", "u_mask", "u_maskN", "u_maskInv", "u_maskFeather"];
+  "u_banim", "u_beat", "u_lev", "u_d1", "u_d2", "u_c3", "u_c4", "u_c5", "u_duoA", "u_duoB", "u_key", "u_keyCol", "u_flip", "u_texel", "u_shape", "u_shapeN", "u_mask", "u_maskN", "u_maskInv", "u_maskFeather", "u_tr", "u_frame"];
 
 export function hexToRgb(hex) {
   const h = String(hex || "#ffffff").replace("#", "");
@@ -1176,8 +1189,7 @@ export class Renderer {
   begin(clear = [0, 0, 0, 1]) {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(...clear);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (clear) { gl.clearColor(...clear); gl.clear(gl.COLOR_BUFFER_BIT); }
     gl.useProgram(this.prog);
     gl.bindVertexArray(this.vao);
     gl.enable(gl.BLEND);
@@ -1270,6 +1282,10 @@ export class Renderer {
 
     // Audio reactivo por superficie: modula el parámetro elegido.
     let bri = fx.brightness, alpha = look.opacity * o.alpha, zoom = fx.zoom, hue = fx.hue, border = fx.border, strobe = fx.strobe;
+    // Transiciones de escena con efecto: destello (flash) y glitch, máximos a mitad de la transición.
+    const trK = o.tr ? Math.sin(Math.PI * o.tr.p) : 0;
+    if (o.tr?.mode === "flash") bri *= 1 + trK * 5;
+    const trGlitch = o.tr?.mode === "glitch" ? trK : 0;
     let rot = (fx.rotate || 0) * Math.PI / 180 + (fx.spin || 0) * o.time;
     hue += (fx.hueCycle || 0) * o.time * 0.1;                     // tono que gira solo
     let shakeX = 0, shakeY = 0;                                  // temblor (más fuerte en cada golpe)
@@ -1335,7 +1351,11 @@ export class Renderer {
     gl.uniform1f(L.u_con, fx.contrast);
     gl.uniform1f(L.u_sat, fx.saturation);
     gl.uniform1f(L.u_hue, hue);
-    gl.uniform1f(L.u_rgb, fx.rgbShift);
+    gl.uniform1f(L.u_rgb, fx.rgbShift + trGlitch * 0.02);
+    const TRM = { dissolve: 1, wipe: 2, wipeV: 3, iris: 4 }[o.tr?.mode] || 0;
+    gl.uniform4f(L.u_tr, TRM, o.tr?.p || 0, o.tr?.role || 0, 0);
+    const vw = o.frameRect || [0, 0, cw, ch];
+    gl.uniform4f(L.u_frame, vw[0], vw[1], vw[2], vw[3]);
     gl.uniform1f(L.u_pix, fx.pixelate);
     gl.uniform1f(L.u_blur, srcType === 1 ? fx.blur : 0);
     gl.uniform1f(L.u_noise, fx.noise);
@@ -1353,7 +1373,7 @@ export class Renderer {
     gl.uniform1f(L.u_beat, lv.beat || 0);
     gl.uniform4f(L.u_lev, lv.bass || 0, lv.mid || 0, lv.high || 0, lv.count || 0);
     gl.uniform4f(L.u_d1, fx.twirl || 0, fx.bulge || 0, fx.ripple || 0, fx.tile || 1);
-    gl.uniform4f(L.u_d2, fx.polar ? 1 : 0, fx.glitch || 0, fx.chroma || 0, fx.crt || 0);
+    gl.uniform4f(L.u_d2, fx.polar ? 1 : 0, Math.min(1, (fx.glitch || 0) + trGlitch), (fx.chroma || 0) + trGlitch * 0.03, fx.crt || 0);
     gl.uniform4f(L.u_c3, fx.posterize || 0, fx.sepia || 0, fx.gamma ?? 1, fx.threshold || 0);
     gl.uniform4f(L.u_c4, fx.vignette || 0, fx.scanlines || 0, fx.halftone || 0, COLORMAP[fx.colormap] || 0);
     gl.uniform4f(L.u_c5, fx.edges || 0, fx.sharpen || 0, fx.emboss || 0, fx.duotone || 0);

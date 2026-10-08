@@ -578,6 +578,128 @@ export function createScene(name = "Escena 1") {
   return { id: uid("scene"), name, duration: 0, transition: "fade", looks: {} };
 }
 
+/* ---------------- Control externo (motor de parámetros, ver params.js) ---------------- */
+export const DEFAULT_BANKS = ["VJ", "Efectos", "Mapping", "Cámaras", "Luces", "Show", "3D"];
+export function defaultControl() {
+  return {
+    mappings: [], macros: [], banks: [...DEFAULT_BANKS], bank: "",
+    // Sincronía externa: MIDI Clock (tempo), start/stop y MIDI Clock de salida (nombre del dispositivo).
+    sync: { clockIn: false, transportIn: false, clockOut: "" },
+  };
+}
+export function normalizeControl(c) {
+  const d = defaultControl();
+  c = { ...d, ...(c || {}) };
+  c.mappings = Array.isArray(c.mappings) ? c.mappings.map(normalizeMapping).filter(Boolean) : [];
+  c.macros = Array.isArray(c.macros) ? c.macros.filter(m => m && m.id).map(m => ({ name: "Macro", steps: [], ...m, steps: Array.isArray(m.steps) ? m.steps : [] })) : [];
+  c.banks = Array.isArray(c.banks) && c.banks.length ? c.banks : d.banks;
+  c.sync = { ...d.sync, ...(c.sync || {}) };
+  if (c.bank && !c.banks.includes(c.bank)) c.bank = "";
+  return c;
+}
+export function normalizeMapping(m) {
+  if (!m || !m.src || !m.target) return null;
+  return {
+    id: m.id || uid("map"), name: "", src: m.src, device: "*", channel: 0, key: "", target: m.target,
+    min: 0, max: 1, mode: "absolute", merge: "override", rel: "twos", sens: 1, bank: "", mod: "",
+    invert: false, feedback: true, takeover: true, enabled: true, ...m,
+  };
+}
+
+/* ---------------- Iluminación: DMX / Art-Net / sACN / pixel mapping (dmx.js) ---------------- */
+export function defaultDmx() {
+  return {
+    enabled: false,          // salida activa (PLAY de luces)
+    iface: "",               // IP local de la interfaz de red elegida
+    rate: 40, mode: "sync",  // fps de envío · sync (reloj fijo) | immediate (al instante)
+    discovery: true, master: 1, followBlackout: true, sampleRes: 320,
+    universes: [], pixelMaps: [], fixtures: [], snapshots: [], inputs: [],
+  };
+}
+export function normalizeDmx(d) {
+  const D = defaultDmx();
+  d = { ...D, ...(d || {}) };
+  for (const k of ["universes", "pixelMaps", "fixtures", "snapshots", "inputs"]) d[k] = Array.isArray(d[k]) ? d[k] : [];
+  d.universes = d.universes.filter(u => u && u.num > 0).map(u => ({ name: "", protocol: "virtual", dest: "broadcast", ip: "", enabled: true, delayMs: 0, priority: 100, portAddress: u.num - 1, sacnUniverse: u.num, ...u }));
+  d.pixelMaps = d.pixelMaps.filter(Boolean).map(pm => ({ ...defaultPixelMap(), ...pm }));
+  d.fixtures = d.fixtures.filter(Boolean).map(f => ({ x: 0.5, y: 0.5, source: "video", values: [], screen: 1, enabled: true, ...f, channels: Array.isArray(f.channels) ? f.channels : [] }));
+  return d;
+}
+export function defaultPixelMap() {
+  return {
+    id: uid("pm"), name: "Pixel map", enabled: true, shape: "line", x: 0.1, y: 0.45, w: 0.8, h: 0.1,
+    cols: 30, rows: 1, count: 30, order: "ltr", serpentine: false, reverse: false, startAngle: 0, arc: 180, points: [],
+    colorOrder: "RGB", universe: 1, channel: 1, autoSpan: true, align: true,
+    source: "video", color: "#ffffff", screen: 1, sampling: "average", average: false,
+    brightness: 1, contrast: 1, saturation: 1, gamma: 1, intensity: 1,
+  };
+}
+
+/* ---------------- Show: timecode, cues, automatización, emergencia (show.js) ---------------- */
+export function defaultShow() {
+  return {
+    tcSource: "internal",     // internal | mtc | ltc | osc
+    chase: false,             // las escenas con timecode se disparan solas al pasar por él
+    ltcDevice: "",            // entrada de audio del LTC
+    lanes: [],                // automatización: [{ id, sceneId, target, points: [[t, v]], enabled }]
+    emergency: { sceneId: "", snapshot: "" },
+  };
+}
+export function normalizeShow(sh) {
+  const D = defaultShow();
+  sh = { ...D, ...(sh || {}) };
+  sh.lanes = Array.isArray(sh.lanes) ? sh.lanes.filter(l => l && l.target && Array.isArray(l.points)) : [];
+  sh.emergency = { ...D.emergency, ...(sh.emergency || {}) };
+  return sh;
+}
+
+/* ---------------- Espacio 3D (three3d.js) ---------------- */
+/** Caras con contenido propio de cada tipo de objeto 3D (en el orden de los grupos de la geometría). */
+export const SLOTS_3D = {
+  cube: ["right", "left", "top", "bottom", "front", "back"],
+  plane: ["front"], sphere: ["body"], cylinder: ["side", "top", "bottom"], cone: ["side", "bottom"],
+  pyramid: ["side", "bottom"], prism: ["side", "top", "bottom"], model: ["model"], group: [],
+};
+export const SLOT_NAMES = { right: "Derecha", left: "Izquierda", top: "Arriba", bottom: "Abajo", front: "Frente", back: "Detrás", body: "Superficie", side: "Lateral", model: "Modelo" };
+export function defaultStage3d() {
+  return {
+    objects: [],      // { id, name, kind, mediaId?, parent, pos[3], rot[3] (grados), scale[3], hidden, locked, color, faces: { slot: faceId } }
+    projectors: [],   // { id, name, pos[3], rot[3], fov, res[2], near, far, shift[2], screen }
+    faces: [],        // superficies virtuales (una por cara) con su contenido por escena
+    units: "m", unitScale: 1, gridStep: 0.5,
+    snap: { enabled: false, move: 0.1, rot: 15, scale: 0.1, mode: "grid" },
+    viewMode: "texture",
+    faceRes: 512,     // resolución del contenido de cada cara (px)
+  };
+}
+/** Superficie virtual de una cara 3D: misma estructura que una superficie, no se dibuja en el escenario 2D. */
+export function createFace(name, w = 1000, h = 1000) {
+  const f = createQuad({ name, corners: rectCorners(0, 0, w, h) });
+  f.id = uid("face"); f.face3d = true; f.locked = true;
+  return f;
+}
+export function normalizeStage3d(d) {
+  const D = defaultStage3d();
+  d = { ...D, ...(d || {}) };
+  d.objects = Array.isArray(d.objects) ? d.objects.filter(o => o && o.id) : [];
+  d.projectors = Array.isArray(d.projectors) ? d.projectors.filter(p => p && p.id) : [];
+  d.faces = Array.isArray(d.faces) ? d.faces.filter(f => f && f.id).map(f => ({ ...f, face3d: true, locked: true, mask: { enabled: false, invert: false, feather: 0.01, points: [], ...(f.mask || {}) } })) : [];
+  d.snap = { ...D.snap, ...(d.snap || {}) };
+  return d;
+}
+
+/* ---------------- Tracking (tracking.js) ---------------- */
+export function defaultTracking() {
+  return { provider: "webcam", camId: "", quality: "medium", fps: 24, hands: true, maxPeople: 4, mirror: true, autoStart: false, zones: [], rules: [] };
+}
+export function normalizeTracking(t) {
+  const D = defaultTracking();
+  t = { ...D, ...(t || {}) };
+  t.zones = Array.isArray(t.zones) ? t.zones.filter(z => z && z.id) : [];
+  t.rules = Array.isArray(t.rules) ? t.rules.filter(r => r && r.id && r.then) : [];
+  return t;
+}
+
 /** Ajustes del proyecto. react = modo ritmo global (todo late con la música). */
 export function defaultSettings() {
   return {
@@ -597,6 +719,14 @@ export function defaultSettings() {
     screens: Object.fromEntries([1, 2, 3, 4].map(n => [n, defaultScreen()])),
     // Sensores de cámara (interacción): [{ id, camId, zone, sens, action, target, cooldown }]
     sensors: [],
+    // Mapeos MIDI / OSC / DMX / teclado / audio, macros y bancos (params.js)
+    control: defaultControl(),
+    // Iluminación (DMX, Art-Net, sACN, pixel mapping, fixtures)
+    dmx: defaultDmx(),
+    // Show: timecode, cues, automatización y emergencia
+    show: defaultShow(),
+    // Tracking de personas: proveedor, calidad, zonas y reglas
+    tracking: defaultTracking(),
   };
 }
 
@@ -655,6 +785,7 @@ export function createProject(name = "Mi mapping", width = 1920, height = 1080) 
     surfaces: [], scenes: [scene], sceneId: scene.id,
     media: [],   // metadatos; los archivos viven en IndexedDB (store.js)
     settings: defaultSettings(),
+    stage3d: defaultStage3d(),
   };
 }
 
@@ -808,7 +939,12 @@ export function normalizeProject(json) {
     record: { ...D.record, ...(st.record || {}) },
     screens: Object.fromEntries([1, 2, 3, 4].map(n => [n, { ...defaultScreen(), ...(st.screens?.[n] || {}) }])),
     sensors: Array.isArray(st.sensors) ? st.sensors : [],
+    control: normalizeControl(st.control),
+    dmx: normalizeDmx(st.dmx),
+    show: normalizeShow(st.show),
+    tracking: normalizeTracking(st.tracking),
   };
+  json.stage3d = normalizeStage3d(json.stage3d);
   if (!json.scenes.length) json.scenes.push(createScene());
   if (!json.scenes.some(s => s.id === json.sceneId)) json.sceneId = json.scenes[0].id;
   for (const s of json.surfaces) {

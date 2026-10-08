@@ -11,6 +11,14 @@ import { PATTERNS } from "./overlay.js";
 import { genThumbs, animThumb } from "./thumbs.js";
 import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./sources.js";
 import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
+import { PRO_PANELS, PRO_TABS } from "./panels-pro.js";
+import { DMX_PANELS, DMX_TABS } from "./panels-dmx.js";
+import { SHOW_PANELS, SHOW_TABS } from "./panels-show.js";
+import { PANELS_3D, TABS_3D } from "./panels-3d.js";
+import { TRACKING_PANELS, TRACKING_TABS } from "./panels-tracking.js";
+import { ASSISTANT_PANELS, ASSISTANT_TABS } from "./panels-assistant.js";
+import { FX_RANGE } from "./params.js";
+import { TRANSITIONS } from "./compose.js";
 
 const animUI = { cat: "Todas", q: "" };
 
@@ -25,6 +33,7 @@ export const TABS = [
   { id: "layers", label: "Capas", ic: "layers" },
   { id: "scenes", label: "Escenas", ic: "scenes" },
   { id: "audio", label: "Audio", ic: "audio" },
+  ...SHOW_TABS, ...TABS_3D, ...TRACKING_TABS, ...ASSISTANT_TABS, PRO_TABS[0], ...DMX_TABS, ...PRO_TABS.slice(1),
 ];
 
 const pct = (v) => Math.round(v * 100) + "%";
@@ -264,7 +273,7 @@ const live = {
           h("strong", {}, `Pantalla ${n}`),
           h("small", {}, used ? `${used} sup.` : "todas"),
           btn({ label: c.on ? "ON" : "OFF", kind: c.on ? "primary" : "danger", onClick: () => A.setScreenCfg(n, { on: !c.on }) })),
-        slider({ label: "Brillo", min: 0, max: 1, value: c.master ?? 1, def: 1, fmt: pct, onInput: (v) => A.setScreenCfg(n, { master: v }, true) }),
+        slider({ label: "Brillo", min: 0, max: 1, value: c.master ?? 1, def: 1, fmt: pct, onInput: (v) => A.setScreenCfg(n, { master: v }, true), param: `screen/${n}/master` }),
         slider({ label: "Estrobo", min: 0, max: 12, step: 0.5, value: c.strobe || 0, def: 0, fmt: (v) => v ? v + " Hz" : "No", onInput: (v) => A.setScreenCfg(n, { strobe: v }, true) }),
         (() => { const sel = h("select", { class: "sel" }, ...SCREEN_FX.map(([v, l]) => { const o = h("option", { value: v }, l); if (v === c.fx) o.selected = true; return o; }));
           sel.addEventListener("change", () => A.setScreenCfg(n, { fx: sel.value })); return sel; })(),
@@ -323,12 +332,12 @@ const live = {
         h("div", { class: "deck" },
           slot("a", "AHORA", a, () => { app.select(s.id); app.openTab("content"); }),
           slot("b", "SIGUIENTE", b, () => pickNext(app, s.id))),
-        look.next ? slider({ label: "A ⟷ B", min: 0, max: 1, step: 0.01, value: look.mix || 0, def: 0, fmt: (v) => Math.round(v * 100) + "%", onInput: (v) => A.setMix(s.id, v) }) : null,
+        look.next ? slider({ label: "A ⟷ B", min: 0, max: 1, step: 0.01, value: look.mix || 0, def: 0, fmt: (v) => Math.round(v * 100) + "%", onInput: (v) => A.setMix(s.id, v), param: `surf/${s.id}/mix` }) : null,
         row(btn({ label: "GO", ic: "play", kind: "wide primary", disabled: !look.next, onClick: () => A.go(s.id) }),
           btn({ label: "Corte", kind: "wide", disabled: !look.next, onClick: () => A.go(s.id, 0) }),
           btn({ ic: "shuffle", kind: "icon", title: "Al azar", onClick: () => A.randomNext(s.id) }),
           btn({ ic: "wand", kind: "icon", title: "Elegir siguiente", onClick: () => pickNext(app, s.id) })),
-        slider({ label: "Opacidad", min: 0, max: 1, value: look.opacity, def: 1, fmt: pct, onInput: (v) => app.edit(() => { look.opacity = v; }) }),
+        slider({ label: "Opacidad", min: 0, max: 1, value: look.opacity, def: 1, fmt: pct, onInput: (v) => app.edit(() => { look.opacity = v; }), param: `surf/${s.id}/opacity` }),
         h("div", { class: "lbl" }, "Sale por"),
         segmented({ options: SCREEN_OPTS, value: s.screen || 0, small: true, onChange: (v) => A.setScreen(s.id, v) }));
       wrap.append(card);
@@ -360,11 +369,19 @@ const content = {
     const s = app.surf();
     if (!s) return needSelection(app);
     const A = app.actions, look = app.lookSel(), src = look.source;
+    const projs = app.S.project.stage3d.projectors;
+    const types = [...SOURCE_TYPES, ...(projs.length && !s.face3d ? [{ id: "projector3d", label: "Proyector 3D", ic: "cube" }] : [])];
     const wrap = h("div", {},
-      tiles(SOURCE_TYPES.map(t => ({ ...t })), { value: src.type, cols: 4, onPick: (id) => {
+      s.face3d ? hint("Cara de un objeto 3D: su contenido se ve en la ventana 3D y en lo que proyecta cada proyector.") : null,
+      tiles(types.map(t => ({ ...t })), { value: src.type, cols: 4, onPick: (id) => {
         if (id === "media" && !app.S.project.media.length) return A.importMedia("selected");
+        if (id === "projector3d") return A.setSource({ type: id, projectorId: src.projectorId || projs[0].id });
         A.setSource({ type: id });
       } }));
+    if (src.type === "projector3d") {
+      wrap.append(section("Proyector 3D", hint("Esta superficie muestra lo que ve el proyector virtual: colócala a pantalla completa en la salida de ese proyector."),
+        h("div", { class: "chips" }, ...projs.map(p => h("button", { class: `chip ${src.projectorId === p.id ? "on" : ""}`, onclick: () => A.setSource({ projectorId: p.id }) }, p.name)))));
+    }
 
     if (src.type === "media") {
       const grid = h("div", { class: "mediagrid" });
@@ -382,8 +399,8 @@ const content = {
         hint("Mantén pulsado un archivo para quitarlo. Formatos: MP4, WebM, MOV, JPG, PNG, WebP, GIF animado.")));
       wrap.append(section("Video",
         app.S.project.media.find(m => m.id === src.mediaId)?.kind === "video" ? h("div", {},
-          slider({ label: "Velocidad", min: 0.25, max: 2, step: 0.05, value: look.rate, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { look.rate = v; }) }),
-          slider({ label: "Volumen", min: 0, max: 1, value: look.volume, def: 0, fmt: pct, onInput: (v) => app.edit(() => { look.volume = v; }) }),
+          slider({ label: "Velocidad", min: 0.25, max: 2, step: 0.05, value: look.rate, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { look.rate = v; }), param: `surf/${s.id}/rate` }),
+          slider({ label: "Volumen", min: 0, max: 1, value: look.volume, def: 0, fmt: pct, onInput: (v) => app.edit(() => { look.volume = v; }), param: `surf/${s.id}/volume` }),
           btn({ label: "Reiniciar videos", ic: "restart", kind: "block", onClick: A.restart })) : null));
     }
 
@@ -465,7 +482,7 @@ const content = {
 
     if (src.type !== "none") wrap.append(rotateFitSection(app));
     wrap.append(section("Mezcla",
-      slider({ label: "Opacidad", min: 0, max: 1, value: look.opacity, def: 1, fmt: pct, onInput: (v) => app.edit(() => { look.opacity = v; }) }),
+      slider({ label: "Opacidad", min: 0, max: 1, value: look.opacity, def: 1, fmt: pct, onInput: (v) => app.edit(() => { look.opacity = v; }), param: `surf/${s.id}/opacity` }),
       segmented({ options: BLEND_MODES, value: look.blend, small: true, onChange: (v) => app.edit(() => { look.blend = v; }) }),
       app.S.project.scenes.length > 1 ? btn({ label: "Usar este contenido en todas las escenas", kind: "block", onClick: A.applyToAllScenes }) : null));
     return wrap;
@@ -487,7 +504,10 @@ const fx = {
     if (!s) return needSelection(app);
     const look = app.lookSel(), f = look.fx;
     const set = (k) => (v) => app.edit(() => { f[k] = v; });
-    const sl = (label, k, min, max, step, def, fmt) => slider({ label, min, max, step, value: f[k] ?? def, def, fmt, onInput: set(k) });
+    const sl = (k, fmt) => {
+      const [label, min, max, step, def] = FX_RANGE[k];
+      return slider({ label, min, max, step, value: f[k] ?? def, def, fmt, onInput: set(k), param: `surf/${s.id}/fx/${k}` });
+    };
 
     // ---- Biblioteca ----
     const search = h("input", { type: "search", class: "text-in", placeholder: `Buscar entre ${FX_LIBRARY.length} efectos…`, value: fxUI.q });
@@ -522,67 +542,67 @@ const fx = {
         toggle({ label: "Combinar con el efecto actual", hint: "Apagado: cada efecto sustituye al anterior", value: fxUI.combine, onChange: (v) => { fxUI.combine = v; } }),
         grid),
       fold("Borde neón (líneas sobre el contorno)", f.border > 0,
-        sl("Grosor", "border", 0, 0.08, 0.001, 0, (v) => v ? (v * 100).toFixed(1) : "No"),
+        sl("border", (v) => v ? (v * 100).toFixed(1) : "No"),
         swatches({ value: f.borderColor, onChange: set("borderColor") }),
-        sl("Resplandor", "borderGlow", 0, 1, 0.01, 0.5, pct),
+        sl("borderGlow", pct),
         segmented({ options: BORDER_ANIMS, value: f.borderAnim, small: true, onChange: set("borderAnim") })),
       fold("Color", true,
-        sl("Brillo", "brightness", 0, 2, 0.01, 1, pct),
-        sl("Contraste", "contrast", 0, 2, 0.01, 1, pct),
-        sl("Saturación", "saturation", 0, 3, 0.01, 1, pct),
-        sl("Tono", "hue", 0, 1, 0.005, 0, (v) => Math.round(v * 360) + "°"),
-        sl("Tono que gira solo", "hueCycle", 0, 4, 0.05, 0, (v) => v ? v.toFixed(2) : "No"),
-        sl("Gamma", "gamma", 0.3, 3, 0.01, 1, fix(2)),
+        sl("brightness", pct),
+        sl("contrast", pct),
+        sl("saturation", pct),
+        sl("hue", (v) => Math.round(v * 360) + "°"),
+        sl("hueCycle", (v) => v ? v.toFixed(2) : "No"),
+        sl("gamma", fix(2)),
         toggle({ label: "Negativo", value: f.invert, onChange: set("invert") })),
       fold("Estilo de color", false,
         h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Mapa de color")),
         segmented({ options: COLORMAPS, value: f.colormap || "none", cols: 4, small: true, onChange: set("colormap") }),
-        sl("Sepia", "sepia", 0, 1, 0.01, 0, pct),
-        sl("Duotono", "duotone", 0, 1, 0.01, 0, pct),
+        sl("sepia", pct),
+        sl("duotone", pct),
         swatches({ label: "Duotono: sombras", value: f.duoA, palette: ["#000000", "#1a0033", "#120800", "#001a00", "#200000", "#000a2a", "#0f380f"], onChange: set("duoA") }),
         swatches({ label: "Duotono: luces", value: f.duoB, palette: ["#ffffff", "#00e5ff", "#ffd060", "#b6ff00", "#ff7a00", "#00ffd0", "#ff3cac"], onChange: set("duoB") }),
-        sl("Posterizar (niveles)", "posterize", 0, 12, 1, 0, (v) => v < 2 ? "No" : v),
-        sl("Umbral blanco/negro", "threshold", 0, 1, 0.01, 0, (v) => v ? pct(v) : "No")),
+        sl("posterize", (v) => v < 2 ? "No" : v),
+        sl("threshold", (v) => v ? pct(v) : "No")),
       fold("Textura y luz", false,
-        sl("Viñeta", "vignette", 0, 1.5, 0.01, 0, pct),
-        sl("Líneas de TV", "scanlines", 0, 1, 0.01, 0, pct),
-        sl("Curvatura de TV antigua", "crt", 0, 1.5, 0.01, 0, pct),
-        sl("Semitono (periódico)", "halftone", 0, 1, 0.01, 0, pct),
-        sl("Ruido / grano", "noise", 0, 0.6, 0.01, 0, pct),
-        sl("Desenfoque", "blur", 0, 2, 0.01, 0, pct)),
+        sl("vignette", pct),
+        sl("scanlines", pct),
+        sl("crt", pct),
+        sl("halftone", pct),
+        sl("noise", pct),
+        sl("blur", pct)),
       fold("Movimiento", false,
-        sl("Zoom", "zoom", 0.2, 4, 0.01, 1, fix(2)),
-        sl("Rotación", "rotate", -180, 180, 1, 0, (v) => v + "°"),
-        sl("Giro continuo", "spin", -3, 3, 0.05, 0, fix(2)),
-        sl("Desplazar ↔", "scrollX", -1, 1, 0.01, 0, fix(2)),
-        sl("Desplazar ↕", "scrollY", -1, 1, 0.01, 0, fix(2)),
-        sl("Temblor (más fuerte en cada golpe)", "shake", 0, 4, 0.05, 0, fix(2))),
+        sl("zoom", fix(2)),
+        sl("rotate", (v) => v + "°"),
+        sl("spin", fix(2)),
+        sl("scrollX", fix(2)),
+        sl("scrollY", fix(2)),
+        sl("shake", fix(2))),
       fold("Distorsión", false,
-        sl("Caleidoscopio", "kaleido", 0, 16, 1, 0, (v) => v < 2 ? "No" : v + " lados"),
+        sl("kaleido", (v) => v < 2 ? "No" : v + " lados"),
         segmented({ options: [["none", "Sin espejo"], ["h", "Espejo ↔"], ["v", "Espejo ↕"], ["quad", "Cuádruple"]], value: f.mirror, small: true, onChange: set("mirror") }),
-        sl("Mosaico (repetir N×N)", "tile", 1, 10, 1, 1, (v) => v < 2 ? "No" : v + "×" + v),
-        sl("Ondas", "wave", 0, 2, 0.01, 0, pct),
-        sl("Remolino", "twirl", -3, 3, 0.01, 0, fix(2)),
-        sl("Ojo de pez (− pellizco)", "bulge", -1, 1, 0.01, 0, fix(2)),
-        sl("Gota de agua", "ripple", 0, 3, 0.01, 0, fix(2)),
+        sl("tile", (v) => v < 2 ? "No" : v + "×" + v),
+        sl("wave", pct),
+        sl("twirl", fix(2)),
+        sl("bulge", fix(2)),
+        sl("ripple", fix(2)),
         toggle({ label: "Túnel polar", value: f.polar, onChange: set("polar") }),
-        sl("Pixelado", "pixelate", 0, 1, 0.01, 0, pct),
-        sl("Glitch", "glitch", 0, 1, 0.01, 0, pct),
-        sl("Separación RGB", "rgbShift", 0, 0.03, 0.0005, 0, (v) => (v * 1000).toFixed(0)),
-        sl("Aberración cromática", "chroma", 0, 0.05, 0.0005, 0, (v) => (v * 1000).toFixed(0))),
+        sl("pixelate", pct),
+        sl("glitch", pct),
+        sl("rgbShift", (v) => (v * 1000).toFixed(0)),
+        sl("chroma", (v) => (v * 1000).toFixed(0))),
       fold("Cámara, video y recortes", look.source.type === "camera",
         hint("Funcionan sobre cámara, video, imagen, texto y dibujo."),
         row(toggle({ label: "Espejo selfie ↔", value: f.flipX, onChange: set("flipX") }), toggle({ label: "Voltear ↕", value: f.flipY, onChange: set("flipY") })),
-        sl("Contornos neón", "edges", 0, 1, 0.01, 0, pct),
-        sl("Nitidez", "sharpen", 0, 2, 0.01, 0, pct),
-        sl("Relieve", "emboss", 0, 1, 0.01, 0, pct),
-        sl("Quitar color de fondo (croma)", "chromaKey", 0, 0.8, 0.01, 0, (v) => v ? pct(v) : "No"),
+        sl("edges", pct),
+        sl("sharpen", pct),
+        sl("emboss", pct),
+        sl("chromaKey", (v) => v ? pct(v) : "No"),
         swatches({ label: "Color a quitar", value: f.keyColor, palette: ["#00ff00", "#0044ff", "#ffffff", "#000000", "#ff0000"], onChange: set("keyColor") }),
-        sl("Suavidad del recorte", "keySoft", 0, 0.5, 0.01, 0.1, pct),
-        sl("Quitar lo oscuro (luma)", "lumaKey", 0, 0.9, 0.01, 0, (v) => v ? pct(v) : "No"),
-        sl("Suavidad de luma", "lumaSoft", 0, 0.5, 0.01, 0.05, pct)),
+        sl("keySoft", pct),
+        sl("lumaKey", (v) => v ? pct(v) : "No"),
+        sl("lumaSoft", pct)),
       fold("Estroboscopio", f.strobe > 0,
-        sl("Destellos por segundo", "strobe", 0, 15, 0.5, 0, (v) => v ? v + " Hz" : "No")),
+        sl("strobe", (v) => v ? v + " Hz" : "No")),
       btn({ label: "Quitar todos los efectos", kind: "block", onClick: () => { app.edit(() => { look.fx = DEFAULT_FX(); }); app.renderPanel(); } }),
     );
   },
@@ -594,6 +614,7 @@ const shape = {
   render(app) {
     const s = app.surf();
     if (!s) return needSelection(app);
+    if (s.face3d) return h("div", {}, hint("Esta es la cara de un objeto 3D: su forma es la del objeto. Muévelo, gíralo o escálalo en el panel 3D."), btn({ label: "Ir al panel 3D", ic: "cube", kind: "block", onClick: () => app.openTab("3d") }));
     const A = app.actions, S = app.S;
     const wrap = h("div", {},
       row(btn({ label: s.name, ic: "pen", kind: "wide", title: "Renombrar", onClick: () => A.rename() })),
@@ -668,7 +689,7 @@ const scenes = {
       const on = sc.id === P.sceneId;
       list.append(h("div", { class: `item ${on ? "on" : ""}`, onclick: (e) => { if (e.target.closest("button")) return; A.goScene(sc.id); } },
         h("div", { class: "badge" }, i + 1),
-        h("div", { class: "name" }, sc.name, h("small", {}, (sc.duration ? `${sc.duration} s` : "manual") + (sc.transition === "cut" ? " · corte" : " · fundido"))),
+        h("div", { class: "name" }, sc.name, h("small", {}, (sc.duration ? `${sc.duration} s` : "manual") + " · " + ((TRANSITIONS.find(t => t[0] === (sc.transition || "fade")) || TRANSITIONS[0])[1]).toLowerCase())),
         btn({ ic: "pen", kind: "icon", title: "Renombrar", onClick: () => A.renameScene(sc.id) }),
         btn({ ic: "up", kind: "icon", title: "Antes", onClick: () => { const k = P.scenes.indexOf(sc); if (k > 0) { P.scenes.splice(k, 1); P.scenes.splice(k - 1, 0, sc); app.changed({ panel: true }); app.commit(); } } }),
         btn({ ic: "trash", kind: "icon", title: "Eliminar", onClick: () => A.removeScene(sc.id) })));
@@ -682,11 +703,13 @@ const scenes = {
       btn({ label: "Nueva escena (copia de la actual)", ic: "plus", kind: "block", onClick: A.addScene }),
       section(`Escena actual · ${cur.name}`,
         slider({ label: "Duración en reproducción automática", min: 0, max: 120, step: 1, value: cur.duration, def: 0, fmt: (v) => v ? v + " s" : "manual", onInput: (v) => app.edit(() => { cur.duration = v; }) }),
-        segmented({ options: [["fade", "Fundido"], ["cut", "Corte"]], value: cur.transition, onChange: (v) => app.edit(() => { cur.transition = v; }) })),
+        h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Transición al entrar en esta escena")),
+        segmented({ options: TRANSITIONS, value: cur.transition || "fade", cols: 4, small: true, onChange: (v) => app.edit(() => { cur.transition = v; }) }),
+        slider({ label: "Duración de la transición", min: 0, max: 8000, step: 50, value: cur.trMs ?? P.settings.transitionMs, def: P.settings.transitionMs, fmt: (v) => (v / 1000).toFixed(2) + " s", onInput: (v) => app.edit(() => { cur.trMs = v; }) })),
       section("Reproducción",
         toggle({ label: "Avanzar escenas automáticamente", hint: "Usa la duración de cada escena", value: P.settings.autoAdvance, onChange: (v) => app.edit(() => { P.settings.autoAdvance = v; S.sceneStart = S.clock; }) }),
         toggle({ label: "Volver a la primera al terminar", value: P.settings.loopScenes, onChange: (v) => app.edit(() => { P.settings.loopScenes = v; }) }),
-        slider({ label: "Duración del fundido", min: 0, max: 4000, step: 50, value: P.settings.transitionMs, def: 800, fmt: (v) => (v / 1000).toFixed(2) + " s", onInput: (v) => app.edit(() => { P.settings.transitionMs = v; }) })),
+        slider({ label: "Duración de transición por defecto", min: 0, max: 4000, step: 50, value: P.settings.transitionMs, def: 800, fmt: (v) => (v / 1000).toFixed(2) + " s", onInput: (v) => app.edit(() => { P.settings.transitionMs = v; }) })),
     );
   },
 };
@@ -744,7 +767,7 @@ const audio = {
         hint("Si no detecta los golpes, acerca el dispositivo al altavoz o sube la sensibilidad.")),
       section("Todo reacciona al ritmo",
         toggle({ label: "Modo ritmo", hint: "Todas las superficies cambian con cada golpe", value: R.enabled, onChange: (v) => { app.edit(() => { R.enabled = v; }); } }),
-        slider({ label: "Intensidad", min: 0.2, max: 2, value: R.amount, def: 1, fmt: pct, onInput: setR("amount") }),
+        slider({ label: "Intensidad", min: 0.2, max: 2, value: R.amount, def: 1, fmt: pct, onInput: setR("amount"), param: "global/reactAmount" }),
         h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Qué cambia en cada golpe")),
         parts,
         stepper({ label: "Cambiar de escena cada (golpes, 0 = no)", value: R.sceneBeats, min: 0, max: 64, onChange: setR("sceneBeats") }),
@@ -828,8 +851,8 @@ const output = {
       hint("Para proyector en modo espejo, Chromecast o cable HDMI duplicando la pantalla. La interfaz se oculta; toca para ver los controles."),
       btn({ label: "Pantalla completa aquí", ic: "fit", kind: "bigbtn", onClick: () => A.projectHere(true) })));
     wrap.append(section("En directo",
-      toggle({ label: "Guías en el proyector", hint: "Muestra contornos y puntos en la pared para alinear", value: S.guides, onChange: (v) => { S.guides = v; } }),
-      slider({ label: "Brillo general", min: 0, max: 1, value: S.master, def: 1, fmt: pct, onInput: (v) => { S.master = v; } }),
+      toggle({ label: "Guías en el proyector", hint: "Muestra contornos y puntos en la pared para alinear", value: S.guides, onChange: (v) => { S.guides = v; }, param: "global/guides" }),
+      slider({ label: "Brillo general", min: 0, max: 1, value: S.master, def: 1, fmt: pct, onInput: (v) => { S.master = v; }, param: "global/master" }),
       row(btn({ label: S.blackout ? "Apagón ACTIVO" : "Apagón", ic: "blackout", kind: `wide ${S.blackout ? "danger" : ""}`, onClick: A.blackout }),
         btn({ label: S.muted ? "Sonido apagado" : "Sonido", ic: S.muted ? "mute" : "volume", kind: "wide", onClick: () => { S.muted = !S.muted; app.renderPanel(); } }))));
     const chips = h("div", { class: "chips" });
@@ -883,6 +906,8 @@ const menu = {
     const item = (ic, label, fn, sub) => h("button", { class: "item", style: { width: "100%", textAlign: "left" }, onclick: fn },
       h("div", { class: "badge", html: icon(ic) }), h("div", { class: "name" }, label, sub ? h("small", {}, sub) : null));
     return h("div", {},
+      section("Modo",
+        toggle({ label: "Modo profesional", hint: "Añade Control (MIDI, teclado, macros), Show (cues, timecode, automatización), 3D (objetos y proyectores), Tracking (cuerpo, manos, zonas y reglas), Luces (DMX, Art-Net, sACN, pixel mapping) y Rendimiento. El uso de siempre no cambia.", value: S.pro, onChange: (v) => app.setPro(v) })),
       section("Proyecto", h("div", { class: "list" },
         item("plus", "Nuevo", A.newProject, "Desde una plantilla"),
         item("folder", "Abrir", A.open, "Proyectos guardados en este dispositivo"),
@@ -908,8 +933,14 @@ const menu = {
           : "En la app de Windows y Android los videos pesados se convierten solos al importarlos.",
           value: app.autoOptimize(), onChange: (v) => app.setAutoOptimize(v) })),
       section("Control", h("div", { class: "list" },
-        item("midi", "Conectar controlador MIDI", A.midi, "Notas 36-51 = escenas · 60 play · 63/64 siguiente/anterior"),
+        item("midi", "Conectar controlador MIDI", () => { A.midi(); if (S.pro) app.openTab("control"); }, S.pro ? "Asigna cualquier control con clic derecho → Aprender" : "Activa el Modo profesional para asignar knobs y faders"),
+        item("live", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), "Controla el show desde el teléfono o una mesa OSC"),
         item("help", "Ayuda y atajos", () => A.help()),
+        item("save", "Copias de seguridad", () => A.backups(), "Se guarda una copia cada 5 minutos · recuperar una anterior"),
+        window.LumaDesktop ? item("gauge", "Analizar el equipo y calidad", () => A.hardwareProfile(false), "GPU, CPU, pantallas, cámaras y códecs por hardware") : null,
+        app.updateInfo?.canRollback ? item("undo", "Volver a la versión anterior", () => A.rollbackUpdate(), "Restaura la versión instalada antes de la última actualización") : null,
+        window.LumaDesktop?.repairInstall ? item("restart", "Reparar instalación", () => A.repairInstall(), "Reinstala esta versión sin tocar tus proyectos") : null,
+        window.LumaDesktop?.openLogs ? item("folder", "Abrir registros", () => A.openLogs(), "Para diagnosticar problemas") : null,
         item("download", "Buscar actualizaciones", () => A.checkUpdates(false), `Versión instalada: ${app.version().version} · también se comprueba sola al abrir`),
         item("info", "Acerca de LumaMap", () => dialog({ title: "LumaMap 2", content: h("p", {}, "Video mapping táctil para Android, tablet y navegador. Código abierto (MIT). Funciona sin internet.") })))),
     );
@@ -940,4 +971,4 @@ export function showHelp(app) {
   return dialog({ title: "Ayuda", content: c, wide: true });
 }
 
-export const PANELS = { add, anim, live, draw, content, fx, shape, layers, scenes, audio, output, menu };
+export const PANELS = { add, anim, live, draw, content, fx, shape, layers, scenes, audio, output, menu, ...PRO_PANELS, ...DMX_PANELS, ...SHOW_PANELS, ...PANELS_3D, ...TRACKING_PANELS, ...ASSISTANT_PANELS };

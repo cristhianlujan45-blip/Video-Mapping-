@@ -1,6 +1,12 @@
 // web/js/icons.js — iconos SVG propios (trazo 2 px, 24×24), sin dependencias.
 const P = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  gauge: '<path d="M4.5 18a9 9 0 1 1 15 0"/><path d="m12 13 4-5"/><circle cx="12" cy="13" r="1.5" fill="currentColor"/>',
+  light: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
+  knob: '<circle cx="12" cy="12" r="7"/><path d="M12 12 9 7"/><path d="M12 2v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 6.3l1.4-1.4"/>',
+  timeline: '<path d="M3 6h18M3 12h18M3 18h18"/><rect x="5" y="4" width="6" height="4" rx="1" fill="currentColor"/><rect x="11" y="10" width="7" height="4" rx="1" fill="currentColor"/><rect x="7" y="16" width="5" height="4" rx="1" fill="currentColor"/>',
+  ai: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  tracking: '<circle cx="12" cy="5" r="2"/><path d="M12 7v7M8 10l4 1 4-1M9 21l3-7 3 7"/><path d="M3 3h3M3 3v3M21 3h-3M21 3v3M3 21h3M3 21v-3M21 21h-3M21 21v-3"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',

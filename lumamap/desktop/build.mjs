@@ -13,9 +13,13 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"))
 
 fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
-for (const f of ["main.js", "preload.js", "optimize.js"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
+for (const f of ["main.js", "preload.js", "ai.js", "optimize.js", "dmx-service.mjs", "remote-service.mjs", "updater.ps1"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
 // ffmpeg para optimizar videos: se incluye su paquete (con el binario de esta plataforma).
 fs.cpSync(path.join(here, "node_modules", "ffmpeg-static"), path.join(stage, "node_modules", "ffmpeg-static"), { recursive: true });
+// SDK de Claude para el asistente (y lo que necesita al ejecutarse), sin tipos ni mapas de código.
+for (const m of ["@anthropic-ai/sdk", "standardwebhooks", "@stablelib/base64", "fast-sha256"])
+  fs.cpSync(path.join(here, "node_modules", m), path.join(stage, "node_modules", m), { recursive: true,
+    filter: (src) => !/\.(map|d\.ts|d\.mts|d\.cts)$/.test(src) && !/[\\/]src([\\/]|$)/.test(path.relative(path.join(here, "node_modules", m), src)) });
 // Compilando para Windows desde otro sistema: se descarga el ffmpeg.exe de Windows.
 const targetPlatform = process.argv[2] === "installer" ? "win32" : (process.argv[2] || process.platform);
 if (!process.argv.includes("--stage") && targetPlatform !== process.platform) {
@@ -25,9 +29,15 @@ if (!process.argv.includes("--stage") && targetPlatform !== process.platform) {
     env: { ...process.env, npm_config_platform: targetPlatform, npm_config_arch: "x64" } });
 }
 fs.cpSync(path.join(here, "..", "web"), path.join(stage, "web"), { recursive: true });
+// Los servicios (Node) importan módulos de web/js: son ES modules.
+fs.writeFileSync(path.join(stage, "web", "package.json"), JSON.stringify({ type: "module" }));
+// Servidor del mando remoto y OSC (mismo código que la versión web).
+fs.mkdirSync(path.join(stage, "server"), { recursive: true });
+for (const f of ["index.js", "osc.js"]) fs.copyFileSync(path.join(here, "..", "server", f), path.join(stage, "server", f));
+fs.writeFileSync(path.join(stage, "server", "package.json"), JSON.stringify({ type: "module" }));
 fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
   name: pkg.name, productName: pkg.productName, version: pkg.version, description: pkg.description, main: "main.js", license: pkg.license, author: pkg.author,
-  dependencies: { "ffmpeg-static": pkg.dependencies["ffmpeg-static"] },
+  dependencies: { "ffmpeg-static": pkg.dependencies["ffmpeg-static"], "@anthropic-ai/sdk": pkg.dependencies["@anthropic-ai/sdk"] },
 }, null, 2));
 if (process.argv.includes("--stage")) process.exit(0);
 
@@ -64,6 +74,8 @@ if (process.argv[2] === "installer") {
         runAfterFinish: true,
         installerLanguages: ["es_ES"],
         language: "3082",
+        include: path.join(here, "build", "installer.nsh"),   // desinstalar conservando los datos (salvo que se pida)
+        deleteAppDataOnUninstall: false,
       },
     },
   });

@@ -8,6 +8,7 @@ import { MediaPool } from "./sources.js";
 import { Link } from "./link.js";
 import { drawPattern, drawGuides, applyOutputCSS, drawSoftEdge } from "./overlay.js";
 import { normalizeProject, usedMediaIds, screenFilter, defaultScreen } from "./model.js";
+import { applyModList } from "./params.js";
 
 const glCanvas = document.getElementById("out");
 /** Número de pantalla de esta salida (?screen=N); la de Android/Presentation es la 1. */
@@ -39,14 +40,35 @@ if (!webgl2Supported()) {
   throw new Error("WebGL2");
 }
 const renderer = new Renderer(glCanvas);
-const pool = new MediaPool();
-const comp = new Compositor(renderer, pool);
+const QS = new URLSearchParams(location.search);
+/**
+ * Motor compartido: si esta ventana la abrió el editor (mismo proceso), se
+ * dibuja con las fuentes del editor (videos, cámaras, dibujos y textos ya
+ * decodificados) y con su reloj. Así cada video se decodifica una sola vez
+ * aunque haya varias salidas y todas las pantallas van exactamente a la par.
+ * Sin editor accesible (Android, otra pestaña) se usa el canal Link.
+ */
+const host = (() => { if (QS.has("solo")) return null; try { return window.opener && window.opener.__lumaHost || null; } catch { return null; } })();
+const pool = host ? null : new MediaPool();
+const comp = new Compositor(renderer, pool, host ? host.comp : null);
+if (host) {
+  host.attach(SCREEN, window);
+  addEventListener("pagehide", () => { try { host.detach(SCREEN, window); } catch {} });
+}
+window.__lumaOut = { comp, renderer, shared: !!host };   // depuración y pruebas
+
+/** El editor se cerró o recargó: esta salida pasa a funcionar por su cuenta. */
+function hostLost() {
+  QS.set("solo", "1");
+  location.replace(location.pathname + "?" + QS.toString());
+}
 
 const link = new Link("output", async (m) => {
+  if (host) return;   // con motor compartido el estado se lee directamente del editor
   if (m.t === "project") {
     const prevScene = project?.sceneId;
     project = normalizeProject(m.project);
-    if (prevScene && prevScene !== project.sceneId && m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - (m.tr.elapsed || 0), dur: m.tr.dur };
+    if (prevScene && prevScene !== project.sceneId && m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - (m.tr.elapsed || 0), dur: m.tr.dur, mode: m.tr.mode };
     for (const id of usedMediaIds(project)) pool.ensure(id);
     for (const id of [...pool.items.keys()]) if (!project.media.some(md => md.id === id)) pool.remove(id);
     hud.querySelector("small").textContent = `${SCREEN > 1 ? "Pantalla " + SCREEN + " · " : ""}${project.name} · ${project.width}×${project.height}`;
@@ -56,7 +78,7 @@ const link = new Link("output", async (m) => {
     st = { ...st, ...m.state };
     levelsAt = performance.now();
     if (typeof m.time === "number") { timeOffset = m.time - performance.now() / 1000; frozenTime = m.time; }
-    if (m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - m.tr.elapsed, dur: m.tr.dur };
+    if (m.tr) tr = { fromId: m.tr.fromId, start: performance.now() - m.tr.elapsed, dur: m.tr.dur, mode: m.tr.mode };
     if (st.playing !== wasPlaying) pool.setPlaying(st.playing);
   } else if (m.t === "media") {
     pool.remove(m.id);
@@ -72,8 +94,7 @@ const link = new Link("output", async (m) => {
     pool.restart();
   }
 });
-link.send({ t: "hello" });
-pool.setPlaying(true);
+if (!host) { link.send({ t: "hello" }); pool.setPlaying(true); }
 
 function outCfg() { return project?.settings?.output || {}; }
 function resize() {
@@ -108,16 +129,28 @@ addEventListener("keydown", (e) => { if (e.key === "f" || e.key === "F") toggleF
 /* ---------------- Bucle de render ---------------- */
 function tick() {
   requestAnimationFrame(tick);
+  let hostFrame = null;
+  if (host) {
+    try { hostFrame = host.frame(SCREEN); } catch { hostLost(); return; }
+    if (!hostFrame) { hostLost(); return; }
+    if (project !== hostFrame.project) {
+      project = hostFrame.project;
+      hud.querySelector("small").textContent = `${SCREEN > 1 ? "Pantalla " + SCREEN + " · " : ""}${project.name} · ${project.width}×${project.height}`;
+    }
+    st = hostFrame.state;
+  }
   if (!project) return;
   const now = performance.now();
+  // Con el canal Link llegan las modulaciones del motor de parámetros (audio, tracking…).
+  const RP = hostFrame ? { project, master: st.master } : applyModList(project, st.master, st.mods);
   const oc = outCfg();
   // Límite de fotogramas por segundo (como el «frame rate» de la composición).
   if (oc.fps && oc.fps < 120 && now - lastDraw < 1000 / oc.fps - 2) return;
   lastDraw = now;
   resize();
-  const time = st.playing ? now / 1000 + timeOffset : frozenTime;
+  const time = hostFrame ? hostFrame.time : st.playing ? now / 1000 + timeOffset : frozenTime;
   // Control de esta pantalla: encendida, brillo, estrobo y efecto propio.
-  const sc = project.settings.screens?.[SCREEN] || defaultScreen();
+  const sc = RP.project.settings.screens?.[SCREEN] || defaultScreen();
   const strobeOff = sc.strobe > 0 && Math.floor(now / 1000 * sc.strobe * 2) % 2 === 1;
   applyOutputCSS([glCanvas], oc, screenFilter(sc.fx, now / 1000));
   applyOutputCSS([ov], oc);
@@ -125,15 +158,15 @@ function tick() {
   const k = renderer.fitScale(W, H, oc.renderScale || 1);
   const view = { sx: k, sy: k, tx: 0, ty: 0 };
   if (tr && now - tr.start > tr.dur) tr = null;
-  comp.frame(project, {
-    layers: sceneLayers(project, tr, now), time, levels: liveLevels(now), view,
-    master: st.master * (sc.master ?? 1), blackout: st.blackout || !!st.pattern || !sc.on || strobeOff, clear: [0, 0, 0, 1], live: st.live || null, screen: SCREEN,
+  comp.frame(RP.project, {
+    layers: hostFrame ? hostFrame.layers : sceneLayers(RP.project, tr, now), time, levels: hostFrame ? hostFrame.levels : liveLevels(now), view,
+    master: RP.master * (sc.master ?? 1), blackout: st.blackout || !!st.pattern || !sc.on || strobeOff, clear: [0, 0, 0, 1], live: st.live || null, screen: SCREEN,
   });
   octx.setTransform(ovk, 0, 0, ovk, 0, 0);
   octx.clearRect(0, 0, W, H);
   if (st.pattern) drawPattern(octx, st.pattern, W, H);
   if (st.guides) drawGuides(octx, project, { sx: 1, sy: 1, tx: 0, ty: 0 }, { selectedId: st.sel, pointIdx: st.point, scale: W / 1280 });
   drawSoftEdge(octx, oc.softEdge, 0, 0, W, H);
-  pool.applyLookAudio(sceneLayers(project, null, now).flatMap(l => Object.values(l.scene.looks)), st.muted);
+  if (pool) pool.applyLookAudio(sceneLayers(project, null, now).flatMap(l => Object.values(l.scene.looks)), st.muted);
 }
 tick();

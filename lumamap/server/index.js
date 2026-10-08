@@ -8,12 +8,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dgram from "node:dgram";
-import { decodeOSC } from "./osc.js";
+import { decodeOSC, encodeOSC } from "./osc.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const WEB = path.join(ROOT, "web");
-const DATA = path.join(ROOT, "data");
+// En la app de escritorio la carpeta de la app es de solo lectura: los datos van a LUMAMAP_DATA.
+const DATA = process.env.LUMAMAP_DATA || path.join(ROOT, "data");
 fs.mkdirSync(DATA, { recursive: true });
 
 const MIME = {
@@ -82,8 +83,10 @@ export function sendJSON(sock, obj) {
 
 /* ---------------- Estado de dispositivos conectados ---------------- */
 
-const clients = new Set(); // {sock, role, id, name}
+const clients = new Set(); // {sock, role, id, name, ok}
 let nextClientId = 1;
+let PIN = "";              // código para los mandos (vacío = sin código)
+let oscOut = null;         // socket UDP para enviar OSC (feedback)
 
 function broadcastState() {
   const displays = [...clients].filter(c => c.role === "display")
@@ -100,16 +103,29 @@ function handleWsMessage(client, raw) {
   if (msg.type === "hello") {
     client.role = msg.role === "controller" ? "controller" : "display";
     client.name = String(msg.name || client.role).slice(0, 60);
+    // Con código: los mandos deben enviarlo; el motor (display) solo puede ser este mismo equipo.
+    if (PIN && client.role === "controller") client.ok = String(msg.pin || "") === PIN;
+    else if (PIN && client.role === "display") client.ok = client.local;
+    else client.ok = true;
+    sendJSON(client.sock, { type: "auth", ok: client.ok, needPin: !!PIN });
+    if (!client.ok) { setTimeout(() => { try { client.sock.end(); } catch {} }, 100); return; }
     broadcastState();
     return;
   }
+  if (!client.ok) return;
   // Relé: control -> displays; state -> controllers
   if (msg.type === "control") {
     for (const c of clients)
-      if (c.role === "display") sendJSON(c.sock, { type: "control", action: msg.action, value: msg.value, from: client.name });
+      if (c.role === "display" && c.ok) sendJSON(c.sock, { type: "control", action: msg.action, value: msg.value, id: msg.id, from: client.name });
   } else if (msg.type === "state") {
     for (const c of clients)
-      if (c.role === "controller") sendJSON(c.sock, { type: "state", state: msg.state });
+      if (c.role === "controller" && c.ok) sendJSON(c.sock, { type: "state", state: msg.state });
+  } else if (msg.type === "oscSend" && client.role === "display" && oscOut) {
+    // Feedback OSC hacia superficies de control (TouchOSC, Lemur, consolas…)
+    try {
+      const args = (msg.args || []).map(v => typeof v === "number" ? { type: Number.isInteger(v) && msg.int ? "i" : "f", value: v } : typeof v === "boolean" ? { type: v ? "T" : "F" } : { type: "s", value: String(v) });
+      oscOut.send(encodeOSC(String(msg.address), args), Number(msg.port), String(msg.host));
+    } catch { /* destino inválido */ }
   }
 }
 
@@ -122,7 +138,8 @@ function onUpgrade(req, sock) {
     `Sec-WebSocket-Accept: ${computeAcceptKey(key)}\r\n\r\n`
   );
   sock.setNoDelay(true);
-  const client = { sock, role: "display", id: nextClientId++, name: "cliente" };
+  const ra = sock.remoteAddress || "";
+  const client = { sock, role: "display", id: nextClientId++, name: "cliente", ok: false, local: ra === "127.0.0.1" || ra === "::1" || ra === "::ffff:127.0.0.1" };
   clients.add(client);
   let buf = Buffer.alloc(0);
   sock.on("data", (chunk) => {
@@ -150,7 +167,8 @@ function safeJoin(baseDir, urlPath) {
   return p === baseDir || p.startsWith(baseDir + path.sep) ? p : null;
 }
 
-export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPort = 9129 } = {}) {
+export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPort = 9129, pin = "" } = {}) {
+  PIN = String(pin || "");
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (url.pathname === "/api/ping") {
@@ -219,6 +237,8 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
       let m;
       try { m = decodeOSC(msg); } catch { return; } // datagrama no OSC: se ignora
       const v = m.args.map(a => a.value);
+      // Todo mensaje OSC llega al motor de parámetros (OSC LEARN y /lumamap/param/...).
+      for (const c of clients) if (c.role === "display" && c.ok) sendJSON(c.sock, { type: "osc", address: m.address, args: v });
       switch (m.address) {
         case "/lumap/play": ctl("play"); break;
         case "/lumap/pause": ctl("pause"); break;
@@ -234,6 +254,8 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
     sock.on("error", () => {}); // si el puerto está ocupado, se opera sin OSC
     srv.on("listening", () => { try { sock.bind(oscPort, host); } catch {} });
     srv.osc = sock;
+    oscOut = dgram.createSocket("udp4");
+    oscOut.on("error", () => {});
   }
   return srv;
 }

@@ -13,7 +13,7 @@ import { Link, nativeBridge } from "./link.js";
 import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge, ROT_OFF } from "./overlay.js";
 import { roundPt, newStrokeId, hitStroke } from "./drawing.js";
 import { icon } from "./icons.js";
-import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles } from "./ui.js";
+import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles, hint } from "./ui.js";
 import { PANELS, TABS, showHelp } from "./panels.js";
 import { buildCommands, keymap, keyOf, openPalette, openContextMenu, closeContextMenu } from "./commands.js";
 import {
@@ -21,7 +21,12 @@ import {
   simplify, bbox, gridCornerIdx, surfaceCorners, gridFromCorners, resampleGrid, surfaceAspect, edgeHandles, dragEdge, rotateHandle,
 } from "./math.js";
 import { detectFromImageFile } from "./automap.js";
-import { initMIDI } from "./midi.js";
+import { MidiDriver } from "./midi.js";
+import { ParamEngine, describe, applyModList } from "./params.js";
+import { DmxEngine } from "./dmx.js";
+import { ShowEngine, parseTc, fmtTc } from "./show.js";
+import { ensure3d, handle3dKey, closeWorkspace } from "./panels-3d.js";
+import { TrackingManager } from "./tracking.js";
 import { Remote } from "./remote.js";
 import * as Updater from "./updater.js";
 
@@ -59,10 +64,12 @@ const S = {
   levels: { bass: 0, mid: 0, high: 0, level: 0, beat: 0 },
   ref: { url: null, opacity: 0.5, camera: false },
   dirty: true, saveDue: 0, lastState: 0, lastSync: 0, lastCount: 0, beatsInScene: 0,
+  pro: (() => { try { return localStorage.getItem("lumamap:pro") === "1"; } catch { return false; } })(),
+  ...(() => { try { const p = JSON.parse(localStorage.getItem("lumamap:preview") || "{}"); return { previewScale: p.scale || 1, previewFps: p.fps || 0 }; } catch { return { previewScale: 1, previewFps: 0 }; } })(),
 };
 
 const history = new History();
-let renderer, pool, comp, link, audio;
+let renderer, pool, comp, link, audio, params, midi, dmx, show;
 const app = { S, M, history }; // API para los paneles
 let KEYS = new Map();
 
@@ -70,7 +77,8 @@ let KEYS = new Map();
    Utilidades del proyecto
    ====================================================================== */
 const scene = () => M.currentScene(S.project);
-const surf = (id = S.sel) => S.project.surfaces.find(s => s.id === id) || null;
+/** Superficie por id; también las caras de los objetos 3D (superficies virtuales). */
+const surf = (id = S.sel) => (id && (S.project.surfaces.find(s => s.id === id) || S.project.stage3d?.faces.find(f => f.id === id))) || null;
 const lookSel = () => (S.sel ? M.lookOf(scene(), S.sel) : null);
 app.scene = scene; app.surf = surf; app.lookSel = lookSel;
 
@@ -91,6 +99,8 @@ app.changed = changed; app.commit = commit; app.commitSoon = commitSoon;
 /** Cambio en vivo desde un control: actualiza y registra en el historial al soltar. */
 app.edit = (fn) => { fn(); changed(); commitSoon(); };
 
+
+
 function setProject(p, { keepHistory = false } = {}) {
   S.project = M.normalizeProject(p);
   S.sel = S.project.surfaces.at(-1)?.id || null;
@@ -102,6 +112,11 @@ function setProject(p, { keepHistory = false } = {}) {
   renderer.meshCache.clear();
   fitView();
   changed({ panel: true });
+  // Tracking: se para el del proyecto anterior; se arranca solo si este lo pide.
+  if (app.tracking) { app.tracking.stop(); const tc = S.project.settings.tracking; if (tc.autoStart) app.tracking.ensure(tc.camId || "default"); }
+  const st3 = S.project.stage3d;
+  if (st3.objects.length || st3.projectors.length) ensure3d(app).catch(e => console.warn("3D", e));
+  else if (app.stage3d) { closeWorkspace(app); }
 }
 app.setProject = setProject;
 
@@ -117,6 +132,86 @@ app.select = select;
    ====================================================================== */
 const A = {};
 app.actions = A;
+
+/* ----------------------------------------------------------------------
+   Motor de parámetros: cambios que llegan de MIDI, OSC, DMX, teclado…
+   ---------------------------------------------------------------------- */
+const touchedIds = new Set();
+let syncTimer = 0;
+/** Un controlador externo cambió un parámetro: guardar, deshacer y reflejarlo en la pantalla. */
+app.paramTouched = (id) => {
+  S.dirty = true;
+  S.saveDue = performance.now() + 1200;
+  commitSoon();
+  touchedIds.add(id);
+  if (!syncTimer) syncTimer = setTimeout(syncParamsToUI, 80);
+};
+function syncParamsToUI() {
+  syncTimer = 0;
+  for (const id of touchedIds) {
+    const d = describe(app, id);
+    if (!d) continue;
+    for (const el of document.querySelectorAll(`[data-param="${CSS.escape(id)}"]`)) el._sync?.(d.get());
+  }
+  touchedIds.clear();
+  updateChrome();
+}
+app.paramMappingsChanged = () => {
+  changed(); commitSoon();
+  if (S.tab === "control") renderPanel(); else markMappedControls();
+};
+/** Marca en el panel los controles que tienen un control físico asignado. */
+function markMappedControls() {
+  const maps = S.project.settings.control.mappings.filter(m => m.enabled !== false);
+  for (const el of document.querySelectorAll("#panelBody [data-param]")) {
+    const id = el.dataset.param, selId = S.sel && id.startsWith("surf/" + S.sel + "/") ? "surf/sel/" + id.slice(6 + S.sel.length) : null;
+    const ms = maps.filter(m => m.target === id || m.target === selId);
+    el.classList.toggle("mapped", ms.length > 0);
+    el.title = ms.length ? "Controlado por: " + ms.map(mappingLabel).join(", ") + " · clic derecho para cambiarlo" : "Clic derecho: aprender MIDI / OSC / DMX / tecla";
+  }
+}
+function mappingLabel(m) {
+  const src = { midi: "MIDI", osc: "OSC", dmx: "DMX", key: "Tecla", audio: "Audio", tracking: "Tracking" }[m.src] || m.src;
+  return `${src} ${m.device && m.device !== "*" ? m.device + " " : ""}${m.key}`;
+}
+app.mappingLabel = mappingLabel;
+
+/** Aprender: espera a que se mueva un control físico y lo asigna al parámetro. */
+A.learn = async (id) => {
+  const d = describe(app, id);
+  if (!d) return;
+  if (midi.supported && !midi.active) await A.midi({ quiet: true });
+  const content = h("div", { class: "learn" },
+    h("div", { class: "learn-pulse" }),
+    h("p", {}, "Mueve ahora el control (knob, fader, pad, botón), envía un mensaje OSC o DMX, o pulsa una tecla."),
+    h("p", { class: "hint" }, `Destino: ${d.name}`));
+  const waiting = params.learn(id);
+  const dlg = dialog({ title: "Aprender control", content, buttons: [{ label: "Cancelar", value: null }] });
+  const m = await Promise.race([waiting, dlg]);
+  if (m && m.id) { closeDialog(); toast(`Asignado: ${mappingLabel(m)} → ${d.name}`); }
+  else params.cancelLearn();
+};
+/** Menú de un control: aprender, ver y quitar sus asignaciones. */
+async function paramMenu(id) {
+  const d = describe(app, id);
+  if (!d) return;
+  const selId = S.sel && id.startsWith("surf/" + S.sel + "/") ? "surf/sel/" + id.slice(6 + S.sel.length) : null;
+  const C = S.project.settings.control;
+  const maps = C.mappings.filter(m => m.target === id || m.target === selId);
+  const list = h("div", { class: "list" });
+  for (const m of maps) list.append(h("div", { class: "item" }, h("span", {}, mappingLabel(m), h("small", {}, ` · ${m.mode}${m.bank ? " · banco " + m.bank : ""}`)),
+    btn({ ic: "trash", kind: "icon", title: "Quitar", onClick: () => { C.mappings.splice(C.mappings.indexOf(m), 1); params.dropMods(m.id); app.paramMappingsChanged(); closeDialog(); } })));
+  const r = await dialog({ title: d.name, content: h("div", {}, maps.length ? list : hint("Sin control físico asignado.")),
+    buttons: [{ label: "Panel Control", value: "panel" }, { label: "Aprender…", kind: "primary", value: "learn" }] });
+  if (r === "learn") A.learn(id);
+  if (r === "panel") { setPro(true); openTab("control"); }
+}
+document.addEventListener("contextmenu", (e) => {
+  const el = e.target.closest?.("[data-param]");
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  paramMenu(el.dataset.param);
+}, true);
 
 A.undo = () => {
   const p = history.undo();
@@ -452,12 +547,13 @@ A.goScene = (id, { instant = false } = {}) => {
   if (id === S.project.sceneId) return;
   const target = S.project.scenes.find(s => s.id === id);
   if (!target) return;
-  const dur = instant || target.transition === "cut" ? 0 : S.project.settings.transitionMs;
-  S.tr = dur ? { fromId: S.project.sceneId, start: performance.now(), dur } : null;
+  const mode = target.transition || "fade";
+  const dur = instant || mode === "cut" ? 0 : (target.trMs ?? S.project.settings.transitionMs);
+  S.tr = dur ? { fromId: S.project.sceneId, start: performance.now(), dur, mode } : null;
   S.project.sceneId = id;
   S.sceneStart = S.clock;
   changed({ panel: true });
-  link.send({ t: "project", project: outProject(), tr: S.tr ? { fromId: S.tr.fromId, elapsed: 0, dur } : null });
+  link.send({ t: "project", project: outProject(), tr: S.tr ? { fromId: S.tr.fromId, elapsed: 0, dur, mode } : null });
   S.dirty = false;
   commitSoon();
 };
@@ -491,6 +587,78 @@ A.renameScene = async (id) => {
 
 /* ---- salida ---- */
 A.blackout = () => { S.blackout = !S.blackout; sendState(true); updateChrome(); renderPanel(); };
+/** Saca lo que ve un proyector 3D por una pantalla: superficie a pantalla completa en todas las escenas. */
+A.projectorToScreen = (pid, n = 1) => {
+  const P = S.project, pr = P.stage3d.projectors.find(p => p.id === pid);
+  if (!pr) return;
+  let s = P.surfaces.find(x => P.scenes.some(sc => sc.looks[x.id]?.source?.type === "projector3d" && sc.looks[x.id].source.projectorId === pid));
+  if (!s) {
+    s = M.createQuad({ name: pr.name, corners: M.rectCorners(0, 0, P.width, P.height) });
+    P.surfaces.push(s);
+  }
+  s.screen = n;
+  for (const sc of P.scenes) sc.looks[s.id] = M.createLook({ type: "projector3d", projectorId: pid });
+  pr.screen = n;
+  // El proyector usa la resolución de la salida (mismo aspecto, sin deformar).
+  if (pr.res[0] / pr.res[1] !== P.width / P.height) pr.res = [P.width, P.height];
+  changed({ panel: true }); commit();
+  toast(`«${pr.name}» sale por P${n}`);
+};
+
+/** EMERGENCIA: salida segura inmediata (escena elegida o negro) y luces a su snapshot o apagadas. */
+A.emergency = () => {
+  S.emergency = !S.emergency;
+  S.tr = null;
+  sendState(true);
+  link.send({ t: "project", project: outProject() });
+  document.body.classList.toggle("emergency", !!S.emergency);
+  updateChrome(); updatePerfHud();
+  toast(S.emergency ? "EMERGENCIA activada" : "Emergencia desactivada", S.emergency ? "err" : "");
+};
+/** Modo actuación: pantalla limpia, sin ediciones accidentales ni avisos; prioridad a las salidas. */
+A.togglePerfMode = (on = !S.perfMode) => {
+  S.perfMode = !!on;
+  document.body.classList.toggle("perfmode", S.perfMode);
+  if (S.perfMode) {
+    openTab(null); closeDialog(); setMode("edit"); S.sel = null; S.point = -1;
+    S.prePerfPreview = { scale: S.previewScale, fps: S.previewFps };
+    // La vista previa del editor se aligera para dejar la GPU a las salidas.
+    S.previewScale = Math.min(S.previewScale || 1, 0.5); S.previewFps = 30;
+  } else if (S.prePerfPreview) { S.previewScale = S.prePerfPreview.scale; S.previewFps = S.prePerfPreview.fps; }
+  updateChrome(); updatePerfHud();
+};
+function updatePerfHud() {
+  const hud = $("#perfhud");
+  if (!hud) return;
+  hud.classList.toggle("show", !!S.perfMode);
+  if (!S.perfMode) return;
+  const P = S.project, i = P.scenes.findIndex(s => s.id === P.sceneId), next = P.scenes[(i + 1) % P.scenes.length];
+  hud.querySelector(".cue").textContent = `${i + 1}. ${P.scenes[i]?.name || ""}`;
+  hud.querySelector(".next").textContent = next && P.scenes.length > 1 ? `Siguiente: ${next.name}` : "";
+  hud.querySelector(".tc").textContent = fmtTc(S.tcNow, show.fps()) + `  ·  ${Math.round(fpsAvg)} fps`;
+  hud.querySelector('[data-h="play"]').textContent = S.playing ? "⏸" : "▶";
+  hud.querySelector('[data-h="black"]').classList.toggle("on", !!S.blackout);
+  hud.querySelector('[data-h="emerg"]').classList.toggle("on", !!S.emergency);
+}
+setInterval(() => { if (S.perfMode) updatePerfHud(); }, 250);
+function buildPerfHud() {
+  const hud = h("div", { id: "perfhud" },
+    h("div", { class: "info" }, h("b", { class: "cue" }), h("small", { class: "next" }), h("span", { class: "tc" })),
+    h("div", { class: "acts" },
+      h("button", { "data-h": "back", onclick: () => A.stepScene(-1) }, "◀ BACK"),
+      h("button", { "data-h": "go", class: "go", onclick: () => A.stepScene(1) }, "GO ▶"),
+      h("button", { "data-h": "play", onclick: () => A.togglePlay() }, "⏸"),
+      h("button", { "data-h": "black", class: "warn", onclick: () => A.blackout() }, "APAGÓN"),
+      h("button", { "data-h": "emerg", class: "danger", onclick: () => A.emergency() }, "EMERGENCIA"),
+      h("button", { "data-h": "exit", class: "exit", title: "Mantén pulsado para salir del modo actuación" }, "Salir")));
+  // Salir exige mantener pulsado 1 s: un toque accidental no rompe el show.
+  const ex = hud.querySelector('[data-h="exit"]');
+  let t = 0;
+  ex.addEventListener("pointerdown", () => { ex.classList.add("hold"); t = setTimeout(() => { ex.classList.remove("hold"); A.togglePerfMode(false); }, 1000); });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) ex.addEventListener(ev, () => { clearTimeout(t); ex.classList.remove("hold"); });
+  document.getElementById("app").append(hud);
+}
+
 A.setPattern = (p) => { S.pattern = S.pattern === p ? null : p; sendState(true); renderPanel(); };
 
 /* ======================================================================
@@ -830,19 +998,25 @@ A.toggleMic = async () => {
 A.tap = () => { const bpm = audio.tap(); S.project.settings.bpm = bpm; changed(); return bpm; };
 A.scaleTempo = (k) => { const b = audio.scaleTempo(k); S.project.settings.bpm = Math.round(b); changed(); toast(`${Math.round(b)} BPM`); };
 A.setBpm = (v) => { S.project.settings.bpm = Math.round(audio.setBpm(Math.round(v))); changed(); toast(`${S.project.settings.bpm} BPM`); };
-A.midi = () => initMIDI({
-  onStatus: (s) => toast(s),
-  onAction: (a, v) => {
-    if (a === "goto" && S.project.scenes[v]) A.goScene(S.project.scenes[v].id);
-    else if (a === "play" && !S.playing) A.togglePlay();
-    else if (a === "pause" && S.playing) A.togglePlay();
-    else if (a === "stop") { if (S.playing) A.togglePlay(); A.restart(); }
-    else if (a === "next") A.stepScene(1);
-    else if (a === "prev") A.stepScene(-1);
-    else if (a === "brightness") { S.master = v; sendState(true); }
-    else if (a === "opacity") { const l = lookSel(); if (l) { l.opacity = v; changed(); } }
-  },
-});
+/** Activa los controladores MIDI (detección automática y conexión en caliente). */
+A.midi = async ({ quiet = false } = {}) => {
+  const ok = await midi.start();
+  if (!ok) { if (!quiet) toast(midi.error, "err"); return false; }
+  params.feedback = (m, v) => midi.sendFeedback(m, v);
+  const n = midi.ports().inputs.filter(p => p.state === "connected").length;
+  if (!quiet) toast(n ? `MIDI activo · ${n} controlador(es) conectado(s)` : "MIDI activo · conecta un controlador (se detecta solo)");
+  if (S.tab === "control") renderPanel();
+  return true;
+};
+/** Mapa MIDI básico (el de LumaMap 2): notas 36-51 = escenas, 60-64 transporte, CC1 brillo, CC21 opacidad. */
+A.loadBasicMidiMap = () => {
+  const C = S.project.settings.control, add = (key, target, mode = "trigger") => C.mappings.push(M.normalizeMapping({ src: "midi", device: "*", key, target, mode, name: "Mapa básico" }));
+  for (let i = 0; i < 16; i++) add("note:" + (36 + i), "scene/" + i);
+  add("note:60", "global/play", "toggle"); add("note:62", "global/restart"); add("note:63", "global/next"); add("note:64", "global/prev");
+  add("cc:1", "global/master", "absolute"); add("cc:21", "surf/sel/opacity", "absolute");
+  app.paramMappingsChanged();
+  toast("Mapa MIDI básico cargado (puedes editarlo en Control)");
+};
 app.audio = () => audio;
 
 /* ======================================================================
@@ -861,10 +1035,56 @@ function sendState(force = false) {
     t: "state", time: S.clock,
     state: {
       playing: S.playing, master: S.master, blackout: S.blackout, pattern: S.pattern, guides: S.guides,
-      sel: S.sel, point: S.point, levels: { ...S.levels }, muted: S.muted,
+      sel: S.sel, point: S.point, levels: { ...S.levels }, muted: S.muted, mods: S.mods || null,
       live: S.live ? { surfaceId: S.live.surfaceId, sceneId: S.live.sceneId, stroke: S.live.stroke } : null,
     },
   });
+}
+
+/** Capas a dibujar: la escena (y su transición) o, en EMERGENCIA, la escena segura (o negro). */
+function currentLayers(project, now) {
+  if (S.emergency) {
+    const sc = project.scenes.find(x => x.id === project.settings.show.emergency.sceneId);
+    return sc ? [{ scene: sc, alpha: 1 }] : [];
+  }
+  return sceneLayers(project, S.tr, now);
+}
+
+/* ----------------------------------------------------------------------
+   Motor compartido para las ventanas de salida (ver output.js): leen el
+   proyecto, el reloj y las fuentes ya decodificadas directamente de aquí.
+   ---------------------------------------------------------------------- */
+const hosted = new Map();   // pantalla -> ventana de salida enganchada
+let hostCache = null;       // estado del fotograma actual (se construye una vez por fotograma)
+function hostFrame() {
+  if (hostCache) return hostCache;
+  const now = performance.now();
+  hostCache = {
+    project: S.renderProject || S.project, time: S.clock, levels: S.levels,
+    layers: currentLayers(S.renderProject || S.project, now),
+    state: {
+      playing: S.playing, master: S.renderMaster ?? S.master, blackout: S.blackout, pattern: S.pattern, guides: S.guides,
+      sel: S.sel, point: S.point, muted: true,
+      live: S.live ? { surfaceId: S.live.surfaceId, sceneId: S.live.sceneId, stroke: S.live.stroke } : null,
+    },
+  };
+  return hostCache;
+}
+window.__lumaHost = {
+  get comp() { return comp; },
+  attach(screen, win) {
+    hosted.set(screen, win);
+    if (screen === 1 && !S.output && !native) S.output = "window";
+    updateChrome();
+  },
+  detach(screen, win) { if (hosted.get(screen) === win) hosted.delete(screen); },
+  frame: () => hostFrame(),
+};
+/** ¿Hay una salida que reproduce el sonido por su cuenta? (entonces el editor calla para no duplicarlo) */
+function outputPlaysAudio() {
+  if (S.output === "native") return true;
+  if (S.output === "window") { const w = hosted.get(1); return !(w && !w.closed); }
+  return false;
 }
 
 function onLinkMsg(m) {
@@ -1013,12 +1233,129 @@ A.checkUpdates = async (silent = false) => {
     buttons: [{ label: "Más tarde", value: false }, { label: "Actualizar", kind: "primary", value: true }],
   });
   if (!go) return;
-  await Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {});
+  await A.prepareForUpdate();
   toast("Descargando actualización…");
   try { await Updater.install(remote, (p) => toast(`Descargando actualización… ${Math.round(p * 100)} %`)); }
   catch (e) { toast("No se pudo actualizar: " + e.message, "err"); }
 };
 app.version = () => Updater.currentVersion();
+
+/**
+ * Antes de actualizar: guardar el proyecto y una copia, y liberar cámaras, LTC,
+ * MIDI Clock, grabación y salidas. Lo demás (DMX, mando, GPU) lo cierra el
+ * proceso principal antes de lanzar el actualizador independiente.
+ */
+A.prepareForUpdate = async () => {
+  await Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {});
+  await saveBackup(true).catch(() => {});
+  if (S.rec) { try { A.record(); } catch {} }
+  try { stopCamera(); } catch {}
+  try { show?.stopLtc(); } catch {}
+  try { midi?.setClockOut(null); } catch {}
+  for (const w of [S.outWin, ...Object.values(S.outWins || {})]) { try { w?.close(); } catch {} }
+  window.LumaDesktop?.log?.("update", "Proyecto guardado y dispositivos liberados antes de actualizar");
+};
+A.rollbackUpdate = async () => {
+  const ok = await confirmDlg("Volver a la versión anterior", "Se guardará tu proyecto, LumaMap se cerrará y se abrirá la versión que tenías antes de la última actualización.", "Volver");
+  if (!ok) return;
+  await A.prepareForUpdate();
+  try { await window.LumaDesktop.rollbackUpdate(); } catch (e) { toast(e.message, "err"); }
+};
+A.repairInstall = async () => {
+  const ok = await confirmDlg("Reparar instalación", "Se guardará tu proyecto y se reinstalará esta versión de LumaMap (sin tocar tus proyectos). La app se reiniciará.", "Reparar");
+  if (!ok) return;
+  await A.prepareForUpdate();
+  let remote = null;
+  try { remote = await Updater.fetchLatest(); } catch {}
+  try { await window.LumaDesktop.repairInstall(remote?.windows?.url || Updater.RELEASE_BASE + "/LumaMap-Setup.exe", remote?.windows || {}); } catch (e) { toast("No se pudo reparar: " + e.message, "err"); }
+};
+A.openLogs = () => window.LumaDesktop?.openLogs?.();
+
+/* ---------------- Perfil de hardware y calidad recomendada ---------------- */
+// Solo afecta a lo que no es la salida final: vista previa del editor, resolución
+// del muestreo de luces y del contenido de las caras 3D. La salida conserva siempre
+// la resolución y los fps configurados.
+const QUALITY = {
+  low: { label: "BAJA", preview: 0.5, fps: 30, faceRes: 256, sampleRes: 160 },
+  balanced: { label: "EQUILIBRADA", preview: 0.75, fps: 0, faceRes: 512, sampleRes: 320 },
+  high: { label: "ALTA", preview: 1, fps: 0, faceRes: 1024, sampleRes: 320 },
+  ultra: { label: "ULTRA", preview: 1, fps: 0, faceRes: 2048, sampleRes: 640 },
+};
+function recommendQuality(hw) {
+  const g = (hw.gpu || "").toLowerCase(), active = hw.gpuDevices?.find(d => d.active) || hw.gpuDevices?.[0];
+  if (/swiftshader|llvmpipe|basic render|microsoft basic/.test(g)) return "low";
+  const dedicated = /nvidia|geforce|quadro|rtx|radeon(?! graphics)|amd radeon rx|arc a/.test(g) || [0x10de].includes(active?.vendor) || (active?.vendor === 0x1002 && !/radeon\(tm\) graphics|vega \d graphics/.test(g));
+  const ramGB = hw.ram / 2 ** 30, vram = Math.max(0, ...(hw.wmi?.gpus || []).map(x => +x.AdapterRAM || 0)) / 2 ** 30;
+  if (dedicated && ramGB >= 31 && hw.cores >= 12 && (vram >= 8 || vram >= 3.9)) return "ultra";
+  if (dedicated) return "high";
+  if (ramGB >= 8 && hw.cores >= 4) return "balanced";
+  return "low";
+}
+A.applyQuality = (level) => {
+  const q = QUALITY[level] || QUALITY.balanced;
+  try { localStorage.setItem("lumamap:quality", level); } catch {}
+  A.setPreview({ scale: q.preview, fps: q.fps });
+  S.project.stage3d.faceRes = Math.min(S.project.stage3d.faceRes || 512, q.faceRes) || q.faceRes;
+  S.project.settings.dmx.sampleRes = q.sampleRes;
+  changed();
+  toast(`Calidad ${q.label}: vista previa ${Math.round(q.preview * 100)} %${q.fps ? " a " + q.fps + " fps" : ""} (la salida no cambia)`);
+};
+A.hardwareProfile = async (first = false) => {
+  const box = h("div", { class: "hwprof" }, hint("Analizando tu equipo…"));
+  const dlg = dialog({ title: first ? "Bienvenido a LumaMap para Windows" : "Perfil del equipo", content: box, wide: true, buttons: [] });
+  let hw = {};
+  try { hw = await window.LumaDesktop.hardwareProfile(); } catch (e) { box.innerHTML = ""; box.append(hint("No se pudo analizar: " + e.message)); }
+  // Decodificación por hardware (lo que el navegador puede reproducir con fluidez y eficiencia).
+  const codecs = [["H.264 4K60", 'video/mp4; codecs="avc1.640033"'], ["H.265/HEVC 4K60", 'video/mp4; codecs="hvc1.1.6.L153.B0"'], ["VP9 4K60", 'video/webm; codecs="vp09.00.51.08"'], ["AV1 4K60", 'video/mp4; codecs="av01.0.12M.08"']];
+  const dec = await Promise.all(codecs.map(async ([n, type]) => {
+    try { const r = await navigator.mediaCapabilities.decodingInfo({ type: "file", video: { contentType: type, width: 3840, height: 2160, bitrate: 40e6, framerate: 60 } }); return [n, r.supported ? (r.powerEfficient ? "por hardware" : r.smooth ? "por software (fluido)" : "por software") : "no soportado"]; }
+    catch { return [n, "desconocido"]; }
+  }));
+  let cams = 0; try { cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput").length; } catch {}
+  const rec = recommendQuality(hw);
+  const GB = (b) => (b / 2 ** 30).toFixed(1) + " GB";
+  const rows = [
+    ["Procesador", `${hw.cpu || "?"} · ${hw.cores || "?"} núcleos`], ["Memoria", hw.ram ? GB(hw.ram) : "?"],
+    ["GPU en uso", hw.gpu || "?"], ...(hw.wmi?.gpus || []).map((g, i) => [`GPU ${i + 1}`, `${g.Name}${+g.AdapterRAM ? " · " + GB(+g.AdapterRAM) + (+g.AdapterRAM >= 4294967295 - 1 ? "+" : "") + " VRAM" : ""}`]),
+    ["Equipo", hw.wmi?.laptop ? "Portátil (se usa la GPU dedicada si existe)" : "Sobremesa"],
+    ["Pantallas", (hw.displays || []).map(d => `${d.label} ${d.w}×${d.h}${d.hz ? " " + d.hz + " Hz" : ""}${d.primary ? " (principal)" : ""}`).join(" · ") || "?"],
+    ["Cámaras", cams ? String(cams) : "ninguna detectada"],
+    ["Codificación por hardware", hw.encoders?.length ? hw.encoders.map(e => ({ h264_nvenc: "NVIDIA NVENC", h264_qsv: "Intel Quick Sync", h264_amf: "AMD AMF", h264_videotoolbox: "VideoToolbox" }[e] || e)).join(", ") : "no disponible (se usa la CPU)"],
+    ...dec.map(([n, v]) => ["Decodificación " + n, v]),
+  ];
+  box.innerHTML = "";
+  box.append(h("div", { class: "perf" }, ...rows.map(([k, v]) => h("div", { class: "pc" }, h("small", {}, k), h("b", {}, v)))),
+    h("p", {}, "Calidad recomendada: ", h("b", {}, QUALITY[rec].label)),
+    hint("La calidad solo cambia la vista previa del editor y el muestreo interno; lo que sale al proyector mantiene siempre la resolución y los fps configurados."),
+    h("div", { class: "row" }, ...Object.entries(QUALITY).map(([k, q]) => btn({ label: q.label + (k === rec ? " ★" : ""), kind: k === rec ? "primary" : "", onClick: () => { A.applyQuality(k); closeDialog(); } }))));
+  await dlg;
+  if (first && !localStorage.getItem("lumamap:quality")) A.applyQuality(rec);
+};
+
+/* ---------------- Copias de seguridad automáticas (cada 5 minutos si hubo cambios) ---------------- */
+let lastBackupSig = "";
+async function saveBackup(force = false) {
+  const sig = history.last || JSON.stringify(S.project);
+  if (!force && sig === lastBackupSig) return;
+  lastBackupSig = sig;
+  const name = "__backup__" + new Date().toISOString().replace(/[:.]/g, "-");
+  await Store.saveProject(name, S.project);
+  const all = (await Store.listBackups()).sort((a, b) => b.savedAt - a.savedAt);
+  for (const old of all.slice(12)) await Store.deleteProject(old.name);
+}
+setInterval(() => { saveBackup().catch(() => {}); }, 5 * 60 * 1000);
+A.backups = async () => {
+  const all = (await Store.listBackups()).sort((a, b) => b.savedAt - a.savedAt);
+  const list = h("div", { class: "list" });
+  for (const b of all) list.append(h("button", { class: "item", style: { width: "100%", textAlign: "left" }, onclick: () => closeDialog(b.name) },
+    h("div", { class: "name" }, new Date(b.savedAt).toLocaleString(), h("small", {}, ` · ${b.surfaces} superficies · ${b.scenes} escenas`))));
+  if (!all.length) list.append(hint("Todavía no hay copias: se hacen solas cada 5 minutos mientras trabajas."));
+  const pick = await dialog({ title: "Copias de seguridad", content: h("div", {}, hint("LumaMap guarda una copia cada 5 minutos (las 12 últimas). Elige una para recuperarla; el proyecto actual se guarda antes como copia."), list) });
+  if (!pick) return;
+  await saveBackup(true);
+  const p = await Store.loadProject(pick);
+  if (p) { setProject(p); toast("Copia recuperada"); }
+};
 A.help = () => showHelp(app);
 A.palette = () => openPalette(app);
 A.toggleGuides = () => { S.guides = !S.guides; sendState(true); renderPanel(); toast(S.guides ? "Guías en el proyector" : "Guías ocultas"); };
@@ -1257,6 +1594,7 @@ function contextAt(cx, cy) {
 }
 
 function onDown(e) {
+  if (S.perfMode) return;   // modo actuación: el escenario no se edita
   $("#ov").setPointerCapture(e.pointerId);
   lastPointerType = e.pointerType;
   closeContextMenu();
@@ -1278,6 +1616,10 @@ function onDown(e) {
   const p = toProject(e.clientX, e.clientY);
   const s = surf();
 
+  if (S.tab === "lights" && S.mode === "edit") {
+    const g = dmxHit(p);
+    if (g) { G = g; return; }
+  }
   if (S.mode === "draw") {
     const ds = surf();
     if (!ds) return;
@@ -1400,6 +1742,15 @@ function onMove(e) {
   if (!G) return;
   const p = toProject(e.clientX, e.clientY);
   switch (G.type) {
+    case "pixmap": case "fixture": {
+      const dx = (p.x - G.p0.x) / S.project.width, dy = (p.y - G.p0.y) / S.project.height;
+      if (G.type === "fixture") { G.f.x = G.start.x + dx; G.f.y = G.start.y + dy; }
+      else if (G.mode === "resize") { G.pm.w = Math.max(0.005, G.start.w + dx); G.pm.h = Math.max(0.002, G.start.h + dy); }
+      else { G.pm.x = G.start.x + dx; G.pm.y = G.start.y + dy; }
+      G.moved = true;
+      changed();
+      break;
+    }
     case "point": {
       const np = { x: p.x + G.off.x, y: p.y + G.off.y };
       const old = G.s.points[G.idx];
@@ -1505,6 +1856,7 @@ function onUp(e) {
   if (pointers.size > 0) return;
   switch (G.type) {
     case "point": case "move": case "pinch": case "edge": case "rotate": if (G.moved) commit(); break;
+    case "pixmap": case "fixture": if (G.moved) { commit(); renderPanel(); } break;
     case "mask": commit(); break;
     case "draw": {
       if (S.live) {
@@ -1592,18 +1944,42 @@ function buildChrome() {
     else if (a === "palette") openPalette(app);
     else if (a === "record") A.record();
   }));
-  const dock = $("#dock");
-  for (const t of TABS) {
-    const b = h("button", { dataset: { tab: t.id }, onclick: () => openTab(t.id) });
-    b.innerHTML = icon(t.ic) + `<span>${t.label}</span>`;
-    dock.append(b);
-  }
+  buildDock();
   const vb = $("#viewbar");
   vb.append(
     Object.assign(btn({ ic: "fit", title: "Ajustar vista", onClick: () => fitView() }), { id: "vbFit" }),
     Object.assign(btn({ ic: "eye", title: "Vista previa sin guías", onClick: () => setMode(S.mode === "preview" ? "edit" : "preview") }), { id: "vbPreview" }));
   buildNudge();
 }
+
+/** Pestañas: en modo simple solo las de siempre; el modo profesional añade Control, Luces, 3D, Show… */
+function buildDock() {
+  const dock = $("#dock");
+  dock.innerHTML = "";
+  for (const t of TABS) {
+    if (t.pro && !S.pro) continue;
+    const b = h("button", { dataset: { tab: t.id }, class: t.pro ? "pro" : "", onclick: () => openTab(t.id) });
+    b.innerHTML = icon(t.ic) + `<span>${t.label}</span>`;
+    dock.append(b);
+  }
+  document.body.classList.toggle("pro", !!S.pro);
+}
+function setPro(on) {
+  S.pro = !!on;
+  try { localStorage.setItem("lumamap:pro", S.pro ? "1" : "0"); } catch {}
+  if (!S.pro && TABS.find(t => t.id === S.tab)?.pro) openTab(null);
+  buildDock();
+  updateChrome();
+  if (S.tab === "menu") renderPanel();
+}
+app.setPro = setPro;
+A.togglePro = () => { setPro(!S.pro); toast(S.pro ? "Modo profesional: Control, Luces, 3D, Show y Rendimiento" : "Modo simple"); };
+/** Calidad de la vista previa del editor (la salida conserva su calidad). */
+A.setPreview = ({ scale, fps } = {}) => {
+  if (scale) S.previewScale = scale;
+  if (fps !== undefined) S.previewFps = fps;
+  try { localStorage.setItem("lumamap:preview", JSON.stringify({ scale: S.previewScale || 1, fps: S.previewFps || 0 })); } catch {}
+};
 
 async function renameProject() {
   const n = await prompt("Nombre del proyecto", S.project.name);
@@ -1640,7 +2016,7 @@ function updateChrome() {
   document.querySelectorAll("#dock button").forEach(b => b.classList.toggle("on", b.dataset.tab === S.tab));
   // barra de selección
   const sb = $("#selbar");
-  const showSel = s && S.mode === "edit" && !S.projecting;
+  const showSel = s && !s.face3d && S.mode === "edit" && !S.projecting;
   sb.classList.toggle("show", !!showSel);
   if (showSel) {
     sb.innerHTML = "";
@@ -1700,6 +2076,7 @@ function openTab(id) {
   const prev = S.tab;
   S.tab = id;
   if (prev === "draw" && id !== "draw" && S.mode === "draw") setMode("edit");
+  if (prev === "lights" && id !== "lights") dmx.monitoring = false;
   if (prev === "shape" && id !== "shape" && S.mode === "mask") setMode("edit");
   if (id === "draw") { ensureDrawingSurface(); setMode("draw"); }
   $("#panel").classList.toggle("open", !!id);
@@ -1721,6 +2098,7 @@ function renderPanel() {
   body.innerHTML = "";
   body.append(def.render(app));
   body.scrollTop = scroll;
+  markMappedControls();
 }
 app.renderPanel = renderPanel;
 
@@ -1728,8 +2106,36 @@ app.renderPanel = renderPanel;
    Teclado (Bluetooth / USB / escritorio)
    ====================================================================== */
 function bindKeys() {
+  // Atajos del 3D (Numpad, G/R/S…) antes que los del 2D mientras la ventana 3D está abierta.
+  addEventListener("keydown", (e) => { if (!S.perfMode) handle3dKey(app, e); }, true);
+  addEventListener("keyup", (e) => {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && document.activeElement.type !== "range") return;
+    params.input({ src: "key", key: keyOf(e), on: false, label: "Soltar " + keyOf(e) });
+  });
   addEventListener("keydown", (e) => {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && document.activeElement.type !== "range") return;
+    // Modo actuación: solo teclas de show (GO, BACK, apagón, emergencia, play) y las asignadas.
+    if (S.perfMode && !params.learning) {
+      const k2 = keyOf(e);
+      if (k2 === "Ctrl+Shift+E") { e.preventDefault(); A.emergency(); return; }
+      if (!S.project.settings.control.mappings.some(m => m.src === "key" && m.key === k2)) {
+        if (e.key === "Enter" || e.key === "PageDown" || e.key === "ArrowRight") { e.preventDefault(); A.stepScene(1); }
+        else if (e.key === "PageUp" || e.key === "ArrowLeft") { e.preventDefault(); A.stepScene(-1); }
+        else if (e.key === " ") { e.preventDefault(); A.togglePlay(); }
+        else if (e.key === "b" || e.key === "B") A.blackout();
+        else if ((e.key === "Escape" && e.shiftKey) || e.key === "F10") { e.preventDefault(); A.togglePerfMode(false); }
+        if (!e.repeat) params.input({ src: "key", key: k2, on: true, label: k2 });
+        return;
+      }
+    }
+    // Teclas como fuente del motor de parámetros (aprender o teclas asignadas).
+    if (!e.repeat && e.key !== "Escape" && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+      if (params.learning) { e.preventDefault(); params.input({ src: "key", key: keyOf(e), on: true, label: keyOf(e) }); return; }
+      if (!document.getElementById("modal").classList.contains("show") &&
+        S.project.settings.control.mappings.some(m => m.src === "key" && m.key === keyOf(e) && m.enabled !== false)) {
+        e.preventDefault(); params.input({ src: "key", key: keyOf(e), on: true, label: keyOf(e) }); return;
+      }
+    }
     if (document.getElementById("modal").classList.contains("show") && e.key !== "Escape") return;
     const k = e.key, ctrl = e.ctrlKey || e.metaKey;
     if (k === "Enter" && document.activeElement?.tagName === "BUTTON") return;   // Enter pulsa el botón enfocado
@@ -1772,13 +2178,15 @@ window.__lumaBack = back;
 /* ======================================================================
    Bucle de render
    ====================================================================== */
-let lastNow = performance.now();
+let lastNow = 0;
 let fpsAvg = 60;
 const ovCtx = () => $("#ov").getContext("2d");
 
+/** Escala de la vista previa del editor (no afecta a la salida ni a la grabación). */
+const previewK = () => (S.projecting ? 1 : S.previewScale || 1);
 function layoutStage(v) {
-  const d = DPR(), P = S.project;
-  renderer.resize(v.cw, v.ch);
+  const d = DPR(), P = S.project, pk = previewK();
+  renderer.resize(v.cw * pk, v.ch * pk);
   const ov = $("#ov");
   if (ov.width !== Math.round(v.cw) || ov.height !== Math.round(v.ch)) { ov.width = Math.round(v.cw); ov.height = Math.round(v.ch); }
   const fr = $("#frame").style;
@@ -1791,13 +2199,66 @@ function layoutStage(v) {
   }
 }
 
+/* ---------------- Medición de rendimiento (datos reales del bucle) ---------------- */
+const perf = {
+  dts: [], works: [], dropped: 0, frames: 0, since: performance.now(),
+  add(dtMs, workMs) {
+    this.frames++;
+    this.dts.push(dtMs); this.works.push(workMs);
+    if (this.dts.length > 240) { this.dts.shift(); this.works.shift(); }
+    const sorted = [...this.dts].sort((a, b) => a - b);
+    const refresh = sorted[Math.floor(sorted.length * 0.1)] || 16.7;   // intervalo de la pantalla
+    if (dtMs > refresh * 1.6) this.dropped += Math.round(dtMs / refresh) - 1;
+  },
+  snapshot() {
+    const n = this.dts.length || 1, avg = (a) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
+    const sorted = [...this.dts].sort((a, b) => a - b);
+    return {
+      fps: 1000 / avg(this.dts), frameMs: avg(this.dts), frameMax: Math.max(0, ...this.dts),
+      workMs: avg(this.works), workMax: Math.max(0, ...this.works), dropped: this.dropped,
+      refreshHz: 1000 / (sorted[Math.floor(n * 0.1)] || 16.7), frames: this.frames, seconds: (performance.now() - this.since) / 1000,
+    };
+  },
+  reset() { this.dts = []; this.works = []; this.dropped = 0; this.frames = 0; this.since = performance.now(); },
+};
+app.perf = () => ({
+  ...perf.snapshot(),
+  preview: { scale: previewK(), fps: S.previewFps || 0 },
+  videos: pool.videos().map(r => {
+    const q = r.el.getVideoPlaybackQuality?.() || {};
+    return { name: S.project.media.find(m => m.id === r.id)?.name || r.id, w: r.el.videoWidth, h: r.el.videoHeight,
+      decoded: q.totalVideoFrames || 0, dropped: q.droppedVideoFrames || 0, paused: r.el.paused };
+  }),
+  outputs: [...hosted.entries()].filter(([, w]) => !w.closed).map(([n]) => n),
+  heap: performance.memory ? { used: performance.memory.usedJSHeapSize, limit: performance.memory.jsHeapSizeLimit } : null,
+  midiMsgs: params.monitor.length,
+});
+app.perfReset = () => perf.reset();
+
+/**
+ * Bucle principal. Lo mueve requestAnimationFrame; si la ventana del editor se
+ * minimiza o queda tapada el navegador deja de dar fotogramas, y entonces un
+ * temporizador mantiene vivo el show (reloj, salidas, luces, MIDI, audio).
+ */
+let lastRun = 0, inFrame = false;
+function rafLoop(t) { requestAnimationFrame(rafLoop); runFrame(t); }
+function runFrame(now) {
+  if (inFrame || now - lastRun < 4 || window.__lumaPause) return;   // __lumaPause: pruebas (congelar para capturar)
+  inFrame = true;
+  try { tick(now); } catch (e) { console.error(e); } finally { inFrame = false; lastRun = now; }
+}
+setInterval(() => { const t = performance.now(); if (lastRun && t - lastRun > 50) runFrame(t); }, 16);
+
 function tick(now) {
-  requestAnimationFrame(tick);
   const dt = Math.min(0.1, (now - lastNow) / 1000);
+  if (lastNow) perf.add(now - lastNow, perf.lastWork || 0);
+  const workStart = performance.now();
   lastNow = now;
   fpsAvg = fpsAvg * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
   if (S.playing) S.clock += dt;
   S.levels = audio.update(now);
+  // Audio como fuente del motor de parámetros (solo si hay mapeos de audio).
+  if (S.project.settings.control.mappings.some(m => m.src === "audio" && m.enabled !== false)) for (const k of ["bass", "mid", "high", "level", "beat"]) params.input({ src: "audio", key: k, v: Math.max(0, Math.min(1, S.levels[k] || 0)) });
   // Cambio de escena al ritmo: cada N golpes.
   const R = S.project.settings.react;
   if (S.levels.count !== S.lastCount) {
@@ -1821,16 +2282,33 @@ function tick(now) {
   const v = currentView();
   layoutStage(v);
   const view = { sx: v.sx, sy: v.sy, tx: v.tx, ty: v.ty };
-  const layers = sceneLayers(S.project, S.tr, now);
-  comp.frame(S.project, {
-    layers, time: S.clock, levels: S.levels, view, screen: S.viewScreen || 0,
-    master: S.master * (S.viewScreen ? S.project.settings.screens[S.viewScreen].master : 1),
+  const pk = previewK();
+  const glView = pk === 1 ? view : { sx: v.sx * pk, sy: v.sy * pk, tx: v.tx * pk, ty: v.ty * pk };
+  // Vista previa a menos fps (opcional): se salta fotogramas del editor; la salida no cambia.
+  S.previewSkip = !S.projecting && S.previewFps === 30 ? !S.previewSkip : false;
+  // Show: timecode, cues por timecode y líneas de automatización.
+  show.tick();
+  // Modulaciones del motor de parámetros (audio, tracking, mezclas): solo en el render.
+  S.mods = params.modList(now);
+  const RP = applyModList(S.project, S.master, S.mods);
+  S.renderProject = RP.project; S.renderMaster = RP.master;
+  const layers = currentLayers(RP.project, now);
+  // 3D: contenido de las caras, proyectores (para las salidas) y visor.
+  if (app.stage3d) { try { app.stage3d.tick({ project: RP.project, layers, time: S.clock, levels: S.levels, master: RP.master }); } catch (e) { console.error("3D", e); } }
+  hostCache = null;
+  // Editor oculto (minimizado): no se dibuja su vista previa, el resto sigue.
+  if (S.previewSkip || document.hidden) comp.frameNo = (comp.frameNo || 0) + 1;
+  else comp.frame(RP.project, {
+    layers, time: S.clock, levels: S.levels, view: glView, screen: S.viewScreen || 0,
+    master: RP.master * (S.viewScreen ? RP.project.settings.screens[S.viewScreen].master : 1),
     blackout: S.blackout || (S.viewScreen ? !S.project.settings.screens[S.viewScreen].on : false), clear: S.projecting ? [0, 0, 0, 1] : [0, 0, 0, 0],
     live: S.live,
   });
-  pool.applyLookAudio(layers.flatMap(l => Object.values(l.scene.looks)), S.muted || !!S.output);
-  drawOverlay(v, view);
-  drawLoupe(v, view);
+  pool.applyLookAudio(layers.flatMap(l => Object.values(l.scene.looks)), S.muted || outputPlaysAudio());
+  // Luces: el video alimenta los pixel maps y los fixtures (muestreo en la GPU).
+  dmx.tick(now, { project: RP.project, layers, time: S.clock, levels: S.levels, master: RP.master });
+  if (!document.hidden) { drawOverlay(v, view); drawLoupe(v, view); }
+  params.tickFeedback(now);
   const rb = $("#recBadge");
   if (S.rec) {
     renderOff(S.rec.o, now);
@@ -1854,6 +2332,7 @@ function tick(now) {
     S.saveDue = 0;
     Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {});
   }
+  perf.lastWork = performance.now() - workStart;
 }
 
 function drawOverlay(v, view) {
@@ -1881,6 +2360,7 @@ function drawOverlay(v, view) {
     });
   }
   const X = (p) => p.x * v.sx + v.tx, Y = (p) => p.y * v.sy + v.ty;
+  if (S.tab === "lights" && !S.projecting) drawDmxOverlay(ctx, v, d);
   if (S.mode === "draw") {
     const s = surf();
     if (s) {
@@ -1907,10 +2387,58 @@ function drawOverlay(v, view) {
   }
 }
 
-/** Lupa de precisión: amplía la zona bajo el dedo al mover un punto o dibujar. */
+/** Pixel maps y fixtures sobre el escenario: LED con su color actual; el seleccionado con asas. */
+function drawDmxOverlay(ctx, v, d) {
+  const P = S.project, c = P.settings.dmx;
+  const px = (x, y) => [x * P.width * v.sx + v.tx, y * P.height * v.sy + v.ty];
+  for (const pm of c.pixelMaps) {
+    const { pos } = dmx.patchOf(pm), col = dmx.ledColors.get(pm.id), sel = S.dmxSel === pm.id;
+    const [x0, y0] = px(pm.x, pm.y), [x1, y1] = px(pm.x + pm.w, pm.y + pm.h);
+    ctx.setLineDash(sel ? [] : [6 * d, 4 * d]); ctx.lineWidth = (sel ? 2 : 1) * d; ctx.strokeStyle = sel ? "#ffd60a" : "rgba(255,214,10,.5)";
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0); ctx.setLineDash([]);
+    const r = Math.max(1.5 * d, Math.min(6 * d, Math.abs(x1 - x0) / Math.max(1, pm.cols) / 3, 6 * d));
+    pos.forEach(([x, y], i) => {
+      const [sx, sy] = px(x, y);
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = col && pm.enabled ? `rgb(${col[i * 4]},${col[i * 4 + 1]},${col[i * 4 + 2]})` : "#333";
+      ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = i === 0 ? "#34c759" : "rgba(0,0,0,.6)"; ctx.stroke();
+    });
+    ctx.fillStyle = "#ffd60a"; ctx.font = `${11 * d}px system-ui`; ctx.fillText(pm.name, x0, y0 - 5 * d);
+    if (sel) { ctx.fillRect(x1 - 6 * d, y1 - 6 * d, 12 * d, 12 * d); }
+  }
+  for (const f of c.fixtures) {
+    const [sx, sy] = px(f.x, f.y), col = dmx.ledColors.get("fx:" + f.id);
+    ctx.beginPath(); ctx.arc(sx, sy, 9 * d, 0, Math.PI * 2);
+    ctx.fillStyle = col ? `rgb(${col[0]},${col[1]},${col[2]})` : "#444"; ctx.fill();
+    ctx.lineWidth = 2 * d; ctx.strokeStyle = "#ff2d8a"; ctx.stroke();
+    ctx.fillStyle = "#ff2d8a"; ctx.font = `${11 * d}px system-ui`; ctx.fillText(f.name, sx + 12 * d, sy + 4 * d);
+  }
+}
+/** ¿Toca el puntero un pixel map o un fixture? Devuelve el gesto o null. */
+function dmxHit(p) {
+  const P = S.project, c = P.settings.dmx, r = hitRadius();
+  for (const f of c.fixtures) if (Math.hypot(f.x * P.width - p.x, f.y * P.height - p.y) < r) return { type: "fixture", f, p0: p, start: { x: f.x, y: f.y } };
+  const order = [...c.pixelMaps].sort((a, b) => (a.id === S.dmxSel ? -1 : b.id === S.dmxSel ? 1 : 0));
+  for (const pm of order) {
+    const x0 = pm.x * P.width, y0 = pm.y * P.height, x1 = (pm.x + pm.w) * P.width, y1 = (pm.y + pm.h) * P.height;
+    if (pm.id === S.dmxSel && Math.hypot(x1 - p.x, y1 - p.y) < r) return { type: "pixmap", pm, mode: "resize", p0: p, start: { ...pm } };
+    const pad = r * 0.6;
+    if (p.x > Math.min(x0, x1) - pad && p.x < Math.max(x0, x1) + pad && p.y > Math.min(y0, y1) - pad && p.y < Math.max(y0, y1) + pad) {
+      if (S.dmxSel !== pm.id) { S.dmxSel = pm.id; renderPanel(); }
+      return { type: "pixmap", pm, mode: "move", p0: p, start: { ...pm } };
+    }
+  }
+  return null;
+}
+
+/**
+ * Lupa de precisión: amplía la zona bajo el dedo al colocar puntos (esquinas,
+ * bordes, máscara). Nunca aparece al dibujar ni al trazar a mano: el trazo debe
+ * ser directo, sin nada alrededor del cursor.
+ */
 function drawLoupe(v) {
   const lp = $("#loupe");
-  const active = G && G.at && ["point", "edge", "draw", "draftPoint", "mask", "trace"].includes(G.type) && pointers.size === 1;
+  const active = G && G.at && ["point", "edge", "draftPoint", "mask"].includes(G.type) && pointers.size === 1 && S.mode !== "draw";
   lp.style.display = active ? "block" : "none";
   if (!active) return;
   const ctx = lp.getContext("2d"), Z = 3, R = lp.width;
@@ -1919,7 +2447,8 @@ function drawLoupe(v) {
   lp.classList.toggle("right", cx < v.cw * 0.35 && cy < v.ch * 0.4);
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, R, R);
   try {
-    ctx.drawImage($("#gl"), cx - srcW / 2, cy - srcW / 2, srcW, srcW, 0, 0, R, R);
+    const pk = previewK();
+    ctx.drawImage($("#gl"), (cx - srcW / 2) * pk, (cy - srcW / 2) * pk, srcW * pk, srcW * pk, 0, 0, R, R);
     ctx.drawImage($("#ov"), cx - srcW / 2, cy - srcW / 2, srcW, srcW, 0, 0, R, R);
   } catch {}
   ctx.strokeStyle = "#ff2d55"; ctx.lineWidth = 2;
@@ -1949,14 +2478,27 @@ window.__lumaNativeEvent = (ev) => {
   }
 };
 
+/**
+ * Mando remoto (teléfono / tablet / otro PC) y OSC. En la versión web el
+ * servidor es el mismo que sirve la app; en la de escritorio es un servicio
+ * propio de la app (remote-service.mjs) en este equipo.
+ */
 async function connectRemote() {
   if (native || location.protocol === "file:") return;
-  try {
-    const r = await fetch("api/ping", { cache: "no-store" });
-    if (!r.ok) return;
-  } catch { return; }
-  const remote = new Remote({
-    role: "display", name: "LumaMap",
+  let url = null;
+  if (window.LumaDesktop?.remoteInfo) {
+    let info = await window.LumaDesktop.remoteInfo();
+    if (!info.port) { await new Promise(r => { window.LumaDesktop.onRemoteReady(r); setTimeout(r, 5000); }); info = await window.LumaDesktop.remoteInfo(); }
+    if (!info.port) return;
+    url = `ws://127.0.0.1:${info.port}/ws`;
+  } else {
+    try {
+      const r = await fetch("api/ping", { cache: "no-store" });
+      if (!r.ok) return;
+    } catch { return; }
+  }
+  const remote = app.remote = new Remote({
+    url, role: "display", name: "LumaMap",
     onControl: (m) => {
       const a = m.action;
       if (a === "play" && !S.playing) A.togglePlay();
@@ -1967,15 +2509,71 @@ async function connectRemote() {
       if (a === "goto" && S.project.scenes[m.value]) A.goScene(S.project.scenes[m.value].id);
       if (a === "brightness") { S.master = Number(m.value); sendState(true); }
       if (a === "blackout") A.blackout();
+      // Cualquier parámetro del motor (crossfader, efectos, luces, macros, snapshots…)
+      if (a === "param" && m.id) {
+        const d = describe(app, m.id);
+        if (!d) return;
+        if (d.kind === "trigger") d.set(true);
+        else if (d.kind === "bool") d.set(m.value === undefined ? !d.get() : !!m.value);
+        else d.set(Math.max(d.min, Math.min(d.max, Number(m.value))));
+        app.paramTouched(d.id);
+      }
     },
+    onOsc: (m) => oscIn(m.address, m.args),
   });
   remote.connect();
   setInterval(() => {
     const i = S.project.scenes.findIndex(s => s.id === S.project.sceneId);
+    const C = S.project.settings.control, D = S.project.settings.dmx;
     remote.sendState({ project: S.project.name, scene: scene().name, sceneIndex: i, sceneCount: S.project.scenes.length,
-      scenes: S.project.scenes.map(s => s.name), playing: S.playing, fps: Math.round(fpsAvg), resolution: `${S.project.width}×${S.project.height}`, blackout: S.blackout });
-  }, 1000);
+      scenes: S.project.scenes.map(s => s.name), playing: S.playing, fps: Math.round(fpsAvg), resolution: `${S.project.width}×${S.project.height}`, blackout: S.blackout,
+      master: S.master, sel: S.sel, mix: S.sel ? (lookSel()?.mix || 0) : 0, hasNext: !!lookSel()?.next,
+      macros: C.macros.map(m => ({ id: m.id, name: m.name })),
+      lights: { enabled: D.enabled, master: D.master, blackout: !!dmx?.blackout, snapshots: D.snapshots.map(s => ({ id: s.id, name: s.name })), active: dmx?.snapshot || null },
+      timecode: S.timecode ? fmtTimecode(S.timecode) : null, cue: S.cueName || null });
+  }, 500);
 }
+
+/** Cómo conectar el mando del teléfono y OSC. */
+A.remoteInfo = async () => {
+  if (!window.LumaDesktop?.remoteInfo) {
+    return dialog({ title: "Mando remoto", content: h("div", {}, hint(location.protocol.startsWith("http") ? `Abre ${location.origin}/controller.html en el teléfono (misma red Wi-Fi).` : "El mando remoto funciona con la app de Windows o con el servidor de LumaMap (npm start).")) });
+  }
+  const info = await window.LumaDesktop.remoteInfo();
+  const content = h("div", { class: "remoteinfo" },
+    h("p", {}, "En el teléfono, tablet u otro PC conectado a la misma red, abre:"),
+    ...(info.urls.length ? info.urls.map(u => h("p", {}, h("b", { class: "big" }, u.url), h("small", {}, " · " + u.name))) : [hint("Este equipo no tiene red local: conéctalo a Wi-Fi o Ethernet.")]),
+    h("p", {}, "PIN: ", h("b", { class: "big" }, info.pin)),
+    h("p", { class: "hint" }, `OSC: envía a la IP de este equipo, puerto UDP ${info.oscPort}. Cualquier dirección se puede asignar con «Aprender»; /lumamap/param/<parámetro> lo fija directamente (p. ej. /lumamap/param/global/master 0.5).`),
+    info.error ? h("p", { class: "hint" }, "Error: " + info.error) : null);
+  const r = await dialog({ title: "Mando remoto y OSC", content, buttons: [{ label: "Nuevo PIN", value: "pin" }, { label: "Cerrar", kind: "primary", value: null }] });
+  if (r === "pin") { await window.LumaDesktop.remoteNewPin(); setTimeout(A.remoteInfo, 1500); }
+};
+
+/** OSC entrante: /lumamap/param/<id> fija un parámetro; el resto va al motor (OSC LEARN y mapeos). */
+function oscIn(address, args) {
+  const nums = args.filter(v => typeof v === "number" || typeof v === "boolean").map(Number);
+  if (address.startsWith("/lumamap/param/")) {
+    const d = describe(app, address.slice(15));
+    if (!d) return;
+    if (d.kind === "trigger") { if (!nums.length || nums[0]) d.set(true); }
+    else if (d.kind === "bool") d.set(nums.length ? !!nums[0] : !d.get());
+    else if (nums.length) d.set(Math.max(d.min, Math.min(d.max, nums[0])));
+    app.paramTouched(d.id);
+    return;
+  }
+  if (address === "/lumamap/timecode") {   // "hh:mm:ss:ff" o segundos
+    const sec = typeof args[0] === "string" ? parseTc(args[0], 30) : Number(args[0]);
+    if (sec !== null && !isNaN(sec)) show.external_("osc", { seconds: sec, fps: 30 });
+    return;
+  }
+  if (address === "/lumamap/go") { A.stepScene(1); return; }
+  if (address.startsWith("/lumap/")) return;   // direcciones fijas de LumaMap 2 (ya atendidas)
+  const v = nums.length ? Math.max(0, Math.min(1, nums[0])) : 1;
+  params.input({ src: "osc", device: "OSC", key: address, v, on: nums.length ? nums[0] > 0 : true, raw: Math.round(v * 127), label: `${address} ${args.join(" ")}` });
+}
+app.oscIn = oscIn;
+const fmtTimecode = (tc) => { const p = (n) => String(n).padStart(2, "0"); return `${p(tc.h)}:${p(tc.m)}:${p(tc.s)}:${p(tc.f)}`; };
 
 /* ======================================================================
    Arranque
@@ -2015,6 +2613,20 @@ async function init() {
   comp = new Compositor(renderer, pool);
   link = new Link("editor", onLinkMsg);
   audio = new AudioEngine();
+  params = app.params = new ParamEngine(app);
+  midi = app.midiDriver = new MidiDriver({
+    onInput: (ev) => params.input(ev),
+    onStatus: () => { if (S.tab === "control") renderPanel(); },
+    onClock: ({ bpm }) => { const sy = S.project.settings.control.sync; if (sy?.clockIn && Math.abs(bpm - (S.project.settings.bpm || 120)) >= 0.5) { S.project.settings.bpm = Math.round(audio.setBpm(bpm) * 10) / 10; } },
+    onTransport: (t) => { const sy = S.project.settings.control.sync; if (!sy?.transportIn) return; if (t === "start") { A.restart(); if (!S.playing) A.togglePlay(); } else if (t === "continue") { if (!S.playing) A.togglePlay(); } else if (t === "stop" && S.playing) A.togglePlay(); },
+    onTimecode: (tc) => { S.timecode = tc; show?.external_("mtc", tc); },
+  });
+  app.sharedComp = () => comp;
+  app.describeParam = (id) => describe(app, id);
+  dmx = app.dmx = new DmxEngine(app);
+  show = app.show = new ShowEngine(app);
+  app.tracking = new TrackingManager(app);
+  window.__lumaApp = app;
   app.commands = buildCommands(app);
   KEYS = keymap(app.commands);
   // Versión de escritorio: el menú de la ventana ejecuta los mismos comandos.
@@ -2030,6 +2642,7 @@ async function init() {
     window.LumaDesktop.onDisplaysChanged(() => { if (S.tab === "output") renderPanel(); });
   }
   buildChrome();
+  buildPerfHud();
   bindStage();
   bindKeys();
   addEventListener("resize", () => updateChrome());
@@ -2046,12 +2659,34 @@ async function init() {
     welcome();
   }
   audio.bpm = S.project.settings.bpm || 120;
-  requestAnimationFrame(tick);
+  requestAnimationFrame(rafLoop);
   connectRemote();
   // Busca actualizaciones al abrir (en silencio: solo avisa si hay una nueva).
   setTimeout(() => A.checkUpdates(true), 5000);
   if ("serviceWorker" in navigator && !native && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
   window.__lumamap = app; // depuración y pruebas
+
+  // La GPU se reinició (controlador, memoria): se guarda y se recarga; el autoguardado lo restaura.
+  $("#gl").addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    window.LumaDesktop?.log?.("gpu", "Contexto WebGL perdido: se recarga el editor");
+    Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {}).finally(() => setTimeout(() => location.reload(), 800));
+  });
+  addEventListener("error", (e) => window.LumaDesktop?.log?.("renderer", `${e.message} @ ${e.filename}:${e.lineno}`));
+  addEventListener("unhandledrejection", (e) => window.LumaDesktop?.log?.("renderer", "Promesa rechazada: " + (e.reason?.stack || e.reason)));
+  // Resultado de una actualización / rollback (lo deja el actualizador independiente).
+  if (window.LumaDesktop?.updateStatus) {
+    window.LumaDesktop.updateStatus().then((st) => {
+      app.updateInfo = st;
+      const r = st.result;
+      if (!r) return;
+      if (r.ok) toast(r.state === "updated" ? `Actualizado: ${r.message}` : r.message);
+      else dialog({ title: r.state === "rolledBack" ? "Se restauró la versión anterior" : "La actualización falló",
+        content: h("div", {}, h("p", {}, r.message), hint("Tus proyectos no se han tocado. Puedes intentarlo de nuevo más tarde o usar ☰ → Reparar instalación.")) });
+    }).catch(() => {});
+  }
+  // Perfil de hardware: la primera vez en la app de escritorio.
+  if (window.LumaDesktop?.hardwareProfile && !localStorage.getItem("lumamap:quality")) setTimeout(() => A.hardwareProfile(true), 2500);
 }
 
 init();

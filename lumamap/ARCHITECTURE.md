@@ -103,3 +103,88 @@ que los entrega a la WebView del proyector con `evaluateJavascript`.
 - El audio de los videos suena desde la salida cuando está activa (el editor se
   silencia para no duplicarlo).
 - La detección de superficies en foto es una ayuda: siempre requiere ajuste manual.
+
+## Plataforma profesional (modo profesional)
+
+```
+ENTRADAS ─ MIDI · OSC · DMX · teclado · audio · tracking · timeline · mando remoto
+   │            (midi.js · remote-service · dmx-service · audio.js · show.js)
+   ▼
+MOTOR DE PARÁMETROS (params.js) ─ mapeos, bancos, modificadores, macros, feedback,
+   │                               soft takeover, mezclas (sustituir/sumar/multiplicar/máx/mín)
+   ▼
+MOTOR AV / GPU (renderer.js + compose.js, WebGL2 sobre Direct3D 11 vía ANGLE en Windows)
+   │  2D (warp, malla, máscaras, 122 efectos, transiciones) · 3D (three3d.js)
+   ▼
+SALIDAS ─ ventanas P1-P4 (motor compartido) · Art-Net/sACN (dmx.js → dmx-service)
+   ▲
+SHOW ─ escenas/cues, transiciones, timecode (MTC, LTC, OSC, interno), automatización,
+       modo actuación, apagón, emergencia (show.js)
+```
+
+### Motor de parámetros (`params.js`)
+- `describe(app, id)` devuelve el descriptor de cualquier parámetro (`global/master`,
+  `surf/<id>/fx/brightness`, `surf/sel/opacity`, `screen/2/on`, `scene/3`,
+  `macro/<id>`, `dmx/master`, `dmx/fix/<id>/<canal>`…): nombre, tipo, mínimo, máximo,
+  defecto, valor actual y `set()`. Los módulos registran sus propios prefijos.
+- `input(ev)` recibe cualquier entrada normalizada `{src, device, channel, key, v, on}`
+  y aplica los mapeos del proyecto (`settings.control.mappings`). «Sustituir» desde
+  MIDI/OSC/DMX/teclado escribe en el proyecto (con deshacer); las fuentes continuas
+  (audio, tracking, timeline) y las demás mezclas son modulaciones por fotograma
+  (`modList()` → `applyModList()`), que también reciben las salidas.
+- MIDI: 14 bits (MSB+LSB y pitch bend), encoders relativos (3 codificaciones),
+  soft takeover, feedback a 30 Hz solo de lo que cambia, bancos, modificadores.
+
+### Salidas con motor compartido
+Las ventanas `output.html` abiertas por el editor están en el mismo proceso: leen
+el proyecto, el reloj y las fuentes del editor (`window.opener.__lumaHost`). Cada
+video/cámara se decodifica una vez; cada salida solo sube el fotograma a su propio
+contexto WebGL (copia GPU→GPU). Sin editor accesible (Android, otra pestaña) se usa
+el canal `Link` de siempre.
+
+### Luces (`dmx.js`, `dmxproto.js`, `desktop/dmx-service.mjs`)
+- La composición se dibuja en un lienzo pequeño (contexto propio, fuentes
+  compartidas) y un shader calcula el color de cada LED con promedio de área y
+  ajustes de color. Solo esos bytes vuelven a la CPU, por PBO + fence asíncronos.
+- Parcheo con AUTO SPAN / ALIGN; universos virtuales → Art-Net/sACN sin rehacer
+  nada. El servicio de red (proceso aparte) envía a la frecuencia configurada,
+  con retardo por universo, ArtPoll, entrada Art-Net/sACN (prioridad sACN) y
+  estadísticas. Se ata a la IP de la interfaz elegida: nunca sale por otra.
+
+### Show (`show.js`, `ltc-core.js`)
+- Transiciones en el mismo shader (sin pasadas extra): fundido/destello/glitch por
+  opacidad; disolver, cortinillas e iris por zonas en coordenadas de la salida.
+- Timecode: MTC (midi.js), LTC (AudioWorklet con decodificador bifase), OSC
+  `/lumamap/timecode` o interno. Las cues con timecode se disparan solas (también
+  al saltar hacia atrás); sin señal el tiempo se detiene, no se inventa.
+- Automatización: `ParamEngine.onRecord` graba lo que mueven los controles; las
+  líneas se reproducen como modulación `timeline`.
+
+### 3D (`three3d.js`, `panels-3d.js`)
+- Objetos, grupos y proyectores en `project.stage3d`. Cada cara es una superficie
+  virtual (`face3d`) con su look por escena: todo el sistema de contenido sirve.
+- Atlas de caras (contexto propio con fuentes compartidas) → `CanvasTexture` con
+  `offset/repeat` por cara (una subida por fotograma).
+- Cada proyector se renderiza en su propio `OffscreenCanvas` a su resolución y se
+  entrega como `ImageBitmap` a la fuente `projector3d` de una superficie 2D a
+  pantalla completa (sobre ella siguen valiendo warp, máscaras y bordes suaves).
+- Modo «Proyección»: proyección de textura desde cada proyector con prueba de
+  profundidad (sombras) y cara de espaldas; se suman los solapes (zonas de blending).
+
+### Tracking y asistente (`tracking.js`, `tracking-worker.js`, `rules.js`, `assistant.js`)
+- Tracking: MediaPipe Pose/Hands en un Web Worker (GPU con respaldo en CPU) sobre
+  fotogramas reducidos; IDs estables por persona; señales al motor de parámetros
+  (fuente «tracking»), zonas y reglas que ejecutan acciones de `rules.js`.
+- Asistente: la página lleva la conversación (historial que solo crece) y ejecuta
+  las herramientas con las mismas acciones del editor; `desktop/ai.js` hace cada
+  llamada a la API de Claude desde el proceso principal con la clave cifrada por
+  `safeStorage` (la página no puede leerla). Sin clave: intérprete local de
+  órdenes simples, marcado «sin IA».
+
+### Escritorio
+- `remote-service.mjs`: el mismo `server/index.js` (mando + OSC) en un proceso
+  aparte, con PIN para los mandos; el editor se conecta como «display» local.
+- `updater.ps1`: actualizador independiente (espera, copia, instala, verifica,
+  rollback, reabre). `test-install.ps1` lo prueba en el CI de Windows junto con
+  reparar, desinstalar conservando datos y reinstalar.
+- Registros en `%APPDATA%\LumaMap\logs`; recarga automática si el editor se cae.

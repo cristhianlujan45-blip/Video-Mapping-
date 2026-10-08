@@ -5,3 +5,8 @@ sourceMappingURL) para detectar la silueta de las personas sin internet.
 Copyright The MediaPipe Authors. Licencia Apache 2.0:
 https://www.apache.org/licenses/LICENSE-2.0
 Modelo: https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter
+
+Modelos «Pose Landmarker (lite)» y «Hand Landmarker» de Google (float16, v1),
+sin cambios, para el tracking de cuerpo y manos sin internet:
+https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
+https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker

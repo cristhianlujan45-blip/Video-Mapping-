@@ -41,9 +41,16 @@ export const loadProject = async (name) => (await run("projects", "readonly", s 
 export const deleteProject = (name) => run("projects", "readwrite", s => s.delete(name));
 export async function listProjects() {
   const all = await run("projects", "readonly", s => s.getAll());
-  return (all || []).filter(r => r.name !== AUTOSAVE)
+  return (all || []).filter(r => r.name !== AUTOSAVE && !r.name.startsWith("__backup__"))
     .map(r => ({ name: r.name, savedAt: r.savedAt, surfaces: r.project?.surfaces?.length || 0, scenes: r.project?.scenes?.length || 0 }))
     .sort((a, b) => b.savedAt - a.savedAt);
+}
+
+/** Copias de seguridad automáticas: [{ name, savedAt, surfaces, scenes }]. */
+export async function listBackups() {
+  const all = await run("projects", "readonly", s => s.getAll());
+  return (all || []).filter(r => r.name.startsWith("__backup__"))
+    .map(r => ({ name: r.name, savedAt: r.savedAt, surfaces: r.project?.surfaces?.length || 0, scenes: r.project?.scenes?.length || 0 }));
 }
 
 /** rec = {id, name, kind, mime, blob, width, height, duration, size, thumb} */

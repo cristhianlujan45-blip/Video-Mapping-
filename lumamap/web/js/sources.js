@@ -186,12 +186,34 @@ export function getCamera(key = "default") {
     await v.play().catch(() => {});
     const cam = { el: v, stream, key, source: () => v, frameKey: () => v.currentTime, kind: "camera" };
     cams.set(key, cam);
+    lost.delete(key);
+    // Cámara desconectada (cable, USB, otra app): se marca y se vuelve a abrir sola al volver.
+    for (const tr of stream.getVideoTracks()) tr.addEventListener("ended", () => { if (cams.get(key) === cam) { cams.delete(key); lost.set(key, Date.now()); } });
     return cam;
   })().finally(() => opening.delete(key));
   opening.set(key, p);
   return p;
 }
 export function cameraIfReady(key = "default") { return cams.get(key) || null; }
+const lost = new Map();      // clave -> cuándo se perdió
+/** ¿Esta cámara se desconectó (y aún no ha vuelto)? */
+export const cameraLost = (key = "default") => lost.has(key);
+if (typeof navigator !== "undefined" && navigator.mediaDevices?.addEventListener)
+  navigator.mediaDevices.addEventListener("devicechange", () => { for (const k of lost.keys()) getCamera(k).catch(() => {}); });
+let offlineCanvas = null;
+/** Imagen «CÁMARA DESCONECTADA» para las superficies que usan una cámara perdida. */
+export function offlineImage() {
+  if (offlineCanvas) return offlineCanvas;
+  offlineCanvas = document.createElement("canvas");
+  offlineCanvas.width = 640; offlineCanvas.height = 360;
+  const c = offlineCanvas.getContext("2d");
+  c.fillStyle = "#0b0d12"; c.fillRect(0, 0, 640, 360);
+  c.strokeStyle = "#ff453a"; c.lineWidth = 6; c.strokeRect(10, 10, 620, 340);
+  c.fillStyle = "#ff453a"; c.font = "bold 44px system-ui, sans-serif"; c.textAlign = "center";
+  c.fillText("CÁMARA DESCONECTADA", 320, 175);
+  c.fillStyle = "#e8eef8"; c.font = "24px system-ui, sans-serif"; c.fillText("se reconecta sola al volver", 320, 220);
+  return offlineCanvas;
+}
 /** Cierra una cámara (o todas si no se indica). */
 export function stopCamera(key) {
   for (const [k, c] of [...cams]) {

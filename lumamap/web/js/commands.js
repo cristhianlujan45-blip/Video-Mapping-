@@ -99,7 +99,13 @@ export function buildCommands(app) {
 
   add("Ayuda", "palette", "Todos los comandos", () => openPalette(app), { keys: "Ctrl+K", ic: "menu" });
   add("Ayuda", "help", "Ayuda y atajos", () => A.help(), { keys: "F1", ic: "help" });
-  add("Ayuda", "midi", "Conectar controlador MIDI", A.midi, { ic: "midi" });
+  add("Ayuda", "midi", "Conectar controlador MIDI", () => A.midi(), { ic: "midi" });
+  add("Ayuda", "remote", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), { ic: "live" });
+  add("Show", "emergency", "EMERGENCIA: salida segura inmediata", A.emergency, { keys: "Ctrl+Shift+E", ic: "blackout" });
+  add("Show", "perfMode", "Modo actuación (pantalla limpia, sin ediciones)", () => A.togglePerfMode(), { keys: "F10", ic: "live" });
+  add("Ver", "pro", "Modo profesional (activar / desactivar)", A.togglePro, { ic: "knob" });
+  add("Ver", "tab-control", "Panel Control (MIDI, macros, monitor)", () => { app.setPro(true); app.openTab("control"); }, { ic: "knob" });
+  add("Ver", "tab-perf", "Panel Rendimiento", () => { app.setPro(true); app.openTab("perf"); }, { ic: "gauge" });
   add("Ayuda", "update", "Buscar actualizaciones", () => A.checkUpdates(false), { ic: "download" });
   return C;
 }

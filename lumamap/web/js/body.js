@@ -10,7 +10,13 @@
 export const BODY_MODES = [
   ["silueta", "Silueta animada"], ["contorno", "Contorno neón"], ["estela", "Estela de movimiento"],
   ["sombra", "Sombra (animación alrededor)"], ["persona", "Persona sin fondo"], ["movimiento", "Solo movimiento"],
+  ["esqueleto", "Esqueleto"], ["particulas", "Partículas (brazos y pies)"], ["fuego", "Fuego"], ["humo", "Humo"],
+  ["lineas", "Líneas entre personas"], ["geometria", "Geometría"],
 ];
+/** Modos que usan el tracking de pose (cuerpo y articulaciones) en lugar de la silueta. */
+export const POSE_MODES = new Set(["esqueleto", "particulas", "fuego", "humo", "lineas", "geometria"]);
+const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28], [27, 31], [28, 32], [0, 11], [0, 12]];
+const TRIS = [[0, 11, 12], [11, 12, 23], [12, 23, 24], [11, 13, 23], [12, 14, 24], [13, 15, 11], [14, 16, 12], [23, 25, 24], [24, 26, 23], [25, 27, 23], [26, 28, 24]];
 
 const BASE = new URL("../vendor/mediapipe/", import.meta.url).href;
 const canvas = (w = 2, h = 2) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
@@ -140,8 +146,9 @@ export class BodyFX {
   }
 
   render(video, src, cam = "default") {
-    const T = bodyTracker(cam);
     const mode = src.bodyMode || "silueta";
+    if (POSE_MODES.has(mode)) return this.renderPose(video, src, cam, mode);
+    const T = bodyTracker(cam);
     T.sens = src.bodySens ?? 0.5;
     T.update(video, mode !== "movimiento");
     if (T.version === this.lastSrc) return this;
@@ -234,6 +241,113 @@ export class BodyFX {
     return this;
   }
 }
+
+/**
+ * Efectos con el tracking de pose (tracking.js): esqueleto, partículas que salen
+ * de manos y pies según su velocidad, fuego, humo, líneas entre personas y
+ * geometría. Canales: R = relleno con la animación, G = líneas de neón.
+ */
+BodyFX.prototype.renderPose = function (video, src, cam, mode) {
+  const TR = globalThis.__lumaTracking;
+  if (!TR) return this;
+  TR.ensure(cam);
+  const W = 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
+  for (const c of [this.out, this.trail]) if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  const now = performance.now(), dt = Math.min(0.1, (now - (this.lastPose || now)) / 1000);
+  this.lastPose = now;
+  const people = TR.people(cam).filter(p => p.lm && !p.ghost);
+  const trackMirror = !!globalThis.__lumaApp?.S.project.settings.tracking.mirror;
+  const flip = (x) => { const raw = trackMirror ? 1 - x : x; return (src.bodyMirror ? 1 - raw : raw) * W; };
+  const P = (p, i) => [flip(p.lm[i][0]), p.lm[i][1] * H, p.lm[i][3] ?? 1];
+  const out = this.out.getContext("2d");
+  out.globalCompositeOperation = "source-over";
+  out.fillStyle = "#000"; out.fillRect(0, 0, W, H);
+  const glow = 1 + (src.bodyGlow || 0) * 6;
+  // Partículas (partículas, fuego, humo): nacen en manos, pies y cabeza.
+  if (mode === "particulas" || mode === "fuego" || mode === "humo") {
+    const ps = this.parts || (this.parts = []);
+    const k = mode === "humo" ? 0.4 : 1;
+    for (const p of people) {
+      const emit = [[15, p.armSpeed], [16, p.armSpeed], [27, p.feetSpeed], [28, p.feetSpeed], [0, 0.2]];
+      for (const [j, sp] of emit) {
+        const [x, y, v] = P(p, j);
+        if (v < 0.4) continue;
+        const n = Math.min(14, Math.round((mode === "particulas" ? 1 + sp * 10 : 3) * k * (1 + (src.bodySens ?? 0.5))));
+        for (let i = 0; i < n; i++) ps.push({ x, y, vx: (Math.random() - 0.5) * (mode === "particulas" ? 220 : 60), vy: mode === "particulas" ? (Math.random() - 0.6) * 220 : -60 - Math.random() * 120, life: 1, size: mode === "humo" ? 8 + Math.random() * 14 : 2 + Math.random() * 4 });
+      }
+    }
+    if (ps.length > 3000) ps.splice(0, ps.length - 3000);
+    out.globalCompositeOperation = "lighter";
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const q = ps[i];
+      q.life -= dt * (mode === "humo" ? 0.45 : mode === "fuego" ? 1.4 : 0.9);
+      if (q.life <= 0) { ps.splice(i, 1); continue; }
+      q.x += q.vx * dt; q.y += q.vy * dt;
+      if (mode === "particulas") q.vy += 180 * dt; else q.vx += (Math.random() - 0.5) * 40 * dt;
+      const r = q.size * (mode === "humo" ? 2 - q.life : mode === "fuego" ? q.life : 1);
+      out.fillStyle = `rgba(255,0,0,${(mode === "humo" ? 0.18 : 0.8) * q.life})`;
+      out.beginPath(); out.arc(q.x, q.y, Math.max(0.5, r), 0, Math.PI * 2); out.fill();
+    }
+    if (mode === "humo") { out.globalCompositeOperation = "source-over"; out.filter = "blur(6px)"; out.drawImage(this.out, 0, 0); out.filter = "none"; }
+  }
+  // Geometría: triángulos entre articulaciones rellenos con la animación.
+  if (mode === "geometria") {
+    out.globalCompositeOperation = "lighter";
+    for (const p of people) for (const [a, b, c] of TRIS) {
+      const A = P(p, a), B = P(p, b), C = P(p, c);
+      if (A[2] < 0.4 || B[2] < 0.4 || C[2] < 0.4) continue;
+      out.fillStyle = "rgba(255,0,0,0.55)";
+      out.beginPath(); out.moveTo(A[0], A[1]); out.lineTo(B[0], B[1]); out.lineTo(C[0], C[1]); out.closePath(); out.fill();
+      out.strokeStyle = "rgba(0,255,0,0.9)"; out.lineWidth = 1.5; out.stroke();
+    }
+  }
+  // Esqueleto (y como guía en los demás modos con poco brillo).
+  if (mode === "esqueleto" || mode === "particulas" || mode === "geometria") {
+    out.globalCompositeOperation = "lighter";
+    out.strokeStyle = mode === "esqueleto" ? "rgba(0,255,0,1)" : "rgba(0,255,0,0.35)";
+    out.lineWidth = 3 * glow; out.lineCap = "round";
+    for (const p of people) {
+      for (const [a, b] of BONES) {
+        const A = P(p, a), B = P(p, b);
+        if (A[2] < 0.4 || B[2] < 0.4) continue;
+        out.beginPath(); out.moveTo(A[0], A[1]); out.lineTo(B[0], B[1]); out.stroke();
+      }
+      if (mode === "esqueleto") {
+        out.fillStyle = "rgba(255,0,0,1)";
+        for (const j of [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) { const A = P(p, j); if (A[2] > 0.4) { out.beginPath(); out.arc(A[0], A[1], 5 * glow, 0, Math.PI * 2); out.fill(); } }
+      }
+    }
+  }
+  // Líneas: cada mano unida a las manos y cabezas de todas las personas.
+  if (mode === "lineas") {
+    out.globalCompositeOperation = "lighter";
+    out.lineWidth = 2 * glow;
+    const pts = [];
+    for (const p of people) for (const j of [0, 15, 16, 27, 28]) { const A = P(p, j); if (A[2] > 0.4) pts.push(A); }
+    for (let i = 0; i < pts.length; i++) for (let k = i + 1; k < pts.length; k++) {
+      const d = Math.hypot(pts[i][0] - pts[k][0], pts[i][1] - pts[k][1]);
+      out.strokeStyle = `rgba(0,255,0,${Math.max(0.15, 1 - d / (W * 0.8))})`;
+      out.beginPath(); out.moveTo(pts[i][0], pts[i][1]); out.lineTo(pts[k][0], pts[k][1]); out.stroke();
+    }
+  }
+  // Estela opcional (canal B) para cualquier modo de pose.
+  const trailAmt = src.bodyTrail || 0;
+  const tr = this.trail.getContext("2d");
+  if (trailAmt > 0) {
+    tr.globalCompositeOperation = "destination-out";
+    tr.fillStyle = `rgba(0,0,0,${0.03 + (1 - trailAmt) * 0.25})`; tr.fillRect(0, 0, W, H);
+    tr.globalCompositeOperation = "lighter";
+    tr.filter = "brightness(0)"; tr.globalAlpha = 0.5;
+    // la estela es la parte roja/verde convertida en azul
+    tr.fillStyle = "#0000ff";
+    for (const p of people) for (const j of [15, 16, 27, 28, 0]) { const A = P(p, j); if (A[2] > 0.4) { tr.beginPath(); tr.arc(A[0], A[1], 10, 0, Math.PI * 2); tr.fill(); } }
+    tr.filter = "none"; tr.globalAlpha = 1;
+    out.globalCompositeOperation = "lighter"; out.drawImage(this.trail, 0, 0);
+  }
+  out.globalCompositeOperation = "source-over";
+  this.version++;
+  return this;
+};
 
 /** Caché de efectos por superficie (clave = escena:superficie). */
 export class BodyCache {

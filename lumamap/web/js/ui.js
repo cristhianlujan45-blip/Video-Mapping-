@@ -37,7 +37,12 @@ export function btn({ label = "", ic, onClick, kind = "", title, disabled, activ
 }
 
 /** Deslizador grande con etiqueta y valor. Doble toque en la etiqueta = valor por defecto. */
-export function slider({ label, min = 0, max = 1, step = 0.01, value, def, fmt, onInput, onCommit }) {
+/**
+ * param: id del motor de parámetros (params.js). Con él, clic derecho / mantener
+ * pulsado ofrece «Aprender MIDI/OSC/DMX/tecla» y el control se actualiza solo
+ * cuando lo mueve un controlador externo.
+ */
+export function slider({ label, min = 0, max = 1, step = 0.01, value, def, fmt, onInput, onCommit, param }) {
   const out = h("output", {}, fmt ? fmt(value) : value);
   const input = h("input", { type: "range", min, max, step, value });
   const set = (v) => { input.value = v; out.textContent = fmt ? fmt(+v) : v; onInput(+v); onCommit?.(); };
@@ -49,7 +54,9 @@ export function slider({ label, min = 0, max = 1, step = 0.01, value, def, fmt, 
     lab.addEventListener("click", () => { const now = Date.now(); if (now - last < 400) set(def); last = now; });
     lab.title = "Doble toque: restablecer";
   }
-  return h("label", { class: "slider" }, h("div", { class: "sl-head" }, lab, out), input);
+  const root = h("label", { class: "slider", dataset: param ? { param } : undefined }, h("div", { class: "sl-head" }, lab, out), input);
+  if (param) root._sync = (v) => { input.value = v; out.textContent = fmt ? fmt(+v) : v; };
+  return root;
 }
 
 export function segmented({ options, value, onChange, cols, small }) {
@@ -66,11 +73,13 @@ export function segmented({ options, value, onChange, cols, small }) {
   return wrap;
 }
 
-export function toggle({ label, value, onChange, hint }) {
+export function toggle({ label, value, onChange, hint, param }) {
   const input = h("input", { type: "checkbox" });
   input.checked = !!value;
   input.addEventListener("change", () => onChange(input.checked));
-  return h("label", { class: "toggle" }, h("span", { class: "lab" }, label, hint ? h("small", {}, hint) : null), input, h("i"));
+  const root = h("label", { class: "toggle", dataset: param ? { param } : undefined }, h("span", { class: "lab" }, label, hint ? h("small", {}, hint) : null), input, h("i"));
+  if (param) root._sync = (v) => { input.checked = !!v; };
+  return root;
 }
 
 export function swatches({ value, onChange, palette = PALETTE, label }) {
@@ -111,6 +120,8 @@ export function hint(text) { return h("p", { class: "hint" }, text); }
 
 let toastTimer = 0;
 export function toast(msg, kind = "") {
+  // Modo actuación: sin avisos en pantalla salvo errores.
+  if (document.body.classList.contains("perfmode") && kind !== "err") return;
   const el = document.getElementById("toast");
   el.textContent = msg;
   el.className = "show " + kind;

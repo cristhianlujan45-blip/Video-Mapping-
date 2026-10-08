@@ -52,7 +52,7 @@ export function install(remote, onProgress) {
   const D = window.LumaDesktop, N = window.LumaNative;
   if (D?.installUpdate) {
     D.onUpdateProgress?.((p) => onProgress(p));
-    return D.installUpdate(remote.windows.url);
+    return D.installUpdate(remote.windows.url, { version: remote.windows.version || remote.version, sha256: remote.windows.sha256 || "", size: remote.windows.size || 0 });
   }
   if (N?.installUpdate) {
     window.__lumaUpdateProgress = (p) => onProgress(p);

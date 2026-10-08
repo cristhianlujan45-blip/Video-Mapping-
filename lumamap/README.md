@@ -11,12 +11,36 @@ cualquier navegador moderno.
    estrella…), trázala a mano o usa un conjunto listo (cubo 3D, fachada, escenario).
 2. **Ajusta los puntos amarillos** a las esquinas reales de la pared. Activa
    *Proyectar → Guías en el proyector* para ver los contornos en la pared mientras
-   los mueves. Una lupa muestra el detalle bajo el dedo y la cruceta mueve el punto
-   píxel a píxel.
+   los mueves. Al mover un punto, una lupa muestra el detalle bajo el dedo (al
+   dibujar no aparece: el trazo es directo) y la cruceta mueve el punto píxel a píxel.
 3. **Contenido** → video, imagen, GIF animado, animación generada, color, texto,
    cámara en vivo o dibujo. Luego **Efectos** y **Audio** para darle vida.
 4. **Proyectar** → pantalla externa (HDMI/USB-C), ventana de salida o pantalla
    completa en el mismo dispositivo (para modo espejo o Chromecast).
+
+## Modo simple y modo profesional
+
+Por defecto LumaMap se usa como siempre (modo simple). En **☰ → Modo
+profesional** aparecen pestañas nuevas sin cambiar nada de lo anterior:
+
+| Pestaña | Para qué |
+|---|---|
+| **Show** | Cues (escenas) con 8 transiciones (corte, fundido, disolver, cortinillas, iris, destello, glitch), GO/BACK/STOP, timecode (interno, MIDI Time Code, LTC por audio, OSC) que dispara las cues, automatización (grabar movimientos de MIDI/OSC/DMX/audio y repetirlos), **modo actuación** y **EMERGENCIA**. |
+| **3D** | Espacio 3D real: cubos, planos, esferas, cilindros, conos, pirámides, prismas y modelos importados (OBJ, FBX, GLTF/GLB, STL, PLY); proyectores virtuales con FOV, resolución, lens shift y frustum; gizmos, rejilla, snap (rejilla, vértice, arista, cara), unidades, navegación tipo Blender y 8 modos de vista. Cada cara tiene su propio contenido y cada proyector sale por P1-P4. |
+| **Control** | MIDI profesional: detección y conexión en caliente, MIDI LEARN (clic derecho en cualquier control → *Aprender*), 14 bits, encoders relativos, soft takeover, feedback (LED, motores), bancos, modificadores SHIFT/ALT/CTRL, macros, MIDI Clock/MTC, monitor y diagnóstico. También teclas, OSC y audio. |
+| **Luces** | DMX por Art-Net y sACN: pixel mapping (tira, matriz, círculo, arco; RGB/RGBW/GRB…; AUTO SPAN y ALIGN), video → luces muestreado en la GPU, fixtures, universos virtuales, búsqueda de nodos, interfaz de red, retardo/sincronía, snapshots, prueba, monitor, diagnóstico y entrada DMX (DMX LEARN). |
+| **Tracking** | Cuerpo (33 puntos) y manos de hasta 4 personas con IA en la GPU (MediaPipe, en un hilo aparte) desde cualquier cámara; zonas interactivas dibujadas sobre la imagen; señales (mano levantada, cercanía, velocidad, brazos abiertos…) que mueven parámetros, y reglas «cuando … entonces …». Kinect, Azure Kinect, RealSense y cámaras IP/NDI: **EN DESARROLLO** (se muestran desactivados). |
+| **Asistente** | Órdenes en español que se ejecutan de verdad: «cuando levante la mano cambia el color a rojo», «ve a la escena 2», «añade un cubo 3D», «crea una macro que…». En la app de escritorio, con tu clave de la API de Claude (guardada cifrada en el equipo), entiende órdenes libres; si Claude declina una petición, la API la reintenta sola con un modelo alternativo. Sin clave, en el navegador o sin internet, un intérprete local entiende órdenes simples y dice claramente cuando no entiende. |
+| **Rendimiento** | FPS, tiempo de fotograma, fotogramas perdidos, CPU, RAM, GPU y VRAM reales (Windows), videos decodificados y perdidos; calidad de la vista previa independiente de la salida. |
+
+Todo lo que se puede mover (brillo, opacidad, efectos, crossfader, luces, 3D…) pasa
+por un **motor de parámetros** único: MIDI, OSC, DMX, teclado, audio, tracking,
+timeline y mando remoto pueden controlar el mismo parámetro a la vez (sustituir,
+sumar, multiplicar, máximo, mínimo).
+
+**Lo que no se simula:** si algo no está conectado, se dice. El panel Luces muestra
+«✗ Nodo» si ningún nodo responde; el MIDI solo lista dispositivos reales; el uso de
+GPU muestra «no disponible» si Windows no lo expone.
 
 ## Funciones
 
@@ -186,6 +210,22 @@ permitir «Instalar apps desconocidas» para LumaMap).
   Extender), con selector de pantalla en *Proyección → Pantalla de salida* y
   recolocación automática al reconectar.
 - Micrófono, cámara y MIDI sin pedir permisos cada vez.
+- **Motor compartido:** las ventanas de salida (P1-P4) usan los videos y cámaras
+  ya decodificados por el editor: cada video se decodifica una sola vez aunque
+  salga por cuatro proyectores, y todas las salidas van con el mismo reloj.
+- **Servicios en procesos aparte:** la red DMX (Art-Net/sACN) y el mando remoto/OSC
+  corren en su propio proceso; si se caen, se reinician solos sin parar el show.
+  Si el editor se minimiza, el show sigue (reloj, salidas, luces, MIDI).
+- **Mando remoto:** ☰ → *Mando remoto y OSC* muestra la dirección para abrir en el
+  teléfono y el PIN. OSC en el puerto UDP 9129 (`/lumamap/param/<parámetro>`,
+  `/lumamap/timecode`, `/lumamap/go` y cualquier dirección con *Aprender*).
+- **Actualizar con seguridad:** al pulsar *Actualizar* se guarda el proyecto, se
+  liberan cámaras/MIDI/DMX, se descarga el instalador y se comprueba su SHA-256;
+  un actualizador independiente espera a que LumaMap se cierre, hace copia de la
+  versión instalada, instala, verifica y, si algo falla, **vuelve sola a la versión
+  anterior**. ☰ → *Volver a la versión anterior* y *Reparar instalación*.
+- **Desinstalar** conserva proyectos, medios y ajustes (pregunta si quieres
+  borrarlos). Registros en ☰ → *Abrir registros*.
 
 ```bash
 cd lumamap/desktop
@@ -226,8 +266,11 @@ npm start            # http://localhost:8080 (y la IP de tu red local)
 
 ```bash
 cd lumamap
-npm test                 # geometría, modelo, historial, dibujo, servidor, WebSocket y OSC
+npm test                 # geometría, modelo, historial, dibujo, motor de parámetros, MIDI,
+                         # Art-Net/sACN, pixel mapping, timecode LTC, show, servidor y OSC
 npm run test:browser     # extremo a extremo en Chromium (necesita Playwright)
+xvfb-run -a node tests/desktop.e2e.mjs   # app de escritorio real con red de verdad
+                                         # (Art-Net, sACN, nodos, entrada DMX, OSC, mando)
 ```
 
 ## Estructura
@@ -248,9 +291,20 @@ lumamap/
 │       ├── drawing.js   pinceles y animaciones del dibujo
 │       ├── sources.js   videos, GIF, cámara, texto
 │       ├── audio.js     análisis del micrófono y tempo
-│       └── link.js      canal editor ↔ salida (BroadcastChannel / Android)
+│       ├── link.js      canal editor ↔ salida (BroadcastChannel / Android)
+│       ├── params.js    motor de parámetros (MIDI, OSC, DMX, audio, tracking…)
+│       ├── midi.js      controladores MIDI, clock y time code
+│       ├── dmx.js       pixel mapping, fixtures, universos (muestreo en GPU)
+│       ├── dmxproto.js  Art-Net, sACN y parcheo de píxeles
+│       ├── show.js      timecode, cues, automatización
+│       ├── ltc-core.js  decodificador LTC (AudioWorklet)
+│       ├── three3d.js   espacio 3D y proyectores virtuales (three.js)
+│       └── panels-*.js  paneles del modo profesional
 ├── android/             app Android (WebView + Presentation)
 ├── desktop/             app de escritorio (Electron: Windows, macOS, Linux)
+│   ├── dmx-service.mjs  red DMX (proceso aparte)
+│   ├── remote-service.mjs mando remoto y OSC (proceso aparte)
+│   └── updater.ps1      actualizador independiente con copia y rollback
 ├── server/              servidor opcional: estáticos, mando remoto, OSC
 └── tests/
 ```

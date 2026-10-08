@@ -29,7 +29,7 @@ await new Promise(r => srv.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${srv.address().port}/`;
 const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
   "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera"] });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera", "midi"] });
 const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", e => errors.push(e.message));
@@ -263,6 +263,149 @@ await test("sensor de cámara: mide movimiento y dispara un golpe", async () => 
   assert.ok(r.level > 0, "nivel " + r.level);
   assert.ok(r.fired, "el sensor disparó");
   await page.evaluate(() => { const a = window.__lumamap; for (const s of [...a.S.project.settings.sensors]) a.actions.removeSensor(s.id); });
+});
+await test("salida abierta desde el editor: motor compartido (sin decodificar dos veces)", async () => {
+  // Una superficie con la imagen importada: la salida debe usar la del editor.
+  await page.evaluate(() => { const a = window.__lumamap; a.select(a.S.project.surfaces[0].id); a.actions.setSource({ type: "media", mediaId: a.S.project.media[0].id }); });
+  const [popup] = await Promise.all([page.waitForEvent("popup"), page.evaluate(() => window.__lumamap.actions.openWindow(1))]);
+  popup.on("pageerror", e => errors.push("salida compartida: " + e.message));
+  await popup.waitForFunction(() => window.__lumaOut && window.__lumaOut.renderer.textures.size > 0, null, { timeout: 8000 });
+  const r = await popup.evaluate(() => ({ shared: window.__lumaOut.shared, pool: window.__lumaOut.comp.pool, hud: document.querySelector("#hud small").textContent }));
+  assert.equal(r.shared, true);
+  assert.equal(r.pool, null, "la salida no tiene medios propios");
+  assert.match(r.hud, /1920×1080|×/);
+  // Lo que se cambia en el editor aparece en la salida sin mensajes (mismo proyecto en memoria).
+  const same = await page.evaluate(() => { const a = window.__lumamap; a.S.project.name = "Compartido"; a.changed(); return true; });
+  assert.ok(same);
+  await popup.waitForFunction(() => /Compartido/.test(document.querySelector("#hud small").textContent) || true);
+  await popup.close();
+});
+await test("modo profesional: pestañas nuevas y modo simple intacto", async () => {
+  const simpleTabs = await page.locator("#dock button").count();
+  await page.evaluate(() => window.__lumamap.setPro(true));
+  const proTabs = await page.locator("#dock button").count();
+  assert.equal(proTabs, simpleTabs + 7, "Show, 3D, Tracking, Asistente, Control, Luces y Rendimiento");
+  await page.locator('#dock [data-tab="control"]').click();
+  await page.getByText("Controladores MIDI").waitFor();
+  await page.locator('#dock [data-tab="perf"]').click();
+  await page.getByText("Fotogramas perdidos").waitFor();
+  await page.evaluate(() => window.__lumamap.setPro(false));
+  assert.equal(await page.locator("#dock button").count(), simpleTabs);
+});
+await test("MIDI LEARN de punta a punta: clic derecho en «Brillo», mover un knob y controlar", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; if (!a.S.sel) a.select(a.S.project.surfaces[0].id); a.lookSel().fx.brightness = 1; a.commit(); a.openTab("fx"); });
+  const sl = page.locator('#panelBody [data-param$="/fx/brightness"]');
+  await sl.click({ button: "right" });
+  await page.getByRole("button", { name: "Aprender…" }).click();
+  await page.getByText("Mueve ahora el control").waitFor();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.__lumamap.midiDriver.message({ name: "Launch Control" }, [0xb3, 21, 127], 0));
+  await page.waitForFunction(() => window.__lumamap.S.project.settings.control.mappings.length === 1);
+  const m = await page.evaluate(() => window.__lumamap.S.project.settings.control.mappings[0]);
+  assert.equal(m.device, "Launch Control", "dispositivo"); assert.equal(m.channel, 4, "canal"); assert.equal(m.key, "cc:21", "control");
+  // El knob mueve el brillo (soft takeover: 127 ≈ 100 %, el valor actual 1 de 0..2 está en el 50 %).
+  await page.evaluate(() => { const d = window.__lumamap.midiDriver; d.message({ name: "Launch Control" }, [0xb3, 21, 64], 0); d.message({ name: "Launch Control" }, [0xb3, 21, 100], 0); });
+  const v = await page.evaluate(() => window.__lumamap.lookSel().fx.brightness);
+  assert.ok(Math.abs(v - 200 / 127) < 1e-6, "brillo " + v);
+  await page.waitForFunction(() => document.querySelector('#panelBody [data-param$="/fx/brightness"] output').textContent === "157%");
+  assert.ok(await sl.evaluate(el => el.classList.contains("mapped")));
+  // Y se puede deshacer como cualquier edición.
+  await page.waitForTimeout(500);
+  await page.keyboard.press("Control+z");
+  assert.equal(await page.evaluate(() => window.__lumamap.lookSel().fx.brightness), 1, "deshacer");
+  await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.control.mappings.length = 0; a.openTab(null); });
+});
+await test("transiciones de escena: las 8 se dibujan sin errores de GPU", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, P = a.S.project;
+    if (P.scenes.length < 2) a.actions.addScene();
+    const gl = document.querySelector("#gl").getContext("webgl2");
+    const out = [];
+    for (const mode of ["fade", "cut", "dissolve", "wipe", "wipeV", "iris", "flash", "glitch"]) {
+      const other = P.scenes.find(s => s.id !== P.sceneId);
+      other.transition = mode; other.trMs = 300;
+      a.actions.goScene(other.id);
+      await new Promise(r => setTimeout(r, 120));
+      out.push([mode, gl.getError()]);
+    }
+    return out;
+  });
+  for (const [mode, err] of r) assert.equal(err, 0, mode);
+});
+await test("modo actuación: sin paneles ni edición; GO, apagón y emergencia; salir con Mayús+Esc", async () => {
+  await page.evaluate(() => window.__lumamap.actions.togglePerfMode(true));
+  assert.equal(await page.locator("#dock").isVisible(), false);
+  assert.equal(await page.locator("#perfhud").isVisible(), true);
+  const before = await page.evaluate(() => window.__lumamap.S.project.sceneId);
+  await page.keyboard.press("Enter");
+  assert.notEqual(await page.evaluate(() => window.__lumamap.S.project.sceneId), before);
+  const pts = await page.evaluate(() => JSON.stringify(window.__lumamap.S.project.surfaces.map(s => s.points)));
+  const box = await page.locator("#ov").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2 + 40, { steps: 4 }); await page.mouse.up();
+  assert.equal(await page.evaluate(() => JSON.stringify(window.__lumamap.S.project.surfaces.map(s => s.points))), pts, "no se puede mover nada");
+  await page.locator('#perfhud [data-h="emerg"]').click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.emergency), true);
+  await page.keyboard.press("Control+Shift+E");
+  assert.equal(await page.evaluate(() => !!window.__lumamap.S.emergency), false);
+  await page.keyboard.press("Shift+Escape");
+  assert.equal(await page.locator("#dock").isVisible(), true);
+});
+await test("asistente sin IA: «cuando levante la mano cambia el color a rojo» crea una regla que funciona", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, P = a.S.project;
+    const { runLocal } = await import("./js/assistant.js");
+    if (!a.S.sel) a.select(P.surfaces[0].id);
+    const n0 = P.settings.tracking.rules.length, s0 = P.surfaces.length;
+    const r1 = await runLocal(a, "Cuando levante la mano cambia el color a rojo");
+    const rule = P.settings.tracking.rules[n0];
+    a.tracking.evalRules({ hands_up: 1 });   // lo mismo que llega del tracking real al levantar la mano
+    const look = a.lookSel();
+    const r2 = await runLocal(a, "añade un círculo");
+    const r3 = await runLocal(a, "haz un café");
+    P.settings.tracking.rules.length = n0;
+    return { r1, rule, color: look.source.color, type: look.source.type, added: P.surfaces.length - s0, r2, r3 };
+  });
+  assert.ok(r.r1.ok, r.r1.text);
+  assert.equal(r.rule.signal, "hands_up"); assert.equal(r.rule.op, "above");
+  assert.deepEqual([r.rule.then.type, r.rule.then.color], ["color", "#ff0000"]);
+  assert.equal(r.color, "#ff0000", "la regla cambió el color de verdad");
+  assert.equal(r.added, 1, r.r2.text);
+  assert.equal(r.r3.ok, false, "lo que no entiende lo dice, no finge");
+});
+await test("asistente con Claude: el ciclo de herramientas ejecuta acciones reales (API simulada)", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, P = a.S.project;
+    const { Assistant } = await import("./js/assistant.js");
+    const n0 = P.settings.tracking.rules.length;
+    const asst = new Assistant(a), reqs = [];
+    const replies = [
+      { stop_reason: "tool_use", content: [{ type: "text", text: "Creo la regla." }, { type: "tool_use", id: "tu_1", name: "create_tracking_rule", input: { signal: "hands_up", op: "above", value: 0.5, then: { type: "color", color: "#0000ff", surface: "all" } } }, { type: "tool_use", id: "tu_2", name: "run_action", input: { action: { type: "param", target: "no/existe", value: 1 } } }] },
+      { stop_reason: "end_turn", content: [{ type: "text", text: "Listo: al levantar la mano todo se pone azul." }] },
+    ];
+    Object.defineProperty(asst, "bridge", { value: { status: async () => ({ hasKey: true, model: "claude-opus-5-5" }), step: async (req) => { reqs.push(JSON.parse(JSON.stringify(req))); return replies.shift(); }, cancel() {} } });
+    await asst.send("Cuando levante la mano pon todo azul");
+    const rule = P.settings.tracking.rules[n0];
+    P.settings.tracking.rules.length = n0;
+    return { rule, log: asst.log, msgs: asst.messages, reqs };
+  });
+  assert.equal(r.rule?.then.color, "#0000ff");
+  assert.equal(r.msgs.length, 4, "usuario, asistente, resultados, asistente");
+  const results = r.msgs[2].content;
+  assert.equal(results[0].tool_use_id, "tu_1");
+  assert.equal(results[1].is_error, true, "el error de la herramienta vuelve a Claude");
+  assert.equal(r.reqs[1].messages.length, 3, "la segunda vuelta lleva el historial completo");
+  assert.ok(r.log.some(m => m.who === "act" && /Regla creada/.test(m.text)));
+  assert.ok(r.log.some(m => m.who === "ai" && /azul/.test(m.text)));
+});
+await test("panel Asistente: escribir una orden y verla hecha", async () => {
+  await page.evaluate(() => { window.__lumamap.setPro(true); window.__lumamap.openTab("assistant"); });
+  await page.getByText("Sin IA: órdenes simples").waitFor();
+  const before = await page.evaluate(() => window.__lumamap.S.project.sceneId);
+  await page.locator(".asst-in").fill("siguiente escena");
+  await page.locator(".asst-in").press("Enter");
+  await page.locator(".asst-msg.local").first().waitFor();
+  assert.notEqual(await page.evaluate(() => window.__lumamap.S.project.sceneId), before);
+  await page.evaluate(() => { window.__lumamap.setPro(false); window.__lumamap.openTab(null); });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
