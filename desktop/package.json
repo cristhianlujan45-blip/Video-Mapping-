@@ -1,0 +1,44 @@
+{
+  "name": "lujan-mapping-studio",
+  "productName": "LUJAN MAPPING Studio",
+  "version": "0.1.0",
+  "description": "Projection mapping, VJ, iluminación DMX/Art-Net/sACN, tracking, 3D y show control para Windows.",
+  "author": "LUJAN MAPPING",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build:main": "node scripts/build-main.mjs",
+    "build:renderer": "vite build",
+    "build": "npm run typecheck && npm run build:main && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "electron .",
+    "e2e": "node scripts/e2e.mjs",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.6.2",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@mediapipe/tasks-vision": "0.10.22-rc.20250304",
+    "@types/node": "22.18.0",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "@types/three": "0.180.0",
+    "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "5.0.2",
+    "electron": "41.0.0",
+    "electron-builder": "26.0.12",
+    "esbuild": "0.25.9",
+    "mp4-muxer": "5.2.2",
+    "playwright-core": "1.55.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "three": "0.180.0",
+    "typescript": "5.9.2",
+    "vite": "7.1.5",
+    "vitest": "3.2.4"
+  }
+}
