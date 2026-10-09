@@ -477,3 +477,4 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .nextstep b{font-size:16px;} .nextstep p{margin:.4em 0 0;color:var(--dim);line-height:1.4;}
 .aiset .steps{margin:4px 0 4px 18px;font-size:13px;line-height:1.5;}
 .aiset code{background:var(--bg4);padding:2px 6px;border-radius:5px;}
+.asst .list .item{gap:8px;} .asst .list .item > span{flex:1;min-width:0;} .asst .list .item .btn{flex:none;white-space:nowrap;}
