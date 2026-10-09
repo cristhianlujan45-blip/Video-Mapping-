@@ -108,7 +108,7 @@ export function stepper({ label, value, min, max, onChange }) {
  * Miniaturas bajo demanda: solo las que se ven y poco a poco (≈10 ms por tanda),
  * así un catálogo de cien animaciones abre al instante también en un móvil lento.
  */
-const lazyQ = [];
+const lazyQ = [], lazyLater = [];
 let lazyBusy = false, lazyIO = null;
 function lazyPump() {
   lazyBusy = true;
@@ -116,8 +116,14 @@ function lazyPump() {
   while (lazyQ.length && performance.now() - t0 < 10) {
     const [img, fn] = lazyQ.shift();
     if (!img.isConnected) continue;
-    try { const src = fn(); if (src) img.src = src; } catch {}
+    try {
+      const src = fn();
+      // «__retry__»: aún no se puede (p. ej. el sombreador de miniaturas compilándose): luego.
+      if (src === "__retry__") { lazyLater.push([img, fn]); continue; }
+      if (src) img.src = src;
+    } catch {}
   }
+  if (lazyLater.length && !lazyQ.length) { lazyQ.push(...lazyLater.splice(0)); setTimeout(lazyPump, 150); return; }
   if (lazyQ.length) setTimeout(lazyPump, 16); else lazyBusy = false;
 }
 export function lazyThumb(img, fn, target = img) {

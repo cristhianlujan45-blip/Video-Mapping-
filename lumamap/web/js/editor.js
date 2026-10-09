@@ -25,6 +25,7 @@ import { MidiDriver } from "./midi.js";
 import { GamepadHub, basicPadMap, padControlName } from "./gamepad.js";
 import { openGifSearch } from "./panels-gif.js";
 import { openHologram } from "./panels-hologram.js";
+import { warmThumbs } from "./thumbs.js";
 import { ParamEngine, describe, applyModList } from "./params.js";
 import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
@@ -2935,6 +2936,8 @@ async function init() {
   app.timers.onChange = () => { if (S.tab === "live") renderPanel(); };
   if (S.project.settings.timers.autoStart && S.project.settings.timers.steps.length) app.timers.start();
   app.tracking = new TrackingManager(app);
+  // Las miniaturas del catálogo empiezan a prepararse en segundo plano en un momento de calma.
+  setTimeout(() => (window.requestIdleCallback || setTimeout)(() => warmThumbs(), { timeout: 3000 }), 2500);
   window.__lumaApp = app;
   app.commands = buildCommands(app);
   KEYS = keymap(app.commands);

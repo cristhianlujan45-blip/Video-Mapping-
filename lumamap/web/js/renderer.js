@@ -1257,11 +1257,11 @@ export const STYLES = [
 export const STYLE_INDEX = Object.fromEntries(STYLES.map((s, i) => [s[0], i]));
 const BANIM = { none: 0, chase: 1, pulse: 2, rainbow: 3 };
 
-function compile(gl, type, src) {
+function compile(gl, type, src, check = true) {
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error("Shader: " + gl.getShaderInfoLog(sh));
+  if (check && !gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error("Shader: " + gl.getShaderInfoLog(sh));
   return sh;
 }
 
@@ -1270,17 +1270,38 @@ export function webgl2Supported() {
 }
 
 export class Renderer {
-  constructor(canvas, { preserve = false } = {}) {
+  /**
+   * background: true → el sombreador (muy grande) se compila en segundo plano si la tarjeta
+   * lo permite (KHR_parallel_shader_compile): la app no se congela; `ready` dice cuándo está.
+   */
+  constructor(canvas, { preserve = false, background = false } = {}) {
     this.canvas = canvas;
     const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: true, preserveDrawingBuffer: preserve });
     if (!gl) throw new Error("WebGL2 no disponible en este dispositivo");
     this.gl = gl;
+    this.parallel = background ? gl.getExtension("KHR_parallel_shader_compile") : null;
     const prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FRAG));
+    this.shaders = [compile(gl, gl.VERTEX_SHADER, VERT, !this.parallel), compile(gl, gl.FRAGMENT_SHADER, FRAG, !this.parallel)];
+    for (const sh of this.shaders) gl.attachShader(prog, sh);
     gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error("Link: " + gl.getProgramInfoLog(prog));
     this.prog = prog;
+    this.ready = false;
+    if (!this.parallel) this.finish();
+  }
+  /** ¿Terminó la compilación en segundo plano? (y entonces se prepara). Nunca bloquea. */
+  poll() {
+    if (this.ready) return true;
+    if (!this.gl.getProgramParameter(this.prog, this.parallel.COMPLETION_STATUS_KHR)) return false;
+    this.finish();
+    return true;
+  }
+  finish() {
+    const gl = this.gl, prog = this.prog;
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      const why = this.shaders.map(sh => gl.getShaderInfoLog(sh)).filter(Boolean).join(" ") || gl.getProgramInfoLog(prog);
+      throw new Error("Link: " + why);
+    }
+    this.ready = true;
     gl.useProgram(prog);
     this.loc = {};
     for (const n of UNIFORMS) this.loc[n] = gl.getUniformLocation(prog, n);
