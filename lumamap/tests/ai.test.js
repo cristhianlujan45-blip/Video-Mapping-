@@ -238,4 +238,29 @@ await test("Privacidad: IA remota desactivada por defecto; JSON robusto; guía l
   assert.equal(searchKnowledge("conectar artnet")[0].id, "dmx-conectar");
 });
 
+await test("show con canción: la IA escucha el tempo y las partes de la canción y monta el plan", async () => {
+  const { analyzeSong } = await import("../web/js/ai/songanalysis.js");
+  const { planFromSong } = await import("../web/js/ai/showplan.js");
+  // Canción sintética a 124 BPM: intro, subida, drop, pausa, clímax y final.
+  const sr = 11025, beat = 60 / 124, bar = beat * 4;
+  const parts = [["INTRO", 16, 0.15], ["BUILD", 16, 0.45], ["DROP", 16, 1], ["BREAK", 8, 0.12], ["CLIMAX", 16, 1.15], ["OUTRO", 8, 0.1]];
+  const x = new Float32Array(Math.ceil(parts.reduce((a, p) => a + p[1], 0) * bar * sr));
+  let t0 = 0, seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (const [, bars, amp] of parts) {
+    const t1 = t0 + bars * bar;
+    for (let i = Math.floor(t0 * sr); i < Math.min(x.length, t1 * sr); i++) { const ph = (i / sr - t0) % beat; x[i] = Math.sin(2 * Math.PI * 55 * ph) * Math.exp(-ph * 18) * (0.3 + amp * 0.7) + (rnd() - 0.5) * 0.25 * amp; }
+    t0 = t1;
+  }
+  const song = analyzeSong(x, sr);
+  assert.ok(Math.abs(song.bpm - 124) < 2, "BPM " + song.bpm);
+  assert.deepEqual(song.sections.map(s => s.name), ["INTRO", "BUILD", "DROP", "BREAK", "CLIMAX", "OUTRO"]);
+  assert.ok(Math.abs(song.sections[2].start - 32 * bar) < bar * 1.5, "el drop empieza en el compás 33");
+  const plan = planFromSong(song, "prueba");
+  assert.equal(plan.sections.length, 6);
+  assert.ok(plan.sections.every(s => M.ANIM_LIBRARY.some(a => a.name === s.animation)), "animaciones reales de la biblioteca");
+  assert.ok(plan.sections.find(s => s.name === "DROP").audio, "el drop reacciona al ritmo");
+  assert.equal(parseCommand(makeApp(), "hazme un show automático con mi canción").intent, "songshow");
+});
+
 report();
+

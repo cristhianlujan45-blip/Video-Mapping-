@@ -71,7 +71,9 @@ class CameraTracker {
     const w = QUALITIES[this.cfg.quality] || 384, h = Math.round(w * v.videoHeight / v.videoWidth);
     try {
       this.inflight = true;
-      const bmp = await createImageBitmap(v, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" });
+      // En una sala oscura (proyección) la imagen se aclara antes de dársela a la IA.
+      const src = lightCorrected(this, v, w, h);
+      const bmp = await createImageBitmap(src, src === v ? { resizeWidth: w, resizeHeight: h, resizeQuality: "low" } : undefined);
       this.worker.postMessage({ t: "frame", bitmap: bmp, ts: performance.now() }, [bmp]);
     } catch { this.inflight = false; }
   }
@@ -149,6 +151,33 @@ class CameraTracker {
     this.mgr.publish(this);
   }
   stop() { clearInterval(this.timer); try { this.worker?.terminate(); } catch {} }
+}
+
+/**
+ * Corrección de luz para la IA: mide el brillo medio cada ~½ s y, si la imagen es
+ * oscura, la aclara y sube el contraste. Si no hace falta, devuelve el video tal cual.
+ */
+function lightCorrected(T, v, w, h) {
+  const now = performance.now();
+  if (!T.lightAt || now - T.lightAt > 500) {
+    T.lightAt = now;
+    try {
+      T.probe ??= Object.assign(document.createElement("canvas"), { width: 16, height: 9 });
+      const pc = T.probe.getContext("2d", { willReadFrequently: true });
+      pc.drawImage(v, 0, 0, 16, 9);
+      const d = pc.getImageData(0, 0, 16, 9).data;
+      let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
+      const gain = Math.min(2.6, Math.max(1, 0.42 / Math.max(0.05, sum / (d.length / 4) / 255)));
+      T.light = gain > 1.08 ? `brightness(${gain.toFixed(2)}) contrast(${(1 + (gain - 1) * 0.25).toFixed(2)})` : "";
+    } catch { T.light = ""; }
+  }
+  if (!T.light) return v;
+  T.lightCanvas ??= document.createElement("canvas");
+  const c = T.lightCanvas;
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  const ctx = c.getContext("2d");
+  ctx.filter = T.light; ctx.drawImage(v, 0, 0, w, h); ctx.filter = "none";
+  return c;
 }
 
 export class TrackingManager {

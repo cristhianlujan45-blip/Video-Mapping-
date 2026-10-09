@@ -4,6 +4,7 @@
 // diagnóstico, lección, auto map). Nada se ejecuta aquí: solo se propone.
 import * as M from "../model.js";
 import { LIGHT_FX } from "../lightfx.js";
+import { findExperience } from "../experiences.js";
 
 const COLORS = { rojo: "#ff0000", verde: "#00ff00", azul: "#0000ff", amarillo: "#ffff00", blanco: "#ffffff", negro: "#000000",
   morado: "#8000ff", violeta: "#8000ff", naranja: "#ff8000", rosa: "#ff00aa", cian: "#00e5ff", celeste: "#00e5ff", dorado: "#ffcc00" };
@@ -64,6 +65,7 @@ export function parseCommand(app, text) {
   const t = raw.toLowerCase().replace(/[¡!¿?.,]/g, " ").replace(/\s+/g, " ").trim();
   const A = (action, parameters = {}) => ({ action, parameters });
 
+  if (/(canci[oó]n|tema musical|mp3|con (la|mi) m[uú]sica)/.test(t) && /(show|proyecto|autom[aá]tic|haz|hazme|crea|monta|arma)/.test(t)) return { intent: "songshow", reply: "¡Hecho! Elige la canción y monto el show solo: escucho el tempo y sus partes (intro, subida, drop…).", actions: [] };
   if (/\bshow\b/.test(t) && /(crea|crear|haz|hacer|quiero|arma|prepara|genera)/.test(t)) return { intent: "show", reply: "Preparo un plan de show por secciones. No cambia nada hasta que lo apliques.", actions: [] };
   if (/(por qu[eé]|lento|baja velocidad|tirones|lag|va mal|no va fluido|fps)/.test(t)) return { intent: "diagnose", reply: "Reviso el rendimiento del proyecto.", actions: [] };
   if (/optimiza/.test(t)) return { intent: "optimize", reply: "Busco qué se puede optimizar.", actions: [] };
@@ -82,6 +84,11 @@ export function parseCommand(app, text) {
     return { reply: !cond ? "No reconozco la condición. Ejemplos: «cuando levante la mano…», «cuando haya dos personas…», «cuando alguien entre…»." : "No reconozco qué hacer. Ejemplos: «…cambia el color a rojo», «…ve a la escena 2», «…luces Fuego».", actions: [] };
   }
   const actions = [];
+  // Experiencias interactivas: «pon un lago interactivo», «fútbol en el suelo», «polvo de estrellas»…
+  if (/(interactiv|experiencia|suelo|que reaccione|que la gente|juego)/.test(t) || /(lago|estanque|peces|pista de baile|f[uú]tbol|pelota|burbujas|polvo de estrellas|niebla|hojas|p[eé]talos|nieve|arena|l[aá]ser)/.test(t)) {
+    const ex = findExperience(t);
+    if (ex) return { reply: "Te monto esta experiencia interactiva (con la IA que ve a la gente):", actions: [A("interactive_experience", { name: ex.name })] };
+  }
   // Pantallas por tiempos: «pantallas una tras otra cada 5 segundos», «sincroniza las pantallas»…
   if (/(pantallas|superficies)/.test(t) && /(una tras otra|en cascada|en orden|sincroniz|a la vez|al mismo tiempo|altern|turn|persecuci|tiempos)/.test(t)) {
     const ev = t.match(/cada\s+(\w+)\s*(segundos?|seg|s|minutos?|min)\b/);

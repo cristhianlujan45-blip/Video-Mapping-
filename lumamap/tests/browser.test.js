@@ -288,7 +288,7 @@ await test("modo profesional: pestañas nuevas y modo simple intacto", async () 
   const simpleTabs = await page.locator("#dock button").count();
   await page.evaluate(() => window.__lumamap.setPro(true));
   const proTabs = await page.locator("#dock button").count();
-  assert.equal(proTabs, simpleTabs + 5, "Show, 3D, Tracking, Control y Rendimiento (Interactivo, Luces y Asistente están en el modo simple)");
+  assert.equal(proTabs, simpleTabs + 4, "Show, Tracking, Control y Rendimiento (Interactivo, Luces, 3D y Asistente están en el modo simple)");
   await page.locator('#dock [data-tab="control"]').click();
   await page.getByText("Controladores MIDI").waitFor();
   await page.locator('#dock [data-tab="perf"]').click();

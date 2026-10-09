@@ -76,4 +76,28 @@ await test("cámaras: se reconoce el tipo por el nombre (sensor 3D, infrarroja, 
   assert.doesNotMatch(cameraName({ label: "Azure Kinect 4K Camera", ...c("Azure Kinect 4K Camera") }), /kinect/i, "sin el nombre «Kinect»");
 });
 
+await test("experiencias listas: un toque monta efecto, reacciones y video; la IA las entiende", async () => {
+  const { EXPERIENCES, applyExperience, findExperience } = await import("../web/js/experiences.js");
+  const { BODY_MODES } = await import("../web/js/body.js");
+  const modes = new Set(BODY_MODES.map(m => m[0]));
+  assert.ok(EXPERIENCES.length >= 15);
+  for (const e of EXPERIENCES) assert.ok(modes.has(e.mode), e.id + " → " + e.mode);
+  const P = M.createProject();
+  P.media.push({ id: "v1", name: "intro.mp4", kind: "video" });
+  const app = { S: { project: P, sel: null }, changed() {}, commit() {}, select(id) { app.S.sel = id; }, tracking: { ensure() { app.ensured = true; } } };
+  const txt = applyExperience(app, EXPERIENCES.find(e => e.id === "video-entrar"));
+  const s = P.surfaces.find(x => x.name === "Interactivo"), look = M.lookOf(M.currentScene(P), s.id);
+  assert.equal(look.source.type, "body"); assert.ok(app.ensured, "el tracking se pone en marcha");
+  const r = P.settings.tracking.rules.find(x => x.experience === "video-entrar");
+  assert.equal(r.then.type, "video"); assert.equal(r.then.mediaId, "v1"); assert.equal(r.then.surface, s.id);
+  applyExperience(app, EXPERIENCES.find(e => e.id === "lago"));
+  assert.equal(P.settings.tracking.rules.filter(x => x.experience).length, 1, "las reglas de la experiencia anterior se sustituyen");
+  assert.match(txt, /Al entrar alguien/);
+  assert.equal(findExperience("ponme un suelo de agua interactivo").id, "lago");
+  assert.equal(findExperience("juego de fútbol en el suelo").id, "futbol");
+  const { parseCommand } = await import("../web/js/ai/commands.js");
+  assert.equal(parseCommand(app, "pon una pista de baile interactiva").actions[0].action, "interactive_experience");
+});
+
 report();
+

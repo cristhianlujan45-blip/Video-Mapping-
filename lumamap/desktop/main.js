@@ -2,7 +2,7 @@
 // Sirve la app web desde un protocolo propio seguro (app://) para que funcionen
 // los módulos ES, IndexedDB, micrófono y cámara, y abre la ventana de salida
 // directamente a pantalla completa en el proyector (segunda pantalla).
-const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain, net, utilityProcess, MessageChannelMain } = require("electron");
+const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain, net, utilityProcess, MessageChannelMain, powerSaveBlocker } = require("electron");
 const { spawn, execFile: execFileCb } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -71,7 +71,7 @@ const extraOutputs = new Map();   // pantalla 2, 3, 4 → ventana
 
 function placeOutput(win) {
   const d = projectorDisplay();
-  if (d) {
+  if (d && !win.isDestroyed()) {
     win.setFullScreen(false);
     win.setBounds(d.bounds);
     win.setFullScreen(true);
@@ -111,6 +111,15 @@ function createEditor() {
     }
     output = win;
     win.on("closed", () => { if (output === win) output = null; });
+  });
+  // Toda ventana de salida se recupera sola: si su proceso se cae (memoria, GPU), se
+  // recarga en el mismo sitio y vuelve a recibir el proyecto del editor.
+  editor.webContents.on("did-create-window", (win) => {
+    win.webContents.on("render-process-gone", (_e, d) => {
+      log("crash", `Salida: ${d.reason} (código ${d.exitCode})`);
+      if (d.reason !== "clean-exit" && !quitting && !win.isDestroyed()) setTimeout(() => { try { win.reload(); } catch {} }, 500);
+    });
+    win.webContents.on("unresponsive", () => log("crash", "La salida no responde"));
   });
   editor.on("closed", () => { editor = null; app.quit(); });
   // Si el proceso del editor se cae (memoria, GPU…), se recarga: el autoguardado restaura el proyecto.
@@ -527,7 +536,22 @@ app.whenReady().then(() => {
   // Conectar o desconectar el proyector con la salida abierta: se recoloca sola.
   const displaysChanged = () => { buildMenu(); editor?.webContents.send("displays-changed"); };
   screen.on("display-added", () => { displaysChanged(); if (output) placeOutput(output); });
-  screen.on("display-removed", () => { displaysChanged(); if (output && !projectorDisplay()) output.setFullScreen(false); });
+  // Un parpadeo del HDMI (el proyector cambia de entrada, se reinicia o negocia la señal)
+  // quita la pantalla un instante: se espera a que vuelva antes de mover la salida.
+  let removedTimer = 0;
+  screen.on("display-removed", () => {
+    displaysChanged();
+    clearTimeout(removedTimer);
+    removedTimer = setTimeout(() => { if (output && !output.isDestroyed() && !projectorDisplay()) output.setFullScreen(false); }, 3000);
+  });
+  // El proyector cambió de resolución, orientación o escala: la salida se recoloca a su medida.
+  screen.on("display-metrics-changed", (_e, d, changed) => {
+    if (!output || output.isDestroyed()) return;
+    if (projectorDisplay()?.id === d.id && changed.some(c => c === "bounds" || c === "workArea" || c === "scaleFactor" || c === "rotation")) placeOutput(output);
+  });
+  // Windows no apaga la pantalla ni el proyector por inactividad mientras LumaMap está abierto
+  // (en un show nadie toca el ratón y el proyector se quedaba «sin señal»).
+  try { powerSaveBlocker.start("prevent-display-sleep"); } catch (e) { log("app", "No se pudo impedir que se apague la pantalla: " + e.message); }
 
   log("app", `LumaMap ${app.getVersion()} · Electron ${process.versions.electron} · ${os.platform()} ${os.release()}`);
   startRemote();

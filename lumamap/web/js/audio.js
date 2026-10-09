@@ -133,10 +133,30 @@ export class AudioEngine {
     this.onsets = []; this.onsetW = []; this.detected = null; this.wasLive = false; this.lock = 0; this.gridRef = 0; this.mult = 1;
   }
 
+  /**
+   * Escuchar una canción que suena desde la app (en lugar del micrófono): la
+   * proyección reacciona exactamente a esa música y se oye por los altavoces.
+   */
+  async startElement(el) {
+    if (this.analyser) this.stop();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AC();
+    if (this.ctx.state === "suspended") await this.ctx.resume().catch(() => {});
+    const src = this.ctx.createMediaElementSource(el);
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 1024;
+    this.analyser.smoothingTimeConstant = 0.35;
+    src.connect(this.analyser);
+    src.connect(this.ctx.destination);
+    this.bins = new Uint8Array(this.analyser.frequencyBinCount);
+    this.onsets = []; this.onsetW = []; this.detected = null; this.wasLive = false; this.lock = 0; this.gridRef = 0; this.mult = 1;
+    this.element = el;
+  }
+
   stop() {
     this.stream?.getTracks().forEach(t => t.stop());
     this.ctx?.close().catch(() => {});
-    this.ctx = this.analyser = this.stream = null;
+    this.ctx = this.analyser = this.stream = null; this.element = null;
     this.detected = null;
   }
 

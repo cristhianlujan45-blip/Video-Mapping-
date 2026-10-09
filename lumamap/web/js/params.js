@@ -16,6 +16,7 @@ export { normalizeMapping, DEFAULT_BANKS, defaultControl, normalizeControl };
 
 /** Rangos de los efectos (los usan el panel Efectos y el motor). [nombre, min, max, paso, defecto] */
 export const FX_RANGE = {
+  styleSize: ["Tamaño del estilo", 0, 1, 0.01, 0.5], styleGlow: ["Brillo del estilo", 0, 1.5, 0.01, 0.5],
   border: ["Borde neón: grosor", 0, 0.08, 0.001, 0],
   borderGlow: ["Borde neón: resplandor", 0, 1, 0.01, 0.5],
   brightness: ["Brillo", 0, 2, 0.01, 1],

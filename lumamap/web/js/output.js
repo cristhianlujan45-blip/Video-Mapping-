@@ -40,6 +40,9 @@ if (!webgl2Supported()) {
   throw new Error("WebGL2");
 }
 const renderer = new Renderer(glCanvas);
+// La GPU se reinició (controlador, memoria, cambio de pantalla): la salida se recarga sola
+// en un momento y vuelve a pedir el proyecto al editor, en vez de quedarse en negro.
+glCanvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); setTimeout(() => location.reload(), 400); });
 const QS = new URLSearchParams(location.search);
 /**
  * Motor compartido: si esta ventana la abrió el editor (mismo proceso), se

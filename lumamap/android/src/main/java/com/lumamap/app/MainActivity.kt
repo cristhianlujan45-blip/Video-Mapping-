@@ -198,7 +198,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         web.onResume()
-        notifyDisplays()
+        // Si el sistema cerró la salida (pantalla bloqueada, parpadeo del HDMI), vuelve sola.
+        if (wantExternal && presentation == null) showPresentation()
+        notifyDisplays(resumed = presentation != null)
     }
 
     override fun onPause() {
@@ -332,7 +334,11 @@ class MainActivity : ComponentActivity() {
         presentation?.dismiss()
         return runCatching {
             val p = OutputPresentation(this, display)
-            p.setOnDismissListener { if (presentation === p) presentation = null }
+            p.setOnDismissListener {
+                if (presentation === p) presentation = null
+                // Cerrada por el sistema (no por el usuario): se reabre en cuanto se pueda.
+                if (wantExternal && !isFinishing) main.postDelayed({ if (wantExternal && presentation == null && !isFinishing) showPresentation() }, 800)
+            }
             p.show()
             presentation = p
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

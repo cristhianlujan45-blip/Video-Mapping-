@@ -496,3 +496,16 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .timers .tclock{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0;}
 .timers .tclock span{flex:1;}
 .timers .tclock input{width:120px;}
+.ifxgrid .ifx.pro{border-color:color-mix(in srgb,var(--acc) 55%,transparent);background:linear-gradient(160deg,color-mix(in srgb,var(--acc) 14%,var(--bg3)),var(--bg3));}
+.stylelib .chip.on{background:var(--acc);color:#000;border-color:var(--acc);}
+/* 3D fácil: botones de navegación sobre la vista */
+.ws3d-view{position:relative;}
+.ws3d-nav{position:absolute;left:10px;bottom:10px;display:flex;flex-wrap:wrap;gap:6px;max-width:340px;z-index:5;}
+.ws3d-nav button{min-width:40px;height:40px;padding:0 10px;border-radius:12px;background:rgba(12,14,20,.82);border:1px solid var(--line);color:var(--text);font-weight:700;font-size:15px;backdrop-filter:blur(6px);}
+.ws3d-nav button:active{background:var(--acc);color:#000;}
+.p3d-easy .chip{font-size:13px;}
+.facepick{max-height:60vh;overflow:auto;margin-top:8px;}
+/* Show con canción: línea de tiempo por partes */
+.songbar{display:flex;height:30px;border-radius:8px;overflow:hidden;margin:8px 0;gap:2px;}
+.songbar i{display:flex;align-items:center;justify-content:center;min-width:0;}
+.songbar i b{font-size:10px;color:#000;font-weight:800;overflow:hidden;white-space:nowrap;}

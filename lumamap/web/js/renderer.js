@@ -8,6 +8,7 @@
 //    desenfoque, ruido, caleidoscopio, espejo, ondas, zoom/giro/desplazamiento,
 //    estroboscopio, borde animado (neón, persecución, pulso, arcoíris) y máscara.
 import { GEN_INDEX } from "./model.js";
+import { PRO_MODE_IDS } from "./fx-pro.js";
 import { UNIT_SQUARE, tryHomography, evalMesh, triangulatePolygon, bbox, surfaceUVOutline, surfaceAspect, surfaceCorners } from "./math.js";
 
 const MAXP = 64;
@@ -56,6 +57,9 @@ uniform int u_maskN, u_maskInv;
 uniform float u_maskFeather;
 uniform vec4 u_tr;      // transición: modo (0 nada, 1 disolver, 2 cortinilla →, 3 cortinilla ↓, 4 iris), progreso, papel (0 sale, 1 entra)
 uniform vec4 u_frame;   // rectángulo de la salida en píxeles del lienzo (x, y desde abajo, ancho, alto)
+uniform vec4 u_sty;     // estilo (0 ninguno · ver STYLES), filas de celdas, resplandor, 0
+uniform vec3 u_styCol;
+uniform sampler2D u_glyph;   // letras y números (8×8 celdas): rampa « .,:;-=+*#%@», 0-9, A-Z
 
 const float TAU = 6.28318530718;
 
@@ -961,6 +965,92 @@ float shapeDist(vec2 uv){
   return d;
 }
 
+float glyph(float idx, vec2 f){ vec2 at = (vec2(mod(idx, 8.0), floor(idx / 8.0)) + clamp(f, 0.04, 0.96)) / 8.0; return texture(u_glyph, at).a; }
+float bayer8(vec2 p){ // umbral ordenado 8×8 (0..1)
+  vec2 q = mod(floor(p), 8.0); float v = 0.0, s = 1.0;
+  for(int i = 0; i < 3; i++){ vec2 b = mod(floor(q / s), 2.0); v = v * 4.0 + (b.x * 2.0 + abs(b.x - b.y)); s *= 2.0; }
+  return (v + 0.5) / 64.0;
+}
+/** Estilos tipo «Ladybug»: ASCII, texto, Matrix, semitonos, RISO, dither, Game Boy, térmica, trazo neón… */
+vec3 stylize(int st, vec3 col, vec2 f, vec2 id, vec2 uv){
+  float L = clamp(dot(col, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+  float glow = u_sty.z;
+  vec3 tint = u_styCol;
+  vec3 hueC = col / max(max(col.r, max(col.g, col.b)), 0.04);
+  if(st == 1) return hueC * (0.35 + L) * glyph(floor(sqrt(L) * 11.99), f) * (1.2 + glow);                                   // ASCII a color
+  if(st == 2) return vec3(glyph(floor(sqrt(L) * 11.99), f)) * (0.45 + L) * (1.1 + glow * 0.6);                // ASCII blanco
+  if(st == 3){                                                                                          // Matrix
+    float sp = 0.5 + hash(vec2(id.x, 3.0)) * 1.5;
+    float head = fract(hash(vec2(id.x, 7.0)) - u_time * sp * 0.25 + id.y * 0.035);
+    float g = glyph(22.0 + floor(hash(id + floor(u_time * (2.0 + hash(id.yx) * 6.0))) * 26.0), f);
+    float k = g * (0.3 + sqrt(L) * 1.5) * (0.45 + 0.55 * pow(1.0 - head, 3.0));
+    return tint * k + vec3(0.7, 1.0, 0.8) * g * step(0.97, 1.0 - head) * L;
+  }
+  if(st == 4){                                                                                          // campo de números
+    float g = glyph(12.0 + floor(hash(id + floor(u_time * (1.0 + hash(id) * 3.0))) * 10.0), f);
+    float on = smoothstep(0.18, 0.4, L);
+    return tint * g * on * (0.6 + L) * (1.0 + glow) + tint * 0.05 * on;
+  }
+  if(st == 5) return mix(vec3(0.02, 0.0, 0.06), vec3(0.9, 0.85, 1.0), glyph(22.0 + floor(hash(id * 1.7) * 26.0), f) * smoothstep(0.08, 0.9, L)) * (1.0 + glow * 0.5);   // texto dither
+  if(st == 6){                                                                                          // código de píxeles
+    float h = hash(id * 3.1);
+    if(h < L * 0.45) return col * (0.8 + glow * 0.4);
+    return mix(col * 0.25, hueC * (0.5 + L), glyph(h < 0.6 ? 12.0 + floor(h * 16.0) : 22.0 + floor(h * 26.0), f));
+  }
+  vec2 q = f - 0.5;
+  if(st == 7){                                                                                          // semitonos dorados
+    float r = sqrt(L) * 0.55, d = length(q);
+    float core = smoothstep(r, r - 0.12, d), halo = exp(-max(d - r, 0.0) * 14.0) * 0.35 * (0.5 + glow);
+    return mix(vec3(1.0, 0.35, 0.02), vec3(1.0, 0.85, 0.45), L) * (core * 1.2 + halo * step(0.05, L));
+  }
+  if(st == 8){                                                                                          // RISO (dos tintas)
+    float a = length(q) - sqrt(L) * 0.6, b = length(q - vec2(0.18, 0.12)) - sqrt(1.0 - L) * 0.32;
+    vec3 paper = vec3(0.07, 0.03, 0.16);
+    vec3 c2 = mix(paper, vec3(0.22, 0.35, 1.0), smoothstep(0.04, -0.04, a));
+    c2 = mix(c2, vec3(0.92, 0.95, 1.0), smoothstep(0.04, -0.04, a + 0.18) * step(0.6, L));
+    return mix(c2, vec3(1.0, 0.2, 0.35), smoothstep(0.04, -0.04, b) * 0.7) + (hash(uv * 900.0) - 0.5) * 0.06;
+  }
+  if(st == 9){                                                                                          // píldoras con texto
+    vec2 b = abs(q) - vec2(0.42, 0.3); float d = length(max(b, 0.0)) + min(max(b.x, b.y), 0.0) - 0.12;
+    float fill = smoothstep(0.03, -0.03, d), edge = smoothstep(0.05, 0.0, abs(d));
+    vec3 pc = mix(col, hueC, 0.4) * (0.55 + L * 0.7);
+    float g = glyph(22.0 + floor(hash(id) * 26.0), vec2(fract(f.x * 2.4) , f.y));
+    return mix(vec3(0.03), mix(pc, pc * 0.25, g * 0.8), fill) + edge * pc * 0.4;
+  }
+  if(st == 10){                                                                                         // rejilla de glifos
+    float box = step(0.46, max(abs(q.x), abs(q.y)));
+    float g = glyph(22.0 + floor(hash(id + floor(u_time * 0.5)) * 26.0), f);
+    return hueC * (g * (0.3 + L) + box * 0.25 * L) * (1.0 + glow * 0.5);
+  }
+  if(st == 11) return mix(vec3(0.0), tint, step(bayer8(gl_FragCoord.xy / 2.0), L));                    // dither 1 bit
+  if(st == 12){ float d = step(bayer8(gl_FragCoord.xy / 2.0), L); return tint * d * (0.7 + glow) + tint * L * 0.25 * glow; }   // dither con brillo
+  if(st == 13){                                                                                         // píxel dither
+    float s = 0.5 * smoothstep(0.05, 0.9, L);
+    float sq = step(max(abs(q.x), abs(q.y)), s);
+    return tint * sq * (0.55 + L) * (1.0 + glow * 0.5);
+  }
+  if(st == 14){                                                                                         // Game Boy
+    float v = clamp(L + (bayer8(f * 8.0 + id * 8.0) - 0.5) * 0.25, 0.0, 0.999);
+    int k = int(v * 4.0);
+    return k == 0 ? vec3(0.06, 0.22, 0.06) : k == 1 ? vec3(0.19, 0.38, 0.19) : k == 2 ? vec3(0.55, 0.67, 0.06) : vec3(0.61, 0.74, 0.06);
+  }
+  if(st == 15) return L < 0.25 ? mix(vec3(0.0, 0.0, 0.25), vec3(0.4, 0.0, 0.6), L * 4.0) : L < 0.5 ? mix(vec3(0.4, 0.0, 0.6), vec3(0.95, 0.1, 0.2), L * 4.0 - 1.0) : L < 0.75 ? mix(vec3(0.95, 0.1, 0.2), vec3(1.0, 0.75, 0.0), L * 4.0 - 2.0) : mix(vec3(1.0, 0.75, 0.0), vec3(1.0), L * 4.0 - 3.0);   // térmica
+  if(st == 16) return mix(mix(vec3(0.55, 0.85, 1.0), vec3(0.85, 0.65, 1.0), smoothstep(0.0, 0.45, L)), vec3(1.0, 0.72, 0.85), smoothstep(0.4, 0.9, L)) * (0.85 + 0.15 * L);   // térmica rosa
+  if(st == 17){                                                                                         // trazo neón (bordes arcoíris)
+    float e = clamp(fwidth(L) * 18.0, 0.0, 1.0);
+    vec3 rb = hsv2rgb(vec3(fract(uv.x * 0.8 + uv.y * 0.4 + u_time * 0.15 + L), 0.85, 1.0));
+    float dots = 0.75 + 0.25 * step(0.5, fract(gl_FragCoord.x / 3.0)) * step(0.5, fract(gl_FragCoord.y / 3.0));
+    return (col * 0.22 + rb * e * (1.4 + glow)) * dots;
+  }
+  if(st == 18){                                                                                         // polvo de estrellas
+    float h = hash(id + floor(u_time * 3.0 * (0.3 + hash(id))));
+    float star = step(1.0 - L * 0.75, h) * exp(-length(q) * 9.0) * 2.2;
+    float streak = smoothstep(0.08, 0.0, abs(q.y)) * smoothstep(0.5, -0.5, q.x) * L * 0.25;
+    return mix(vec3(1.0, 0.75, 0.45), vec3(1.0), 0.3) * (star + streak) * (1.0 + glow) + col * 0.06;
+  }
+  return col;
+}
+
 void main(){
   vec2 uv = v_uvh.xy / v_uvh.z;       // geometría (máscara y borde)
   vec2 vuv = uv;                      // contenido
@@ -1014,6 +1104,17 @@ void main(){
     float cells = mix(260.0, 6.0, u_pix);
     vec2 n = vec2(cells*u_aspect, cells);
     cuv = (floor(cuv*n) + 0.5) / n;
+    gp = (cuv - 0.5) * vec2(u_aspect, 1.0);
+  }
+  // ---- estilos por celdas (ASCII, semitonos, píxeles…): se muestrea el centro de cada celda ----
+  int st = int(u_sty.x + 0.5);
+  vec2 cellF = vec2(0.5), cellId = vec2(0.0);
+  if(st > 0 && st != 11 && st != 12 && st != 15 && st != 16 && st != 17){
+    float rows = max(u_sty.y, 4.0);
+    float cw = (st <= 6 || st == 10) ? 0.62 : (st == 9 ? 2.4 : 1.0);   // letras más altas que anchas; píldoras alargadas
+    vec2 n = vec2(rows * u_aspect / cw, rows);
+    cellF = fract(cuv * n); cellId = floor(cuv * n);
+    cuv = (cellId + 0.5) / n;
     gp = (cuv - 0.5) * vec2(u_aspect, 1.0);
   }
   // ---- fuente ----
@@ -1076,6 +1177,7 @@ void main(){
     if(u_c4.y > 0.0) c.rgb *= 1.0 - u_c4.y*0.55*(0.5 + 0.5*sin(vuv.y*720.0));               // líneas de TV
     if(u_c4.x > 0.0) c.rgb *= 1.0 - u_c4.x*smoothstep(0.3, 0.85, length((uv - 0.5)*1.25));    // viñeta
     if(u_noise > 0.0) c.rgb += (hash(uv*vec2(1920.0, 1080.0) + fract(u_time*7.13)) - 0.5) * u_noise;
+    if(st > 0) c.rgb = stylize(st, c.rgb, cellF, cellId, uv);
   }
   // ---- borde animado (efectos de línea sobre el contorno) ----
   if(u_border > 0.0){
@@ -1115,7 +1217,26 @@ void main(){
 const UNIFORMS = ["u_tex", "u_src", "u_fit", "u_contain", "u_gen", "u_c1", "u_c2", "u_gscale", "u_gtime",
   "u_aspect", "u_time", "u_alpha", "u_bri", "u_con", "u_sat", "u_hue", "u_rgb", "u_pix", "u_blur", "u_noise",
   "u_inv", "u_mirror", "u_kal", "u_wave", "u_zoom", "u_rot", "u_scroll", "u_border", "u_glow", "u_bcol",
-  "u_banim", "u_beat", "u_lev", "u_d1", "u_d2", "u_c3", "u_c4", "u_c5", "u_duoA", "u_duoB", "u_key", "u_keyCol", "u_flip", "u_texel", "u_shape", "u_shapeN", "u_mask", "u_maskN", "u_maskInv", "u_maskFeather", "u_tr", "u_frame"];
+  "u_banim", "u_beat", "u_lev", "u_d1", "u_d2", "u_c3", "u_c4", "u_c5", "u_duoA", "u_duoB", "u_key", "u_keyCol", "u_flip", "u_texel", "u_shape", "u_shapeN", "u_mask", "u_maskN", "u_maskInv", "u_maskFeather", "u_tr", "u_frame", "u_sty", "u_styCol", "u_glyph"];
+
+/** 64 caracteres en una rejilla 8×8: rampa « .,:;-=+*#%@» (0-11), 0-9 (12-21), A-Z (22-47) y símbolos. */
+function makeGlyphAtlas(gl) {
+  const chars = " .,:;-=+*#%@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ<>/\\|()[]{}?!&$+x";
+  const tex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 512;
+    const x = c.getContext("2d");
+    x.fillStyle = "#fff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = "bold 50px monospace";
+    for (let i = 0; i < 64; i++) x.fillText(chars[i] || "", (i % 8) * 64 + 32, Math.floor(i / 8) * 64 + 34);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  } catch { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); }
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.activeTexture(gl.TEXTURE0);
+  return tex;
+}
 
 export function hexToRgb(hex) {
   const h = String(hex || "#ffffff").replace("#", "");
@@ -1125,6 +1246,15 @@ export function hexToRgb(hex) {
 
 const MIRROR = { none: 0, h: 1, v: 2, quad: 3 };
 export const COLORMAP = { none: 0, thermal: 1, night: 2, xray: 3, gold: 4, rainbow: 5, ice: 6 };
+/** Estilos tipo «Ladybug» (efectos de imagen): [id, nombre, color por defecto]. El orden es el índice del shader. */
+export const STYLES = [
+  ["none", "Ninguno"], ["ascii", "ASCII a color"], ["asciiw", "ASCII blanco"], ["matrix", "Retro Matrix", "#39ff6a"],
+  ["numeros", "Campo de números", "#3dffb0"], ["texto", "Texto dither"], ["pixelcode", "Código de píxeles"],
+  ["oro", "Semitonos dorados"], ["riso", "RISO"], ["pildoras", "Píldoras con texto"], ["glifos", "Rejilla de glifos"],
+  ["dither", "Dither 1 bit", "#ffffff"], ["ditherglow", "Dither con brillo", "#ff4fd8"], ["pixeldither", "Píxel dither", "#c6ff1a"],
+  ["gameboy", "Game Boy"], ["termica", "Térmica"], ["termicarosa", "Térmica rosa"], ["trazo", "Trazo neón"], ["polvo", "Polvo de estrellas"],
+];
+export const STYLE_INDEX = Object.fromEntries(STYLES.map((s, i) => [s[0], i]));
 const BANIM = { none: 0, chase: 1, pulse: 2, rainbow: 3 };
 
 function compile(gl, type, src) {
@@ -1156,6 +1286,9 @@ export class Renderer {
     for (const n of UNIFORMS) this.loc[n] = gl.getUniformLocation(prog, n);
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
+    // Atlas de letras para los estilos ASCII / texto (unidad de textura 1).
+    this.glyphTex = makeGlyphAtlas(gl);
+    gl.uniform1i(this.loc.u_glyph, 1);
     this.vbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.enableVertexAttribArray(0);
@@ -1320,7 +1453,7 @@ export class Renderer {
     let srcType = 0;
     if (src.type === "color") srcType = 2;
     else if (src.type === "gen") srcType = 3;
-    else if (src.type === "body" && o.tex) srcType = src.bodyMode === "persona" ? 1 : 4;
+    else if (src.type === "body" && o.tex) srcType = src.bodyMode === "persona" || PRO_MODE_IDS.has(src.bodyMode) ? 1 : 4;
     else if (o.tex) srcType = 1;
     if (srcType === 0 && border <= 0) return;
 
@@ -1382,6 +1515,9 @@ export class Renderer {
     gl.uniform4f(L.u_key, fx.chromaKey || 0, fx.keySoft ?? 0.1, fx.lumaKey || 0, fx.lumaSoft ?? 0.05);
     gl.uniform3fv(L.u_keyCol, hexToRgb(fx.keyColor || "#00ff00"));
     gl.uniform2f(L.u_flip, fx.flipX ? 1 : 0, fx.flipY ? 1 : 0);
+    const sti = STYLE_INDEX[fx.style] || 0;
+    gl.uniform4f(L.u_sty, sti, 14 + (1 - (fx.styleSize ?? 0.5)) * 110, fx.styleGlow ?? 0.5, 0);
+    gl.uniform3fv(L.u_styCol, hexToRgb(fx.styleColor || STYLES[sti]?.[2] || "#39ff6a"));
     gl.uniform2f(L.u_texel, srcType === 1 ? 1 / Math.max(1, o.tex.w) : 0, srcType === 1 ? 1 / Math.max(1, o.tex.h) : 0);
 
     if (border > 0) {

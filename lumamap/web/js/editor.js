@@ -623,6 +623,27 @@ A.projectorToScreen = (pid, n = 1) => {
   toast(`«${pr.name}» sale por P${n}`);
 };
 
+/**
+ * Holograma de pirámide: 4 vistas del objeto (frente, derecha, detrás, izquierda) en cruz
+ * sobre la Pantalla 1, con la cabeza de cada vista hacia fuera. La pirámide transparente
+ * va boca abajo en el centro de la pantalla.
+ */
+A.hologram = (pids) => {
+  const P = S.project, W = P.width, H = P.height, c = Math.min(W, H) / 3, cx = W / 2, cy = H / 2;
+  // Celdas: abajo (frente), derecha, arriba (detrás), izquierda; ángulo para que mire hacia fuera.
+  const cells = [[cx - c / 2, cy + c / 2, 180], [cx + c / 2, cy - c / 2, -90], [cx - c / 2, cy - 1.5 * c, 0], [cx - 1.5 * c, cy - c / 2, 90]];
+  pids.slice(0, 4).forEach((pid, i) => {
+    const [x, y, deg] = cells[i];
+    const s = M.createQuad({ name: `Holograma ${["frente", "derecha", "detrás", "izquierda"][i]}`, corners: M.rectCorners(x, y, c, c) });
+    const pts = transformPoints(s.points, { x: x + c / 2, y: y + c / 2 }, 1, deg * Math.PI / 180);
+    pts.forEach((q, k) => { s.points[k].x = q.x; s.points[k].y = q.y; });
+    s.screen = 1;
+    P.surfaces.push(s);
+    for (const sc of P.scenes) { sc.looks[s.id] = M.createLook({ type: "projector3d", projectorId: pid }); sc.looks[s.id].fx.flipX = true; }
+  });
+  changed({ panel: true }); commit();
+};
+
 /** EMERGENCIA: salida segura inmediata (escena elegida o negro) y luces a su snapshot o apagadas. */
 A.emergency = () => {
   S.emergency = !S.emergency;
@@ -1022,6 +1043,31 @@ A.toggleMic = async () => {
   } catch (e) { toast("Micrófono no disponible: " + e.message, "err"); }
   renderPanel();
 };
+/* ---- Show con una canción: suena desde la app, el mapping la sigue y las escenas cambian en su sitio ---- */
+let song = null;   // { el, url, name }
+A.loadSong = (file) => {
+  A.stopSong();
+  const el = new Audio(); const url = URL.createObjectURL(file);
+  el.src = url; el.preload = "auto";
+  song = { el, url, name: file.name.replace(/\.[^.]+$/, "") };
+  el.addEventListener("ended", () => { S.songShow = null; toast("Fin de la canción"); updateChrome(); });
+  return song;
+};
+/** Empieza el show: canción desde el principio y cada escena en el segundo exacto de su parte. */
+A.playSongShow = async (ids, starts) => {
+  if (!song) return toast("Elige primero una canción", "err");
+  try { await audio.startElement(song.el); } catch (e) { console.warn(e); }
+  const R = S.project.settings.react; R.enabled = true;
+  S.project.settings.autoAdvance = false;   // manda la canción, no el reloj
+  S.songShow = { ids, starts };
+  song.el.currentTime = 0;
+  A.goScene(ids[0]);
+  if (!S.playing) A.togglePlay();
+  await song.el.play().catch((e) => toast("No se pudo reproducir: " + e.message, "err"));
+  changed({ panel: true });
+};
+A.stopSong = () => { if (!song) return; song.el.pause(); if (audio.element === song.el) audio.stop(); URL.revokeObjectURL(song.url); song = null; S.songShow = null; };
+A.songState = () => song ? { name: song.name, playing: !song.el.paused, time: song.el.currentTime, duration: song.el.duration || 0 } : null;
 A.tap = () => { const bpm = audio.tap(); S.project.settings.bpm = bpm; changed(); return bpm; };
 A.scaleTempo = (k) => { const b = audio.scaleTempo(k); S.project.settings.bpm = Math.round(b); changed(); toast(`${Math.round(b)} BPM`); };
 A.setBpm = (v) => { S.project.settings.bpm = Math.round(audio.setBpm(Math.round(v))); changed(); toast(`${S.project.settings.bpm} BPM`); };
@@ -1614,6 +1660,41 @@ function rotHandle(s) {
   return ok ? out : rotateHandle(s, -off * 1.4);
 }
 
+/* ---- Imán: alinear con los bordes y el centro de la salida y con otras superficies ---- */
+function snapTargets(except) {
+  const P = S.project, xs = [0, P.width / 2, P.width], ys = [0, P.height / 2, P.height], pts = [
+    { x: 0, y: 0 }, { x: P.width, y: 0 }, { x: P.width, y: P.height }, { x: 0, y: P.height }, { x: P.width / 2, y: P.height / 2 }];
+  for (const o of P.surfaces) {
+    if (o === except || o.hidden) continue;
+    const b = bbox(o.points);
+    xs.push(b.x, b.x + b.w, b.x + b.w / 2); ys.push(b.y, b.y + b.h, b.y + b.h / 2);
+    for (const q of o.points) pts.push(q);
+  }
+  return { xs, ys, pts };
+}
+/** Superficie entera: el borde o el centro más cercano a una guía se engancha. */
+function snapMove(start, dx, dy, s) {
+  const r = hitRadius(9), T = snapTargets(s);
+  const b = bbox(start), cand = (v0, list) => {
+    let best = null;
+    for (const v of [v0[0], v0[1], v0[2]]) for (const t of list) { const d = t - v; if (Math.abs(d) < r && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, t }; }
+    return best;
+  };
+  const sx = cand([b.x + dx, b.x + b.w / 2 + dx, b.x + b.w + dx], T.xs), sy = cand([b.y + dy, b.y + b.h / 2 + dy, b.y + b.h + dy], T.ys);
+  S.snapLines = { x: sx ? sx.t : null, y: sy ? sy.t : null };
+  return [dx + (sx ? sx.d : 0), dy + (sy ? sy.d : 0)];
+}
+/** Esquina: se engancha a esquinas de la salida y de otras superficies, o a sus bordes. */
+function snapPoint(np, s, linked) {
+  const r = hitRadius(9), T = snapTargets(s);
+  let best = null;
+  for (const q of T.pts) { if (linked.includes(q)) continue; const d = Math.hypot(q.x - np.x, q.y - np.y); if (d < r && (!best || d < best.d)) best = { d, q }; }
+  if (best) { S.snapLines = { x: best.q.x, y: best.q.y }; return { x: best.q.x, y: best.q.y }; }
+  const nx = T.xs.find(t => Math.abs(t - np.x) < r * 0.7), ny = T.ys.find(t => Math.abs(t - np.y) < r * 0.7);
+  S.snapLines = { x: nx ?? null, y: ny ?? null };
+  return { x: nx ?? np.x, y: ny ?? np.y };
+}
+
 function hitPoint(s, p, r) {
   let best = -1, bd = r;
   s.points.forEach((q, i) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = i; } });
@@ -1752,7 +1833,7 @@ function onDown(e) {
           o.points.forEach((q, i) => { if (Math.hypot(q.x - grabbed.x, q.y - grabbed.y) < tol) linked.push(o.points[i]); });
         }
       }
-      G = { type: "point", s, idx, linked, off: { x: grabbed.x - p.x, y: grabbed.y - p.y } };
+      G = { type: "point", s, idx, linked, off: { x: grabbed.x - p.x, y: grabbed.y - p.y }, sx: e.clientX, sy: e.clientY, armed: false, start: s.points.map(q => ({ ...q })), c: centroid(s.points) };
       haptic();
       updateChrome();
       return;
@@ -1799,7 +1880,7 @@ function onDown(e) {
     if (hit.id !== S.sel) select(hit.id);
     S.point = -1;
     updateChrome();
-    if (!hit.locked) G = { type: "move", s: hit, last: p, moved: false };
+    if (!hit.locked) G = { type: "move", s: hit, p0: p, start: hit.points.map(q => ({ ...q })), moved: false, sx: e.clientX, sy: e.clientY, armed: false };
     return;
   }
   if (S.sel) { select(null); }
@@ -1826,7 +1907,13 @@ function onMove(e) {
   if (pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 10) { clearTimeout(pressTimer); pressAt = null; }
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (!G) return;
+  // Margen antes de mover: un toque para seleccionar nunca mueve nada (el dedo siempre tiembla un poco).
+  if ((G.type === "point" || G.type === "move") && !G.armed) {
+    if (Math.hypot(e.clientX - G.sx, e.clientY - G.sy) < (e.pointerType === "mouse" ? 3 : 9)) return;
+    G.armed = true;
+  }
   const p = toProject(e.clientX, e.clientY);
+  S.snapLines = null;
   switch (G.type) {
     case "pixmap": case "fixture": {
       const dx = (p.x - G.p0.x) / S.project.width, dy = (p.y - G.p0.y) / S.project.height;
@@ -1838,7 +1925,16 @@ function onMove(e) {
       break;
     }
     case "point": {
-      const np = { x: p.x + G.off.x, y: p.y + G.off.y };
+      let np = { x: p.x + G.off.x, y: p.y + G.off.y };
+      // Mayús: escalar toda la superficie desde el centro (mantiene la forma).
+      if (e.shiftKey) {
+        const a = G.start[G.idx], k = Math.hypot(np.x - G.c.x, np.y - G.c.y) / Math.max(1, Math.hypot(a.x - G.c.x, a.y - G.c.y));
+        transformPoints(G.start, G.c, k, 0).forEach((q, i) => { G.s.points[i].x = q.x; G.s.points[i].y = q.y; });
+        G.moved = true; G.at = G.s.points[G.idx];
+        changed();
+        break;
+      }
+      if (!e.altKey) np = snapPoint(np, G.s, G.linked);
       const old = G.s.points[G.idx];
       const dx = np.x - old.x, dy = np.y - old.y;
       old.x = np.x; old.y = np.y;
@@ -1867,9 +1963,11 @@ function onMove(e) {
       break;
     }
     case "move": {
-      const dx = p.x - G.last.x, dy = p.y - G.last.y;
-      for (const q of G.s.points) { q.x += dx; q.y += dy; }
-      G.last = p; G.moved = true;
+      // Desde la posición inicial (sin acumular errores) y con imán a bordes, centro y otras superficies.
+      let dx = p.x - G.p0.x, dy = p.y - G.p0.y;
+      if (!e.altKey) [dx, dy] = snapMove(G.start, dx, dy, G.s);
+      G.start.forEach((q, i) => { G.s.points[i].x = q.x + dx; G.s.points[i].y = q.y + dy; });
+      G.moved = true;
       changed();
       break;
     }
@@ -1931,6 +2029,7 @@ function onMove(e) {
 
 function onUp(e) {
   pointers.delete(e.pointerId);
+  S.snapLines = null;
   clearTimeout(pressTimer); pressAt = null;
   if (!G) return;
   if (pointers.size === 1 && (G.type === "pinch" || G.type === "view")) {
@@ -2378,6 +2477,13 @@ function tick(now) {
   // Show: timecode, cues por timecode y líneas de automatización.
   show.tick();
   app.timers?.tick(now);
+  // Show con canción: la escena la decide el segundo de la canción (siempre en sincronía).
+  if (S.songShow && song && !song.el.paused) {
+    const t = song.el.currentTime, st = S.songShow.starts;
+    let i = 0; while (i + 1 < st.length && st[i + 1] <= t) i++;
+    const id = S.songShow.ids[i];
+    if (id && S.project.sceneId !== id && !S.tr) A.goScene(id);
+  }
   // Modulaciones del motor de parámetros (audio, tracking, mezclas): solo en el render.
   S.mods = params.modList(now);
   const RP = applyModList(S.project, S.master, S.mods);
@@ -2450,6 +2556,13 @@ function drawOverlay(v, view) {
     });
   }
   const X = (p) => p.x * v.sx + v.tx, Y = (p) => p.y * v.sy + v.ty;
+  // Guías del imán mientras se arrastra.
+  if (S.snapLines && !S.projecting) {
+    ctx.save(); ctx.strokeStyle = "#ff2d8a"; ctx.lineWidth = 1.5 * d; ctx.setLineDash([6 * d, 4 * d]);
+    if (S.snapLines.x !== null && S.snapLines.x !== undefined) { const x = S.snapLines.x * v.sx + v.tx; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    if (S.snapLines.y !== null && S.snapLines.y !== undefined) { const y = S.snapLines.y * v.sy + v.ty; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.restore();
+  }
   if (S.tab === "lights" && !S.projecting) drawDmxOverlay(ctx, v, d);
   if (S.autoMap?.length && !S.projecting) drawAutoMap(ctx, v, d);
   if (S.mode === "draw") {

@@ -8,12 +8,13 @@
 // (diferencia entre fotogramas), que funciona en cualquier equipo.
 
 import { NEW_MODES, NEW_MODE_IDS, InteractiveFX, drawAligned, camToProj, calibOf } from "./interactive.js";
+import { PRO_MODES, PRO_MODE_IDS, ProFX } from "./fx-pro.js";
 
 export const BODY_MODES = [
   ["silueta", "Silueta animada"], ["contorno", "Contorno neón"], ["estela", "Estela de movimiento"],
   ["sombra", "Sombra (animación alrededor)"], ["persona", "Persona sin fondo"], ["movimiento", "Solo movimiento"],
   ["esqueleto", "Esqueleto"], ["particulas", "Partículas (brazos y pies)"], ["fuego", "Fuego"], ["humo", "Humo"],
-  ["lineas", "Líneas entre personas"], ["geometria", "Geometría"], ...NEW_MODES,
+  ["lineas", "Líneas entre personas"], ["geometria", "Geometría"], ...NEW_MODES, ...PRO_MODES,
 ];
 /** Alineación cámara ↔ proyección del proyecto abierto (o null). */
 const calib = () => { const P = globalThis.__lumaApp?.S.project; return P ? calibOf(P) : null; };
@@ -29,7 +30,7 @@ const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 /** Detector compartido (uno por ventana): mantiene la máscara de la persona al día. */
 class BodyTracker {
   constructor() {
-    this.seg = null;
+    this.seg = null; this.pose = null; this.people = 0; this.missed = 0; this.emptyMasks = 0; this.forceCPU = false;
     this.loading = null;
     this.status = "off";          // off | loading | ai | motion | depth | error
     this.mask = canvas();         // máscara IA: blanco con alfa = persona
@@ -52,29 +53,76 @@ class BodyTracker {
     on = !!on;
     if (on === this.depthOn) return;
     this.depthOn = on; this.bg = null;
-    this.setStatus(on ? "depth" : this.seg ? "ai" : this.loading ? "motion" : "off");
+    this.setStatus(on ? "depth" : this.seg || this.pose ? "ai" : this.loading ? "motion" : "off");
   }
   /** Vuelve a aprender el fondo (con la zona vacía). */
   learnBackground() { this.bg = null; }
 
   setStatus(s) { if (this.status !== s) { this.status = s; this.onStatus(s); } }
 
-  /** Carga la IA (una vez). Si falla, queda el modo movimiento. */
+  /**
+   * Carga la IA (una vez). Primero el modelo de CUERPO ENTERO (pose con silueta de
+   * hasta 4 personas: ve a la gente de pies a cabeza a varios metros, como en una
+   * proyección); si no puede, el de selfie (persona cerca); si tampoco, movimiento.
+   */
   load() {
     if (this.loading) return this.loading;
     this.setStatus("loading");
     this.loading = (async () => {
-      const { ImageSegmenter } = await import(BASE + "vision_bundle.js");
+      const { PoseLandmarker, ImageSegmenter } = await import(BASE + "vision_bundle.js");
       const fileset = { wasmLoaderPath: BASE + "wasm/vision_wasm_internal.js", wasmBinaryPath: BASE + "wasm/vision_wasm_internal.wasm" };
-      const opts = (delegate) => ({
-        baseOptions: { modelAssetPath: BASE + "selfie_segmenter.tflite", delegate },
-        runningMode: "VIDEO", outputConfidenceMasks: true, outputCategoryMask: false,
-      });
-      try { this.seg = await ImageSegmenter.createFromOptions(fileset, opts("GPU")); }
-      catch (e) { console.warn("IA en GPU no disponible, se usa CPU", e); this.seg = await ImageSegmenter.createFromOptions(fileset, opts("CPU")); }
-      this.setStatus("ai");
+      const tryBoth = async (make) => { if (this.forceCPU) return make("CPU"); try { return await make("GPU"); } catch (e) { console.warn("IA en GPU no disponible, se usa CPU", e); return make("CPU"); } };
+      try {
+        this.pose = await tryBoth((delegate) => PoseLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: BASE + "pose_landmarker_lite.task", delegate }, runningMode: "VIDEO",
+          numPoses: 4, outputSegmentationMasks: true, minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3, minTrackingConfidence: 0.3,
+        }));
+      } catch (e) {
+        console.warn("Silueta de cuerpo entero no disponible: se usa la de selfie", e);
+        this.seg = await tryBoth((delegate) => ImageSegmenter.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: BASE + "selfie_segmenter.tflite", delegate }, runningMode: "VIDEO", outputConfidenceMasks: true, outputCategoryMask: false,
+        }));
+      }
+      this.setStatus(this.depthOn ? "depth" : "ai");
     })().catch((e) => { console.warn("Detección de cuerpo con IA no disponible: se usa el movimiento", e); this.setStatus("motion"); });
     return this.loading;
+  }
+
+  /** Fuera del callback de la IA (cerrarla dentro la rompería): se cierra y se carga en CPU. */
+  switchToCPU() {
+    console.warn("La silueta llega vacía desde la GPU: la IA de cuerpo pasa a la CPU");
+    this.forceCPU = true;
+    const old = [this.pose, this.seg];
+    this.pose = null; this.seg = null; this.loading = null;
+    for (const t of old) { try { t?.close(); } catch {} }
+    this.load();
+  }
+
+  /**
+   * Imagen para la IA: pequeña (rápida) y con la luz corregida. En una sala oscura
+   * la webcam ve casi negro: se aclara y se sube el contraste según el brillo medio.
+   */
+  prepare(video, sw) {
+    const sh = Math.max(64, Math.round(sw * video.videoHeight / video.videoWidth));
+    if (!this.small) this.small = canvas(sw, sh);
+    if (this.small.width !== sw || this.small.height !== sh) { this.small.width = sw; this.small.height = sh; }
+    const ctx = this.small.getContext("2d", { willReadFrequently: true });
+    ctx.filter = this.light || "none";
+    ctx.drawImage(video, 0, 0, sw, sh);
+    ctx.filter = "none";
+    // Brillo medio cada ~½ s (sobre una muestra de 16×9 píxeles): ajusta la corrección.
+    if (!this.lightAt || performance.now() - this.lightAt > 500) {
+      this.lightAt = performance.now();
+      if (!this.probe) this.probe = canvas(16, 9);
+      const pc = this.probe.getContext("2d", { willReadFrequently: true });
+      pc.drawImage(video, 0, 0, 16, 9);
+      const d = pc.getImageData(0, 0, 16, 9).data;
+      let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
+      const mean = sum / (d.length / 4) / 255;
+      const gain = Math.min(2.6, Math.max(1, 0.42 / Math.max(0.05, mean)));
+      this.light = gain > 1.08 ? `brightness(${gain.toFixed(2)}) contrast(${(1 + (gain - 1) * 0.25).toFixed(2)})` : "none";
+    }
+    return this.small;
   }
 
   /** Procesa el fotograma de la cámara si es nuevo (máx. ~30 por segundo). */
@@ -87,14 +135,35 @@ class BodyTracker {
     this.lastTs = ts;
     if (this.depthOn) { this.updateDepth(video); this.version++; return true; }
     if (useAI && this.status === "off") this.load();
+    if (useAI && this.pose) {
+      try {
+        // Cuerpo entero a 320 px de ancho: ve personas lejos sin cargar el equipo.
+        const img = this.prepare(video, 320);
+        this.pose.detectForVideo(img, ts, (r) => {
+          const ms = r.segmentationMasks || [];
+          this.people = ms.length;
+          if (ms.length) {
+            const w = ms[0].width, h = ms[0].height, n = w * h;
+            if (!this.merged || this.merged.length !== n) this.merged = new Float32Array(n);
+            const out = this.merged; out.fill(0);
+            let mx = 0;
+            for (const m of ms) { const a = m.getAsFloat32Array(); for (let i = 0; i < n; i++) if (a[i] > out[i]) { out[i] = a[i]; if (a[i] > mx) mx = a[i]; } }
+            // Algunas tarjetas no dejan leer la silueta desde la GPU (llega vacía aunque haya
+            // gente): tras unos fotogramas así, la IA pasa sola a la CPU, que siempre funciona.
+            if (mx === 0 && !this.forceCPU && ++this.emptyMasks > 8) { this.forceCPU = true; setTimeout(() => this.switchToCPU(), 0); return; }
+            if (mx > 0) this.emptyMasks = 0;
+            this.missed = 0;
+            this.writeMask(out, w, h);
+          } else if (++this.missed > 4) this.writeMask(null, this.mask.width, this.mask.height);   // se mantiene ~0,15 s si la IA pierde un fotograma
+        });
+        this.version++;
+        return true;
+      } catch (e) { console.warn(e); this.pose = null; this.setStatus("motion"); }
+    }
     if (useAI && this.seg) {
       try {
-        // La IA trabaja a 256 px de ancho: igual de precisa y mucho más ligera.
-        const sw = 256, sh = Math.max(64, Math.round(256 * video.videoHeight / video.videoWidth));
-        if (!this.small) this.small = canvas(sw, sh);
-        if (this.small.width !== sw || this.small.height !== sh) { this.small.width = sw; this.small.height = sh; }
-        this.small.getContext("2d").drawImage(video, 0, 0, sw, sh);
-        this.seg.segmentForVideo(this.small, ts, (r) => {
+        const img = this.prepare(video, 256);
+        this.seg.segmentForVideo(img, ts, (r) => {
           const m = r.confidenceMasks && r.confidenceMasks[0];
           if (m) this.writeMask(m.getAsFloat32Array(), m.width, m.height);
         });
@@ -107,16 +176,23 @@ class BodyTracker {
     return true;
   }
 
+  /** Máscara IA → canvas (blanco con alfa). Suavizada en el tiempo: no parpadea. arr null = vaciar poco a poco. */
   writeMask(arr, w, h) {
-    if (this.mask.width !== w || this.mask.height !== h) { this.mask.width = w; this.mask.height = h; this.img = null; }
+    if (w < 2 || h < 2) return;
+    if (this.mask.width !== w || this.mask.height !== h) { this.mask.width = w; this.mask.height = h; this.img = null; this.prevMask = null; }
     const ctx = this.mask.getContext("2d");
     if (!this.img) this.img = ctx.createImageData(w, h);
-    const d = this.img.data;
+    const d = this.img.data, n = w * h;
+    if (!this.prevMask || this.prevMask.length !== n) this.prevMask = new Float32Array(n);
+    const pm = this.prevMask;
     // Sensibilidad: umbral de confianza (más alto = solo lo muy seguro).
-    const lo = 0.15 + (1 - this.sens) * 0.5, span = 0.25;
-    for (let i = 0, j = 0; i < arr.length; i++, j += 4) {
+    const lo = 0.1 + (1 - this.sens) * 0.45, span = 0.25;
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      const v = arr ? clamp01((arr[i] - lo) / span) : 0;
+      // Sube rápido (aparece al momento) y baja algo más despacio (sin parpadeos).
+      const a = pm[i] = v > pm[i] ? pm[i] + (v - pm[i]) * 0.75 : pm[i] + (v - pm[i]) * 0.4;
       d[j] = d[j + 1] = d[j + 2] = 255;
-      d[j + 3] = clamp01((arr[i] - lo) / span) * 255;
+      d[j + 3] = a * 255;
     }
     ctx.putImageData(this.img, 0, 0);
   }
@@ -199,7 +275,7 @@ export class BodyFX {
   render(video, src, cam = "default") {
     const mode = src.bodyMode || "silueta";
     if (POSE_MODES.has(mode)) return this.renderPose(video, src, cam, mode);
-    if (NEW_MODE_IDS.has(mode)) return this.renderInteractive(video, src, cam, mode);
+    if (NEW_MODE_IDS.has(mode) || PRO_MODE_IDS.has(mode)) return this.renderInteractive(video, src, cam, mode);
     const T = bodyTracker(cam);
     T.sens = src.bodySens ?? 0.5;
     T.setDepth(calib()?.depth);
@@ -408,15 +484,22 @@ BodyFX.prototype.renderInteractive = function (video, src, cam, mode) {
   T.sens = src.bodySens ?? 0.5;
   T.setDepth(calib()?.depth);
   T.update(video, true);
-  const W = 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
+  // Los efectos profesionales (GPU) trabajan a más resolución: se ven nítidos proyectados.
+  const pro = PRO_MODE_IDS.has(mode);
+  const W = pro ? 640 : 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
   for (const c of [this.out, this.m]) if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
   const mk = this.m.getContext("2d");
   mk.clearRect(0, 0, W, H);
   drawAligned(mk, T.source(false), calib(), W, H, !!src.bodyMirror);
   const now = performance.now(), dt = Math.min(0.1, (now - (this.lastI || now)) / 1000);
   this.lastI = now;
-  if (!this.ifx) this.ifx = new InteractiveFX();
-  this.ifx.render(this.out, this.m, mode, W, H, dt, src.bodySens ?? 0.5);
+  if (pro) {
+    if (!this.pro) this.pro = new ProFX();
+    this.pro.render(this.out, this.m, mode, W, H, dt, { color: src.color, color2: src.color2 });
+  } else {
+    if (!this.ifx) this.ifx = new InteractiveFX();
+    this.ifx.render(this.out, this.m, mode, W, H, dt, src.bodySens ?? 0.5);
+  }
   this.version++;
   return this;
 };

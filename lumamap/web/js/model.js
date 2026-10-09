@@ -364,6 +364,8 @@ export const DEFAULT_FX = () => ({
   gamma: 1, posterize: 0, sepia: 0, threshold: 0, hueCycle: 0, colormap: "none",
   duotone: 0, duoA: "#1a0033", duoB: "#00e5ff",
   vignette: 0, scanlines: 0, halftone: 0, edges: 0, sharpen: 0, emboss: 0,
+  // Estilos de imagen (ASCII, semitonos, dither, Game Boy, térmica… ver renderer.js STYLES)
+  style: "none", styleSize: 0.5, styleGlow: 0.5, styleColor: "",
   // Cámara y recortes
   flipX: false, flipY: false, chromaKey: 0, keyColor: "#00ff00", keySoft: 0.1, lumaKey: 0, lumaSoft: 0.05,
 });
@@ -524,6 +526,26 @@ P("Cámara", "Pixel art", { pixelate: 0.7, posterize: 5, saturation: 1.4 });
 P("Cámara", "Caleidoscopio", { kaleido: 6 });
 P("Cámara", "Fantasma", { invert: true, saturation: 0, lumaKey: 0.3, lumaSoft: 0.2 });
 P("Cámara", "Holograma", { duotone: 1, duoA: "#000814", duoB: "#00e5ff", scanlines: 0.7, glitch: 0.2, chroma: 0.008 });
+
+// Estilos de imagen («looks» como los de Ladybug): letras, puntos, píxeles y paletas.
+P("Estilos", "Retro Matrix", { style: "matrix", styleSize: 0.55, contrast: 1.3 });
+P("Estilos", "ASCII a color", { style: "ascii", styleSize: 0.5, contrast: 1.2 });
+P("Estilos", "ASCII blanco", { style: "asciiw", styleSize: 0.55 });
+P("Estilos", "Campo de números", { style: "numeros", styleSize: 0.4, styleGlow: 0.8 });
+P("Estilos", "Texto dither", { style: "texto", styleSize: 0.6 });
+P("Estilos", "Código de píxeles", { style: "pixelcode", styleSize: 0.35 });
+P("Estilos", "Semitonos dorados", { style: "oro", styleSize: 0.45, styleGlow: 0.8, contrast: 1.2 });
+P("Estilos", "RISO", { style: "riso", styleSize: 0.55 });
+P("Estilos", "Píldoras con texto", { style: "pildoras", styleSize: 0.3 });
+P("Estilos", "Rejilla de glifos", { style: "glifos", styleSize: 0.45 });
+P("Estilos", "Dither 1 bit", { style: "dither", contrast: 1.2 });
+P("Estilos", "Dither con brillo", { style: "ditherglow", styleGlow: 0.9 });
+P("Estilos", "Píxel dither", { style: "pixeldither", styleSize: 0.5 });
+P("Estilos", "Game Boy", { style: "gameboy", styleSize: 0.25, contrast: 1.15 });
+P("Estilos", "Térmica (estilo)", { style: "termica" });
+P("Estilos", "Térmica rosa", { style: "termicarosa", blur: 0.2 });
+P("Estilos", "Trazo neón", { style: "trazo", styleGlow: 0.9 });
+P("Estilos", "Polvo de estrellas", { style: "polvo", styleSize: 0.25, styleGlow: 0.8 });
 
 export const FX_LIBRARY = L;
 export const FX_CATEGORIES = [...new Set(L.map(x => x.cat))];

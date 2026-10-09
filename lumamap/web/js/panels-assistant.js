@@ -10,7 +10,8 @@ import { AIEngine, MSG } from "./ai/providers.js";
 import { validateAction, applyAction } from "./ai/actions.js";
 import { AREAS, analyzeProject } from "./ai/analyzer.js";
 import { Academy, LEVELS } from "./ai/academy.js";
-import { planChanges, applyPlan } from "./ai/showplan.js";
+import { planChanges, applyPlan, planFromSong } from "./ai/showplan.js";
+import { analyzeFile } from "./ai/songanalysis.js";
 import { MODEL_TIERS, ADVANCED_MODELS } from "./ai/hardware.js";
 import { searchKnowledge } from "./ai/knowledge.js";
 
@@ -84,6 +85,7 @@ async function send(app, text, redraw) {
 async function runIntent(app, intent, text = "") {
   const ai = aiOf(app);
   if (intent === "show") { ui.brief = text; await makeShow(app, text); }
+  else if (intent === "songshow") ui.card = { kind: "song-start" };
   else if (intent === "diagnose") ui.card = { kind: "health", data: await ai.diagnose(text) };
   else if (intent === "optimize") ui.card = { kind: "health", data: await ai.optimize(), title: "Optimizar el proyecto" };
   else if (intent === "automap") ui.card = { kind: "automap-start" };
@@ -118,6 +120,43 @@ function showCard(app, plan) {
       if (!(await confirmDlg("Aplicar el plan de show", planChanges(plan).join(". ") + ".", "Aplicar", "primary"))) return;
       toast(applyPlan(app, plan)); ui.card = null; app.renderPanel();
     } }), btn({ label: "Cancelar", onClick: () => { ui.card = null; app.renderPanel(); } })));
+  return wrap;
+}
+
+/* ---------------- Show automático con una canción ---------------- */
+function pickSong(app) {
+  const input = h("input", { type: "file", accept: "audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac" });
+  input.addEventListener("change", async () => {
+    const f = input.files[0];
+    if (!f) return;
+    ui.card = { kind: "song-busy", name: f.name }; app.renderPanel();
+    try {
+      const song = await analyzeFile(f);
+      app.actions.loadSong(f);
+      const plan = planFromSong(song, f.name.replace(/\.[^.]+$/, ""), { lights: (app.dmx?.lights() || []).length > 0 });
+      ui.card = { kind: "song", data: plan, song };
+    } catch (e) { ui.card = null; toast("No se pudo leer la canción: " + (e.message || e), "err"); }
+    app.renderPanel();
+  });
+  input.click();
+}
+function songCard(app, plan, song) {
+  const fmt = (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, "0")}`;
+  const COL = { INTRO: "#5a6cff", BUILD: "#ffb000", DROP: "#ff2d55", BREAK: "#34c759", CLIMAX: "#ff00aa", OUTRO: "#8e9ab0" };
+  // Línea de tiempo de la canción: cada parte con su color y su energía.
+  const bar = h("div", { class: "songbar" }, ...plan.sections.map(s => h("i", { title: `${s.name} ${fmt(s.start)}`, style: { flex: String(s.seconds), background: COL[s.name] || "#666", opacity: String(0.45 + s.energy * 0.55) } }, h("b", {}, s.name))));
+  const wrap = h("div", { class: "aicard" }, h("b", {}, "🎵 " + plan.title), h("small", { class: "dim" }, ` · ${fmt(song.duration)} · ${plan.sections.length} partes`), bar);
+  const tb = h("div", { class: "plan" });
+  for (const s of plan.sections) tb.append(h("div", { class: "psec" }, h("b", {}, s.name), h("span", {}, `${fmt(s.start)} → ${fmt(s.start + s.seconds)}`),
+    h("small", {}, `${s.animation} · ${s.transition}${s.lights ? " · luces: " + s.lights : ""}${s.audio ? " · ♪ reacciona al ritmo" : ""}`)));
+  wrap.append(tb, hint("Al aplicar se crean las escenas (las tuyas no se tocan) y empieza la canción: cada escena entra en su segundo exacto y todo sigue el ritmo."),
+    row(btn({ label: "Aplicar y reproducir", ic: "play", kind: "primary", onClick: () => {
+      const P = app.S.project, first = P.scenes.length;
+      toast(applyPlan(app, plan));
+      const ids = P.scenes.slice(first).map(x => x.id);
+      app.actions.playSongShow(ids, plan.sections.map(x => x.start));
+      ui.card = { kind: "song-playing" }; app.renderPanel();
+    } }), btn({ label: "Otra canción", onClick: () => pickSong(app) }), btn({ label: "Cancelar", onClick: () => { app.actions.stopSong(); ui.card = null; app.renderPanel(); } })));
   return wrap;
 }
 
@@ -280,6 +319,7 @@ const QUICK = [
   ["Detectar Problemas", "info", async (app) => { ui.card = { kind: "health", data: await app.ai.analyze() }; app.renderPanel(); }],
   ["Aprender Mapping", "help", (app) => { ui.card = { kind: "academy" }; app.renderPanel(); }],
   ["Optimizar Proyecto", "gauge", async (app) => { ui.card = { kind: "health", data: await app.ai.optimize(), title: "Optimizar el proyecto" }; app.renderPanel(); }],
+  ["Show con mi canción", "audio", (app) => pickSong(app)],
   ["Crear Show", "scenes", (app) => { ui.card = { kind: "show-start" }; app.renderPanel(); }],
   ["Preguntar a la IA", "ai", () => document.querySelector(".asst-in")?.focus()],
 ];
@@ -310,6 +350,13 @@ const assistantPanel = {
     const c = ui.card;
     if (c?.kind === "health") wrap.append(healthCard(app, c.data, c.title));
     if (c?.kind === "show") wrap.append(showCard(app, c.data));
+    if (c?.kind === "song") wrap.append(songCard(app, c.data, c.song));
+    if (c?.kind === "song-start") wrap.append(h("div", { class: "aicard" }, h("b", {}, "🎵 Show automático con tu canción"),
+      hint("Elige una canción (mp3, wav, m4a…). La IA escucha el tempo y sus partes (intro, subida, drop…) y monta el show sola."),
+      row(btn({ label: "Elegir canción", ic: "audio", kind: "primary", onClick: () => pickSong(app) }), btn({ label: "Cancelar", onClick: () => { ui.card = null; app.renderPanel(); } }))));
+    if (c?.kind === "song-busy") wrap.append(h("div", { class: "aicard" }, h("b", {}, "🎵 Escuchando «" + c.name + "»…"), hint("Detectando el tempo y las partes de la canción.")));
+    if (c?.kind === "song-playing") { const st = app.actions.songState(); wrap.append(h("div", { class: "aicard" }, h("b", {}, st ? `🎵 Sonando «${st.name}»` : "🎵 Show terminado"),
+      row(btn({ label: "Parar la canción", ic: "stop", onClick: () => { app.actions.stopSong(); ui.card = null; app.renderPanel(); } })))); }
     if (c?.kind === "automap") wrap.append(autoMapCard(app, c.data));
     if (c?.kind === "academy") wrap.append(academyList(app));
     if (c?.kind === "automap-start") wrap.append(h("div", { class: "aicard" }, h("b", {}, "Analizar superficie"),

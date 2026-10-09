@@ -55,6 +55,28 @@ export function planFromRules(text, ctx) {
   return { title: `Show de ${Math.round(b.seconds / 60 * 10) / 10} min a ${b.bpm} BPM`, bpm: b.bpm, seconds: b.seconds, sections, source: "reglas" };
 }
 
+/**
+ * Plan a partir de una canción analizada (songanalysis.js): una escena por parte de
+ * la canción, con su duración real, la animación según su energía, transición,
+ * luces y reacción al ritmo en las partes intensas.
+ */
+export function planFromSong(song, name = "tu canción", ctx) {
+  const lib = M.ANIM_LIBRARY, used = new Set();
+  const byName = Object.fromEntries(SECTIONS.map(x => [x.id, x]));
+  const sections = song.sections.map((sec, i) => {
+    const base = byName[sec.name] || SECTIONS[1];
+    const pool = lib.filter(a => base.cats.includes(a.cat) && !used.has(a.name));
+    const anim = (pool[(i * 5 + Math.round(song.bpm)) % Math.max(1, pool.length)] || lib[i % lib.length]).name;
+    used.add(anim);
+    return {
+      name: sec.name, seconds: sec.seconds, start: sec.start, bars: sec.bars || Math.max(1, Math.round(sec.seconds / (song.barSec || 2))),
+      animation: anim, transition: i === 0 ? "fade" : base.tr, lights: ctx?.dmx?.lights || ctx?.lights ? base.lights : base.lights,
+      audio: sec.energy >= 0.45, effect: base.fx, energy: sec.energy,
+    };
+  });
+  return { title: `Show para «${name}» · ${song.bpm} BPM`, bpm: Math.round(song.bpm), seconds: Math.round(song.duration), sections, source: "tu canción", song: true };
+}
+
 /** Normaliza un plan (del modelo o de reglas) contra las bibliotecas reales. */
 export function normalizePlan(raw, ctx) {
   const base = planFromRules(raw?.brief || "", ctx);

@@ -16,9 +16,9 @@ self.onmessage = async (e) => {
           catch (err) { if (delegate === "CPU") throw err; }
         }
       };
-      const p = await make(vision.PoseLandmarker, "pose_landmarker_lite.task", { numPoses: m.numPoses || 4, minPoseDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+      const p = await make(vision.PoseLandmarker, "pose_landmarker_lite.task", { numPoses: m.numPoses || 4, minPoseDetectionConfidence: 0.35, minPosePresenceConfidence: 0.35, minTrackingConfidence: 0.35 });
       pose = p.task;
-      if (m.hands) hands = (await make(vision.HandLandmarker, "hand_landmarker.task", { numHands: m.numHands || 4, minHandDetectionConfidence: 0.5 })).task;
+      if (m.hands) hands = (await make(vision.HandLandmarker, "hand_landmarker.task", { numHands: m.numHands || 4, minHandDetectionConfidence: 0.4, minTrackingConfidence: 0.4 })).task;
       ready = true;
       self.postMessage({ t: "ready", delegate: p.delegate });
     } catch (err) { self.postMessage({ t: "error", msg: String(err && err.message || err) }); }

@@ -12,6 +12,7 @@ import { describe } from "../params.js";
 import { LIGHT_FX, findFx, defaultLightFx } from "../lightfx.js";
 import { SIGNALS } from "../tracking.js";
 import { TIMER_TEMPLATES, templateSteps, targetName } from "../timers.js";
+import { EXPERIENCES, applyExperience } from "../experiences.js";
 
 const SHAPES = [...Object.keys(M.SHAPES), "mesh"];
 const LIGHT_KINDS = ["strip", "matrix", "ring", "bar", "par", "moving"];
@@ -252,6 +253,17 @@ export const ACTIONS = {
     check: (app, p) => ({ kind: oneOf(p.kind, "kind", ["cube", "plane", "sphere", "cylinder", "cone", "pyramid", "prism"]) }),
     text: (app, p) => `Añadir un objeto 3D (${p.kind})`,
     run: async (app, p) => { const { ensure3d } = await import("../panels-3d.js"); const st = await ensure3d(app); const o = st.addObject(p.kind); app.changed({ panel: true }); app.commit(); return `${o.name} añadido`; },
+  },
+  interactive_experience: {
+    label: "Experiencia interactiva", params: { name: EXPERIENCES.map(e => e.name).join(" | ") },
+    check: (app, p) => {
+      const q = String(p.name || "").toLowerCase();
+      const ex = EXPERIENCES.find(e => e.id === p.name || e.name.toLowerCase() === q) || EXPERIENCES.find(e => q && e.name.toLowerCase().includes(q));
+      if (!ex) fail(`No existe la experiencia «${p.name}»`);
+      return { id: ex.id };
+    },
+    text: (app, p) => { const ex = EXPERIENCES.find(e => e.id === p.id); return `Montar «${ex.emoji} ${ex.name}»: ${ex.desc}`; },
+    run: (app, p) => { const r = applyExperience(app, EXPERIENCES.find(e => e.id === p.id)); if (app.S.tab !== "interactive") app.openTab("interactive"); return r; },
   },
   screen_power: {
     label: "Encender / apagar pantalla", params: { screen: "1-4 | all | nombre de superficie", on: "true|false" },

@@ -96,9 +96,15 @@ export function runAction(app, a) {
       return applyStep(app, { target, on: on !== false }) || "Destino no encontrado";
     }
     case "video": {
-      const m = P.media.find(x => x.id === a.mediaId || x.name === a.mediaId);
-      if (!m) throw new Error("No existe el video: " + (a.mediaId || "(ninguno)"));
       const sc = currentScene(P);
+      let m = P.media.find(x => x.id === a.mediaId || x.name === a.mediaId);
+      // «next»: el siguiente de los videos del proyecto (en bucle).
+      if (a.mediaId === "next") {
+        const vids = P.media.filter(x => x.kind === "video");
+        const sid = surfacesOf(app, a.surface)[0], cur = sid && sc.looks[sid]?.source?.mediaId;
+        m = vids[(vids.findIndex(x => x.id === cur) + 1) % Math.max(1, vids.length)];
+      }
+      if (!m) throw new Error("No existe el video: " + (a.mediaId || "(ninguno)"));
       for (const id of surfacesOf(app, a.surface)) {
         const look = lookOf(sc, id);
         look.source = { ...look.source, type: "media", mediaId: m.id };

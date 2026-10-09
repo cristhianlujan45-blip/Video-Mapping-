@@ -9,6 +9,7 @@ import { bodyTracker } from "./body.js";
 import { INTERACTIVE_FX, calibOf, autoCalibrate } from "./interactive.js";
 import { runAction } from "./rules.js";
 import { findFx } from "./lightfx.js";
+import { EXPERIENCES, EXPERIENCE_CATS, applyExperience } from "./experiences.js";
 
 const ui = { editing: false, cams: null };
 const pct = (v) => Math.round(v * 100) + "%";
@@ -141,14 +142,28 @@ const interactivePanel = {
       row(toggle({ label: "Usar la alineación", value: cal.enabled, onChange: (v) => set(() => { cal.enabled = v; }) }),
         btn({ label: "Reiniciar", kind: "small", onClick: () => set(() => { cal.quad = M.defaultInteractive().quad; cal.enabled = false; }) }))));
 
+    // ---- Experiencias listas (efecto + reacciones con IA + luces + tus videos) ----
+    const exGrid = h("div", { class: "ifxgrid exgrid" });
+    const cat = ui.exCat || "Todas";
+    for (const ex of EXPERIENCES.filter(e => cat === "Todas" || e.cat === cat)) {
+      exGrid.append(h("button", { class: `ifx pro ${look?.source.bodyMode === ex.mode ? "on" : ""}`, onclick: () => { toast(applyExperience(app, ex)); } },
+        h("b", {}, `${ex.emoji} ${ex.name}`), h("small", {}, ex.desc)));
+    }
+    wrap.append(section("⭐ Experiencias listas (un toque)",
+      hint("Cada una monta el efecto, las reacciones (la IA ve a la gente: entra, levanta la mano, salta…), las luces y tus videos. Funciona con cualquier cámara."),
+      h("div", { class: "chips" }, ...["Todas", ...EXPERIENCE_CATS].map(c => h("button", { class: `chip ${c === cat ? "on" : ""}`, onclick: () => { ui.exCat = c; app.renderPanel(); } }, c))),
+      exGrid,
+      row(btn({ label: S.rec ? "Parar y guardar el video" : "⏺ Grabar video de la experiencia", kind: `wide ${S.rec ? "danger" : ""}`, onClick: () => { app.actions.record(); setTimeout(() => app.renderPanel(), 300); } }),
+        btn({ label: "📷 Foto", kind: "wide", onClick: () => app.actions.snapshot() }))));
+
     // ---- 3 · Efecto ----
     const grid = h("div", { class: "ifxgrid" });
     for (const f of INTERACTIVE_FX) {
       const on = look?.source.bodyMode === f.mode;
-      grid.append(h("button", { class: `ifx ${on ? "on" : ""}`, onclick: () => {
+      grid.append(h("button", { class: `ifx ${on ? "on" : ""} ${f.pro ? "pro" : ""}`, onclick: () => {
         const s = interactiveSurface(app, true);
         const l = M.lookOf(M.currentScene(P), s.id);
-        Object.assign(l.source, { type: "body", bodyMode: f.mode, gen: f.gen, camId: cal.camId || "" });
+        Object.assign(l.source, { type: "body", bodyMode: f.mode, gen: f.gen, camId: cal.camId || "" }, f.color ? { color: f.color } : {}, f.color2 ? { color2: f.color2 } : {});
         // Los efectos de esqueleto y partículas usan el tracking del cuerpo: se pone en marcha solo.
         if (["particulas", "fuego", "humo", "esqueleto", "lineas", "geometria"].includes(f.mode)) app.tracking?.ensure(P.settings.tracking.camId || cal.camId || "default");
         app.select(s.id);

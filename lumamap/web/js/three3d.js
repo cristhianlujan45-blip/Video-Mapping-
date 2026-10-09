@@ -335,20 +335,22 @@ export class Stage3D {
     A.r.resize(W, H);
     const tiles = faces.map((face, i) => ({ face, x: (i % cols) * tile, y: Math.floor(i / cols) * tile, w: tile, h: tile }));
     A.comp.drawFaces(frame.project, frame, tiles);
-    if (!A.tex) { A.tex = new THREE.CanvasTexture(A.canvas); A.tex.colorSpace = THREE.SRGBColorSpace; A.tex.generateMipmaps = false; A.tex.minFilter = THREE.LinearFilter; }
-    A.tex.needsUpdate = true;
-    const sig = tiles.map(t => t.face.id + "@" + t.x + "," + t.y).join("|") + `|${W}x${H}`;
-    if (sig !== A.sig) {
-      A.sig = sig;
-      for (const t of tiles) {
-        let ft = this.faceTex.get(t.face.id);
-        if (!ft) { ft = A.tex.clone(); this.faceTex.set(t.face.id, ft); }
-        ft.source = A.tex.source;
-        ft.offset.set(t.x / W, 1 - (t.y + t.h) / H);
-        ft.repeat.set(t.w / W, t.h / H);
-        ft.needsUpdate = true;
+    // Cada cara tiene su propia imagen (copiada del atlas en la GPU) y se actualiza en cada
+    // fotograma: así las animaciones, videos y cámaras se mueven también sobre el objeto 3D.
+    let created = false;
+    for (const t of tiles) {
+      let ft = this.faceTex.get(t.face.id);
+      if (!ft || ft.image.width !== tile) {
+        const c = document.createElement("canvas"); c.width = c.height = tile;
+        ft = new THREE.CanvasTexture(c); ft.colorSpace = THREE.SRGBColorSpace; ft.generateMipmaps = false; ft.minFilter = THREE.LinearFilter;
+        this.faceTex.get(t.face.id)?.dispose();
+        this.faceTex.set(t.face.id, ft); created = true;
       }
+      ft.image.getContext("2d").drawImage(A.canvas, t.x, t.y, t.w, t.h, 0, 0, tile, tile);
+      ft.needsUpdate = true;
     }
+    const sig = tiles.map(t => t.face.id).join("|") + `|${tile}`;
+    if (sig !== A.sig || created) A.sig = sig + (created ? "*" + Date.now() : "");
   }
 
   /** Materiales de un modo de vista para todos los objetos. */
@@ -465,7 +467,11 @@ export class Stage3D {
     const ortho = new THREE.OrthographicCamera(-5, 5, 5, -5, -500, 500);
     const orbit = new OrbitControls(persp, canvas);
     orbit.target.set(0, 0.5, 0);
-    orbit.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+    // Como Blender pero más fácil: izquierdo o central = girar alrededor, derecho = desplazar,
+    // rueda = acercar. Un clic sin arrastrar elige el objeto (o la cara). Táctil: 1 dedo gira, 2 dedos acercan/desplazan.
+    orbit.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+    orbit.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    orbit.screenSpacePanning = true;
     orbit.enableDamping = false;
     orbit.update();
     const gizmo = new TransformControls(persp, canvas);
@@ -483,11 +489,9 @@ export class Stage3D {
     let down = null;
     canvas.addEventListener("pointerdown", (e) => {
       down = { x: e.clientX, y: e.clientY, button: e.button };
-      if (e.button === 0 && e.altKey) { orbit.mouseButtons.LEFT = THREE.MOUSE.ROTATE; this.vp.viewFrom = null; }
-      if (e.button === 1 || e.button === 2) this.vp.viewFrom = null;
+      this.vp.viewFrom = null;
     }, true);
     canvas.addEventListener("pointerup", (e) => {
-      orbit.mouseButtons.LEFT = null;
       if (!down || e.button !== 0 || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4 || gizmo.dragging || e.altKey) return;
       this.pick(e);
     });
@@ -596,8 +600,62 @@ export class Stage3D {
       let id = o.userData.lumaId, data = this.data.objects.find(x => x.id === id);
       while (data?.parent && this.sel?.id !== data.parent && this.sel?.id !== id) { id = data.parent; data = this.data.objects.find(x => x.id === id); }
       this.select("object", id);
+      // ¿Qué cara se tocó? (para ponerle una animación con un clic)
+      const slots = hit.object.userData.slots, data2 = this.data.objects.find(x => x.id === o.userData.lumaId);
+      const slot = slots?.[hit.face?.materialIndex ?? 0] ?? slots?.[0];
+      if (slot && data2?.faces?.[slot]) this.onFacePick?.(data2, slot, data2.faces[slot]);
     }
     this.app.renderPanel();
+  }
+  /** Girar la vista alrededor del objetivo (botones en pantalla): grados horizontal / vertical. */
+  orbitBy(dAz, dEl) {
+    const vp = this.vp; if (!vp) return;
+    vp.viewFrom = null;
+    const t = vp.orbit.target, off = vp.cam.position.clone().sub(t), sp = new THREE.Spherical().setFromVector3(off);
+    sp.theta += dAz * D2R; sp.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sp.phi - dEl * D2R));
+    vp.cam.position.copy(t.clone().add(new THREE.Vector3().setFromSpherical(sp)));
+    vp.cam.up.set(0, 1, 0); vp.cam.lookAt(t); vp.orbit.update();
+  }
+  zoomBy(k) {
+    const vp = this.vp; if (!vp) return;
+    vp.viewFrom = null;
+    const t = vp.orbit.target, off = vp.cam.position.clone().sub(t).multiplyScalar(k);
+    if (off.length() < 0.2 || off.length() > 200) return;
+    vp.cam.position.copy(t.clone().add(off));
+    if (vp.cam.isOrthographicCamera && vp.cam.userData.size) vp.cam.userData.size *= k;
+    vp.orbit.update();
+  }
+  /** Centro y tamaño de lo que hay en la escena (o del objeto elegido). */
+  bounds() {
+    const n = this.selNode(), obj = n?.obj || this.root;
+    const box = new THREE.Box3().setFromObject(obj);
+    if (box.isEmpty()) return { c: new THREE.Vector3(0, 0.5, 0), r: 0.9 };
+    return { c: box.getCenter(new THREE.Vector3()), r: Math.max(0.3, box.getSize(new THREE.Vector3()).length() / 2) };
+  }
+  /**
+   * Proyectores colocados solos alrededor del objeto, mirándolo, cada uno por su salida.
+   * n = 1-4 (2: a ±45° para ver dos caras; 3 y 4: alrededor, 360°).
+   * Devuelve los proyectores creados (los de una plantilla anterior se quitan).
+   */
+  projectorRig(n, { holo = false } = {}) {
+    const d = this.data, P = this.app.S.project, { c, r } = this.bounds();
+    // Quita los de la plantilla anterior y sus salidas.
+    const old = new Set(d.projectors.filter(p => p.rig).map(p => p.id));
+    d.projectors = d.projectors.filter(p => !old.has(p.id));
+    const used = (s) => P.scenes.some(sc => sc.looks[s.id]?.source?.type === "projector3d" && old.has(sc.looks[s.id].source.projectorId));
+    for (const s of P.surfaces.filter(used)) { P.surfaces.splice(P.surfaces.indexOf(s), 1); for (const sc of P.scenes) delete sc.looks[s.id]; }
+    const angles = holo ? [0, 90, 180, 270] : ({ 1: [0], 2: [-45, 45], 3: [0, 120, 240], 4: [0, 90, 180, 270] })[n] || [0];
+    const fov = 32, dist = r / Math.tan(fov * D2R / 2) * 1.15, h = holo ? c.y : c.y + r * 0.6;
+    const made = angles.map((a, i) => {
+      const ar = a * D2R, pos = [c.x + Math.sin(ar) * dist, h, c.z + Math.cos(ar) * dist];
+      const pitch = -Math.atan2(h - c.y, dist) / D2R;
+      const pr = { id: M.uid("proj"), name: holo ? `Holograma ${["frente", "derecha", "detrás", "izquierda"][i]}` : `Proyector ${i + 1}`, pos, rot: [pitch, a, 0], fov,
+        res: holo ? [1024, 1024] : [P.width, P.height], near: 0.05, far: dist * 4, shift: [0, 0], screen: holo ? 1 : i + 1, rig: true };
+      d.projectors.push(pr);
+      return pr;
+    });
+    this.select("projector", made[0].id);
+    return made;
   }
   viewCamera() {
     const vp = this.vp;

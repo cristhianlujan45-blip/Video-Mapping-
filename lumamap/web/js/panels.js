@@ -10,6 +10,7 @@ import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
 import { genThumb, animThumb } from "./thumbs.js";
 import { timersSection } from "./panels-timers.js";
+import { STYLES } from "./renderer.js";
 import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./sources.js";
 import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
 import { PRO_PANELS, PRO_TABS } from "./panels-pro.js";
@@ -550,6 +551,13 @@ const fx = {
         search, cats,
         toggle({ label: "Combinar con el efecto actual", hint: "Apagado: cada efecto sustituye al anterior", value: fxUI.combine, onChange: (v) => { fxUI.combine = v; } }),
         grid),
+      fold("✨ Estilos (ASCII, Matrix, semitonos, dither, Game Boy, térmica…)", (f.style || "none") !== "none",
+        hint("Convierten cualquier contenido (video, cámara, animación o interactivo) en arte: letras, puntos, píxeles…"),
+        h("div", { class: "chips stylelib" }, ...STYLES.map(([id, name]) => h("button", { class: `chip ${(f.style || "none") === id ? "on" : ""}`, onclick: () => { app.edit(() => { look.fx.style = id; look.fx.styleColor = ""; }); app.renderPanel(); } }, name))),
+        (f.style || "none") !== "none" ? h("div", {},
+          sl("styleSize", (v) => v < 0.34 ? "Pequeño" : v < 0.67 ? "Medio" : "Grande"),
+          sl("styleGlow", pct),
+          swatches({ label: "Color (Matrix, números, dither)", value: f.styleColor || STYLES.find(x => x[0] === f.style)?.[2] || "#39ff6a", palette: ["#39ff6a", "#3dffb0", "#ffffff", "#ff4fd8", "#c6ff1a", "#ffb000", "#00e5ff", "#ff3b3b"], onChange: set("styleColor") })) : null),
       fold("Borde neón (líneas sobre el contorno)", f.border > 0,
         sl("border", (v) => v ? (v * 100).toFixed(1) : "No"),
         swatches({ value: f.borderColor, onChange: set("borderColor") }),

@@ -165,6 +165,19 @@ export const NEW_MODE_IDS = new Set(NEW_MODES.map(m => m[0]));
 
 /** Galería del modo fácil: efecto → modo de cuerpo + animación que lo colorea. */
 export const INTERACTIVE_FX = [
+  // Profesionales (simulación en la GPU, como los suelos y paredes interactivos comerciales)
+  { mode: "agua", name: "💧 Agua real", desc: "Ondas de verdad que se propagan y rebotan al pisar", gen: "ocean", color: "#1a8cf0", color2: "#06203f", pro: true },
+  { mode: "koi", name: "🐟 Estanque con peces koi", desc: "Agua con peces que huyen de la gente", gen: "ocean", pro: true },
+  { mode: "fluido", name: "🌈 Fluido de colores", desc: "Tinta de colores que el cuerpo empuja y arremolina", gen: "rainbow", pro: true },
+  { mode: "humo_pro", name: "🌫 Humo que empujas", desc: "Humo blanco que sigue tus movimientos", gen: "smoke", pro: true },
+  { mode: "polvo", name: "✨ Polvo de estrellas", desc: "Tu silueta hecha de chispas con estela", gen: "galaxy", pro: true },
+  { mode: "agua_neon", name: "⚡ Agua de neón", desc: "Ondas de luz neón al moverse", gen: "plasma", color: "#00e5ff", color2: "#ff2bd6", pro: true },
+  { mode: "arena", name: "🏖 Arena con huellas", desc: "Se marcan tus pasos y se borran despacio", gen: "fire", pro: true },
+  { mode: "nieve", name: "❄ Nieve con huellas", desc: "Pisadas en la nieve que brilla", gen: "snow", pro: true },
+  { mode: "niebla", name: "🌌 Niebla que se aparta", desc: "Al pasar se ve el cielo de colores detrás", gen: "aurora", color: "#7a2cff", pro: true },
+  { mode: "hojas", name: "🍂 Hojas de otoño", desc: "Las hojas salen volando cuando pasas", gen: "fire", pro: true },
+  { mode: "petalos", name: "🌸 Pétalos de flores", desc: "Pétalos que se apartan a tu paso", gen: "rainbow", pro: true },
+  { mode: "pelota", name: "⚽ Pelota gigante", desc: "Juego: patea o empuja la pelota", gen: "rainbow", pro: true },
   { mode: "silueta", name: "Silueta de colores", desc: "La persona se llena de animación", gen: "rainbow" },
   { mode: "contorno", name: "Contorno de neón", desc: "Un borde de luz alrededor del cuerpo", gen: "plasma" },
   { mode: "estela", name: "Estela mágica", desc: "Al moverse deja un rastro de color", gen: "aurora" },

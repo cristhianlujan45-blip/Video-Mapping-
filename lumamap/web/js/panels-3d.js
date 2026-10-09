@@ -3,7 +3,8 @@
 // proyectores virtuales, propiedades, modos de vista, vista dividida, snap,
 // unidades y atajos configurables. El motor está en three3d.js (se carga al
 // abrir el panel por primera vez).
-import { h, section, row, btn, segmented, toggle, hint, toast, dialog, closeDialog } from "./ui.js";
+import { h, section, row, btn, segmented, toggle, hint, toast, dialog, closeDialog, tiles } from "./ui.js";
+import { animThumb } from "./thumbs.js";
 import { icon } from "./icons.js";
 import * as M from "./model.js";
 
@@ -75,7 +76,35 @@ function buildToolbar(app, st) {
     btn({ label: "Ver desde proyector", kind: "small", title: "Numpad 0", onClick: () => st.viewFromProjector(st.sel?.type === "projector" ? st.sel.id : null) }),
     h("span", { class: "grow" }),
     btn({ label: "Volver al 2D", ic: "close", kind: "small", onClick: () => { closeWorkspace(app); if (app.S.tab === "3d") app.openTab(null); } }),
-    h("small", { class: "ws3d-help" }, "Central: orbitar · Mayús+central: desplazar · Rueda: zoom · Alt+izq: orbitar · Numpad 1/3/7 vistas"));
+    h("small", { class: "ws3d-help" }, "Arrastrar: girar alrededor · Clic derecho: desplazar · Rueda o 2 dedos: acercar · Clic en una cara: su animación"));
+  // Botones de navegación en pantalla (para táctil y para quien no use atajos).
+  const nav = document.querySelector("#ws3d .ws3d-nav") || h("div", { class: "ws3d-nav" });
+  nav.innerHTML = "";
+  const nb = (label, title, fn) => h("button", { title, onclick: fn }, label);
+  nav.append(nb("⟲", "Girar a la izquierda", () => st.orbitBy(-20, 0)), nb("⟳", "Girar a la derecha", () => st.orbitBy(20, 0)),
+    nb("↑", "Mirar desde más arriba", () => st.orbitBy(0, 12)), nb("↓", "Mirar desde más abajo", () => st.orbitBy(0, -12)),
+    nb("+", "Acercar", () => st.zoomBy(0.8)), nb("−", "Alejar", () => st.zoomBy(1.25)), nb("⌂", "Centrar el objeto", () => st.frameSelection()),
+    nb("Frente", "Vista de frente", () => st.view("front")), nb("Lado", "Vista de lado", () => st.view("right")), nb("Arriba", "Vista desde arriba", () => st.view("top")),
+    nb("3D", "Vista en perspectiva", () => { st.view("front"); st.orbitBy(35, 22); }));
+  if (!nav.isConnected) document.querySelector("#ws3d .ws3d-view")?.append(nav);
+  // Clic en una cara de un objeto → elegir su animación.
+  st.onFacePick = (o, slot, faceId) => facePicker(app, o, slot, faceId);
+}
+
+/** Elegir la animación de una cara con un toque (o ponerla en todas). */
+function facePicker(app, o, slot, faceId) {
+  const P = app.S.project, sc = M.currentScene(P);
+  const apply = (a, all) => {
+    const ids = all ? Object.values(o.faces) : [faceId];
+    app.edit(() => { for (const id of ids) sc.looks[id] = M.createLook({ type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale }); });
+    toast(`${a.name} · ${all ? "todas las caras" : M.SLOT_NAMES[slot] || slot}`);
+  };
+  let all = false;
+  const t = tiles(M.ANIM_LIBRARY.slice(0, 120).map(a => ({ id: a.id, label: a.name, img: () => animThumb(a) })), { cols: 4, onPick: (id) => { apply(M.ANIM_LIBRARY.find(x => x.id === id), all); closeDialog(); } });
+  dialog({ title: `${o.name} · cara ${M.SLOT_NAMES[slot] || slot}`, wide: true, content: h("div", {},
+    toggle({ label: "Poner en todas las caras", value: false, onChange: (v) => { all = v; } }),
+    btn({ label: "Otro contenido (video, cámara, texto…)", kind: "block", onClick: () => { closeDialog(); app.select(faceId); app.openTab("content"); } }),
+    h("div", { class: "facepick" }, t)), buttons: [] });
 }
 
 async function importModel(app, st) {
@@ -151,6 +180,45 @@ const panel3d = {
     const d = st.data, [uName, uK] = st.units();
     const changed = (panel = false) => { app.changed({ panel }); app.commitSoon(); };
 
+    // ---- Fácil: objeto → animaciones en sus caras → proyectores ----
+    const easy = h("div", { class: "p3d-easy" });
+    easy.append(section("1 · Objeto",
+      h("div", { class: "chips" }, ...Mod.KINDS_3D.map(([k, l]) => h("button", { class: "chip", onclick: () => { st.addObject(k); st.frameSelection(); app.changed({ panel: true }); app.commit(); } }, "+ " + l)),
+        h("button", { class: "chip", onclick: () => importModel(app, st) }, "Importar modelo…")),
+      hint("Muévete como en Blender: arrastra para girar alrededor, clic derecho para desplazar, rueda (o dos dedos) para acercar. También con los botones sobre la vista.")));
+    const firstObj = d.objects.find(x => x.kind !== "group" && Object.keys(x.faces).length);
+    const sc = M.currentScene(S.project);
+    const allFaces = (gen) => { if (!firstObj) return toast("Añade primero un objeto", "err"); app.edit(() => { const objs = st.sel?.type === "object" ? d.objects.filter(x => x.id === st.sel.id) : d.objects; for (const ob of objs) Object.values(ob.faces).forEach((fid, i) => { const a = gen === "random" ? M.ANIM_LIBRARY[(Math.random() * M.ANIM_LIBRARY.length) | 0] : M.ANIM_LIBRARY.find(x => x.gen === gen) || M.ANIM_LIBRARY[i % M.ANIM_LIBRARY.length]; sc.looks[fid] = M.createLook({ type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale }); }); }); };
+    easy.append(section("2 · Animaciones en las caras",
+      hint("Haz clic en una cara del objeto en la vista 3D y elige su animación. O con un toque:"),
+      h("div", { class: "chips" },
+        h("button", { class: "chip", onclick: () => allFaces("random") }, "🎲 Una distinta en cada cara"),
+        h("button", { class: "chip", onclick: () => allFaces("plasma") }, "Plasma en todas"),
+        h("button", { class: "chip", onclick: () => allFaces("fire") }, "Fuego en todas"),
+        h("button", { class: "chip", onclick: () => allFaces("galaxy") }, "Galaxia en todas"),
+        h("button", { class: "chip", onclick: () => allFaces("calib") }, "Patrón de calibración"))));
+    const rig = (n, holo) => {
+      if (!d.objects.length) return toast("Añade primero un objeto", "err");
+      const made = st.projectorRig(n, { holo });
+      if (holo) app.actions.hologram(made.map(p => p.id));
+      else made.forEach(p => app.actions.projectorToScreen(p.id, p.screen));
+      app.changed({ panel: true }); app.commit();
+      toast(holo ? "Holograma listo: 4 vistas en cruz por P1. Pon la pirámide en el centro." : `${n} proyector(es) alrededor del objeto, cada uno por su salida (P1${n > 1 ? "-P" + n : ""})`);
+    };
+    easy.append(section("3 · Proyectores",
+      hint("Se colocan solos alrededor del objeto mirándolo, y cada uno sale por su pantalla."),
+      h("div", { class: "chips" },
+        h("button", { class: "chip", onclick: () => rig(1) }, "1 proyector"),
+        h("button", { class: "chip", onclick: () => rig(2) }, "2 (esquina: dos caras)"),
+        h("button", { class: "chip", onclick: () => rig(3) }, "3 alrededor"),
+        h("button", { class: "chip", onclick: () => rig(4) }, "4 alrededor (360°)"),
+        h("button", { class: "chip", onclick: () => rig(4, true) }, "🔺 Holograma (pirámide)")),
+      d.projectors.length ? row(btn({ label: "Ver desde un proyector", kind: "wide", onClick: () => st.viewFromProjector(null) }), btn({ label: "Vista libre", kind: "wide", onClick: () => { st.vp.viewFrom = null; st.frameSelection(); } })) : null));
+    wrap.append(easy);
+    const adv = h("details", { class: "fold" }, h("summary", {}, "Avanzado (posiciones exactas, rejilla, snap, atajos)"));
+    wrap.append(adv);
+    const wrapAdv = adv;
+
     // ---- Objetos ----
     const objs = h("div", { class: "list" });
     const rowObj = (o, depth = 0) => {
@@ -165,13 +233,13 @@ const panel3d = {
     if (!d.objects.length) objs.append(hint("Añade un cubo, un plano u otra forma, o importa el modelo 3D de tu edificio o escenario."));
     const addRow = h("div", { class: "chips" }, ...Mod.KINDS_3D.map(([k, l]) => h("button", { class: "chip", onclick: () => { st.addObject(k); app.changed({ panel: true }); app.commit(); } }, "+ " + l)),
       h("button", { class: "chip", onclick: () => importModel(app, st) }, "Importar modelo…"));
-    wrap.append(section("Objetos", addRow, objs));
+    wrapAdv.append(section("Objetos", addRow, objs));
 
     // ---- Propiedades del objeto ----
     const o = st.sel?.type === "object" ? d.objects.find(x => x.id === st.sel.id) : null;
     if (o) {
       const groups = d.objects.filter(x => x.kind === "group" && x.id !== o.id);
-      wrap.append(section(o.name,
+      wrapAdv.append(section(o.name,
         h("input", { class: "text-in", value: o.name, onchange: (e) => { o.name = e.target.value; changed(true); } }),
         vec3(`Posición (${uName})`, o.pos, uK, () => changed(), 0.01),
         vec3("Rotación (°)", o.rot, 1, () => changed(), 1),
@@ -196,10 +264,10 @@ const panel3d = {
         h("span", {}, p.name, h("small", {}, ` · ${p.res[0]}×${p.res[1]} · P${p.screen}${used ? " · en salida" : ""}`))));
     }
     if (!d.projectors.length) pl.append(hint("Añade un proyector y colócalo donde está el real. Luego sácalo por una pantalla (P1-P4)."));
-    wrap.append(section("Proyectores", pl, btn({ label: "Añadir proyector", ic: "plus", kind: "block", onClick: () => { st.addProjector(); app.changed({ panel: true }); app.commit(); } })));
+    wrapAdv.append(section("Proyectores", pl, btn({ label: "Añadir proyector", ic: "plus", kind: "block", onClick: () => { st.addProjector(); app.changed({ panel: true }); app.commit(); } })));
     const p = st.sel?.type === "projector" ? d.projectors.find(x => x.id === st.sel.id) : null;
     if (p) {
-      wrap.append(section(p.name,
+      wrapAdv.append(section(p.name,
         h("input", { class: "text-in", value: p.name, onchange: (e) => { p.name = e.target.value; changed(true); } }),
         vec3(`Posición (${uName})`, p.pos, uK, () => changed(), 0.01),
         vec3("Rotación (°)", p.rot, 1, () => changed(), 0.5),
@@ -216,7 +284,7 @@ const panel3d = {
     }
 
     // ---- Ajustes ----
-    wrap.append(section("Vista, rejilla y snap",
+    wrapAdv.append(section("Vista, rejilla y snap",
       h("label", { class: "field" }, h("span", { class: "lab" }, "Modo de vista"), selectEl(Mod.VIEW_MODES, d.viewMode, (v) => { d.viewMode = v; changed(); })),
       row(h("label", { class: "field" }, h("span", { class: "lab" }, "Unidades"), selectEl([["m", "Metros"], ["cm", "Centímetros"], ["mm", "Milímetros"], ["ft", "Pies"]], d.units, (v) => { d.units = v; changed(true); })),
         h("label", { class: "field" }, h("span", { class: "lab" }, `Rejilla (${uName})`), num(d.gridStep * uK, (v) => { d.gridStep = Math.max(0.001, v / uK); changed(); }))),
@@ -233,4 +301,4 @@ const panel3d = {
 };
 
 export const PANELS_3D = { "3d": panel3d };
-export const TABS_3D = [{ id: "3d", label: "3D", ic: "cube", pro: true }];
+export const TABS_3D = [{ id: "3d", label: "3D", ic: "cube" }];

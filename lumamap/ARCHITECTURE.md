@@ -203,6 +203,24 @@ el canal `Link` de siempre.
   modo sensor del detector (`BodyTracker.updateDepth`): fondo aprendido de la zona
   vacía y diferencia por píxel; vale para cualquier codificación de profundidad.
 
+### Efectos profesionales, estilos, tiempos y experiencias
+- `fx-pro.js`: simulaciones en un contexto WebGL2 propio por superficie (texturas
+  RGBA16F, `EXT_color_buffer_float`): ecuación de onda (agua, neón, koi), fluidos
+  (advección, vorticidad, presión por Jacobi; el cuerpo empuja con −∇máscara ·
+  Δmáscara), campos de altura que se rellenan (arena, nieve), niebla; y física en
+  CPU para hojas, pétalos, pelota y polvo de estrellas. Salida = colores finales
+  (la superficie la muestra tal cual). Sin WebGL2 flotante: respaldo 2D.
+- Estilos (`renderer.js` `stylize()`): en el shader principal; los de celdas
+  muestrean el centro de cada celda antes de leer la fuente (vale para video,
+  cámara, generadores y cuerpo) y dibujan letras con un atlas 8×8 en la unidad 1.
+- `timers.js`: pasos {at, target, on} evaluados en cada fotograma; plantillas.
+- `experiences.js`: efecto + reglas de tracking (marcadas `experience`, se
+  sustituyen al cambiar) + luces + videos del proyecto.
+- `ai/songanalysis.js`: envolventes a 100 Hz, golpes de graves → `estimateTempo`
+  por ventanas (mediana), energía por compás, tramos por nivel unidos a ≥ N
+  compases y nombrados por energía. El show sincroniza la escena con
+  `audio.currentTime` en cada fotograma.
+
 ### Luces (`lightfx.js`)
 - 75 efectos como funciones por LED (posición, tiempo, tempo, audio); CPU pura y
   barata, probada en Node. `dmx.js` los aplica a pixel maps (source «effect») y a
