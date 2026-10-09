@@ -2,7 +2,7 @@
 // Requiere Playwright: `npm i -D playwright && npx playwright install chromium`
 // (o PLAYWRIGHT_MODULE=/ruta/a/playwright/index.mjs). Ejecuta: npm run test:browser
 import { createServer } from "../server/index.js";
-import { test, report } from "./harness.js";
+import { test, report, setOnFail } from "./harness.js";
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
@@ -36,6 +36,13 @@ page.on("pageerror", e => errors.push(e.message));
 // El bucle de la app atrapa los errores para que el show nunca se pare (console.error):
 // aquí cuentan igual, así un efecto que falla en cada fotograma no pasa desapercibido.
 page.on("console", m => { if (m.type() === "error" && /TypeError|ReferenceError|RangeError|SyntaxError/.test(m.text())) errors.push("consola: " + m.text().slice(0, 300)); });
+// Si una prueba falla: captura de pantalla y qué hay abierto (diálogo, pestaña), para ver la causa en la CI.
+let shotN = 0;
+setOnFail(async (name) => {
+  const info = await page.evaluate(() => ({ tab: window.__lumamap?.S.tab, dialog: document.querySelector("#modal.show h2")?.textContent || "", toast: document.querySelector(".toast")?.textContent || "" })).catch(() => ({}));
+  console.error("    estado:", JSON.stringify(info));
+  if (process.env.SHOTS_DIR) { fs.mkdirSync(process.env.SHOTS_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.SHOTS_DIR, `${String(++shotN).padStart(2, "0")}-${name.replace(/[^\w]+/g, "_").slice(0, 60)}.png`) }); }
+});
 await page.goto(base);
 await page.waitForTimeout(800);
 await page.getByText("Cubo 3D").click();

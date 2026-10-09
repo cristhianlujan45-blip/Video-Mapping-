@@ -56,7 +56,7 @@ jobs:
   # (Electron) con red de verdad: Art-Net, sACN, búsqueda de nodos, entrada DMX.
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,18 +68,31 @@ jobs:
           (cd desktop && npm ci --no-audit --no-fund)
           npm i --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
+      # Cada paso se ejecuta aunque falle el anterior: así se ve todo lo que falla de una vez.
       - name: Pruebas en el navegador
         working-directory: lumamap
+        env:
+          SHOTS_DIR: ${{ runner.temp }}/shots
         run: node tests/browser.test.js
       - name: Tracking real (cámara falsa con una persona → IA → regla)
+        if: success() || failure()
         working-directory: lumamap
         run: node tests/tracking.browser.test.js
       - name: Pruebas de velocidad (móvil con CPU ×4, como la APK)
+        if: success() || failure()
         working-directory: lumamap
         run: node tests/perf.test.js
       - name: Pruebas de la app de escritorio (Electron + red)
+        if: success() || failure()
         working-directory: lumamap
         run: xvfb-run -a node tests/desktop.e2e.mjs
+      - name: Capturas de las pruebas que fallaron
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-pruebas-fallidas
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
 
   windows:
     runs-on: windows-latest
