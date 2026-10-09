@@ -520,7 +520,7 @@ BodyFX.prototype.renderInteractive = function (video, src, cam, mode) {
   this.lastI = now;
   if (pro) {
     if (!this.pro) this.pro = new ProFX();
-    this.pro.render(this.out, this.m, mode, W, H, dt, { color: src.color, color2: src.color2 });
+    this.pro.render(this.out, this.m, mode, W, H, dt, { color: src.color, color2: src.color2, sound: src.bodySound !== false, score: src.bodyScore !== false });
   } else {
     if (!this.ifx) this.ifx = new InteractiveFX();
     this.ifx.render(this.out, this.m, mode, W, H, dt, src.bodySens ?? 0.5);

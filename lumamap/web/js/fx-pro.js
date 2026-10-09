@@ -19,6 +19,7 @@ export const PRO_MODES = [
   ["fluido", "Fluido de colores"], ["humo_pro", "Humo que empujas"], ["arena", "Arena con huellas"],
   ["nieve", "Nieve con huellas"], ["niebla", "Niebla que se aparta"], ["hojas", "Hojas de otoño"],
   ["petalos", "Pétalos de flores"], ["pelota", "Pelota gigante"], ["polvo", "Polvo de estrellas"],
+  ["burbujas_pro", "Burbujas de jabón (tócalas)"],
 ];
 export const PRO_MODE_IDS = new Set(PRO_MODES.map(m => m[0]));
 
@@ -210,6 +211,41 @@ class GPU {
 }
 
 /** Partículas que la gente empuja (hojas, pétalos) y la pelota: física sencilla en la CPU. */
+/** Una burbuja de jabón: casi transparente, con borde de arcoíris y brillos. */
+function drawBubble(ctx, x, y, r, hue, ph) {
+  const body = ctx.createRadialGradient(x, y, r * 0.55, x, y, r);
+  body.addColorStop(0, "rgba(120,180,255,0.02)"); body.addColorStop(0.85, "rgba(170,210,255,0.10)"); body.addColorStop(1, "rgba(220,240,255,0.30)");
+  ctx.fillStyle = body; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  // Borde iridiscente (colores que giran despacio).
+  let rim;
+  if (ctx.createConicGradient) {
+    rim = ctx.createConicGradient(ph * 0.5, x, y);
+    for (let k = 0; k <= 6; k++) rim.addColorStop(k / 6, `hsla(${(hue + k * 60) % 360},95%,70%,0.55)`);
+  } else rim = `hsla(${hue % 360},95%,70%,0.55)`;
+  ctx.strokeStyle = rim; ctx.lineWidth = Math.max(1.5, r * 0.07);
+  ctx.beginPath(); ctx.arc(x, y, r * 0.96, 0, Math.PI * 2); ctx.stroke();
+  // Brillo principal arriba a la izquierda y reflejo pequeño abajo a la derecha.
+  const hl = ctx.createRadialGradient(x - r * 0.38, y - r * 0.42, 0, x - r * 0.38, y - r * 0.42, r * 0.32);
+  hl.addColorStop(0, "rgba(255,255,255,0.85)"); hl.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = hl; ctx.beginPath(); ctx.ellipse(x - r * 0.38, y - r * 0.42, r * 0.3, r * 0.18, -0.6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.ellipse(x + r * 0.42, y + r * 0.45, r * 0.1, r * 0.05, -0.6, 0, Math.PI * 2); ctx.fill();
+}
+/** «Pop» corto sintetizado (sin archivos): solo en la ventana del editor, una vez. */
+let popCtx = null, lastPop = 0;
+function popSound(size = 0.5) {
+  if (typeof window === "undefined" || !window.__lumamap || window.__lumamap.S?.muted) return;
+  const now = performance.now();
+  if (now - lastPop < 40) return;
+  lastPop = now;
+  try {
+    popCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    const t = popCtx.currentTime, o = popCtx.createOscillator(), g = popCtx.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(900 - size * 500, t); o.frequency.exponentialRampToValueAtTime(140, t + 0.09);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g).connect(popCtx.destination); o.start(t); o.stop(t + 0.13);
+  } catch {}
+}
+
 class Bodies {
   constructor() { this.items = []; this.grid = null; }
   sense(mask, W, H) {
@@ -259,6 +295,7 @@ export class ProFX {
     ctx.globalCompositeOperation = "source-over";
     if (g && this.gpu) ctx.drawImage(g.canvas, 0, 0, W, H);
     else if (gpuMode) this.fallback(ctx, mask, mode, W, H, c1, c2);
+    if (mode === "burbujas_pro") { this.b.sense(mask, W, H); this.soap(ctx, W, H, dt, opts); return true; }
     if (mode === "koi" || mode === "hojas" || mode === "petalos" || mode === "pelota" || mode === "polvo") { this.b.sense(mask, W, H); this[mode === "koi" ? "fish" : mode === "pelota" ? "ball" : mode === "polvo" ? "stardust" : "leaves"](ctx, W, H, dt, mode, opts); }
     return true;
   }
@@ -362,6 +399,75 @@ export class ProFX {
     }
   }
   /** Pelota gigante que rebota en la gente y en los bordes (fútbol en el suelo o la pared). */
+  /**
+   * Burbujas de jabón: suben flotando con reflejos de arcoíris; si alguien las toca (su
+   * silueta las alcanza en la proyección) revientan en gotas, suenan («pop») y suman.
+   */
+  soap(ctx, W, H, dt, opts = {}) {
+    const B = this.b;
+    const st = this.state ??= { bubbles: [], pops: [], drops: [], score: 0, spawn: 0, shown: 0 };
+    const R = Math.min(W, H);
+    // Fondo: negro con un leve degradado del color 2 (en la proyección, lo negro no se ve).
+    const bg = ctx.createRadialGradient(W / 2, H * 0.6, 0, W / 2, H * 0.6, Math.max(W, H) * 0.8);
+    const c2 = opts.color2 || "#06203f";
+    bg.addColorStop(0, c2 + "66"); bg.addColorStop(1, "#000000");
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    // Nacen abajo (y algunas por los lados) hasta ~22 a la vez.
+    st.spawn -= dt;
+    if (st.spawn <= 0 && st.bubbles.length < 22) {
+      st.spawn = 0.25 + Math.random() * 0.45;
+      const r = R * (0.045 + Math.random() * 0.08);
+      st.bubbles.push({ x: r + Math.random() * (W - 2 * r), y: H + r, r, vy: R * (0.06 + Math.random() * 0.08), ph: Math.random() * 6.28, wob: 0.5 + Math.random(), age: 0, hue: Math.random() * 360 });
+    }
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = st.bubbles.length - 1; i >= 0; i--) {
+      const b = st.bubbles[i];
+      b.age += dt; b.ph += dt * b.wob;
+      b.y -= b.vy * dt;
+      const x = b.x + Math.sin(b.ph) * b.r * 0.35, y = b.y;
+      if (y < -b.r * 1.5) { st.bubbles.splice(i, 1); continue; }
+      // ¿La toca alguien? Centro y 8 puntos del borde.
+      let touched = b.age > 0.3 && B.at(x, y, W, H) > 0.4;
+      for (let k = 0; !touched && b.age > 0.3 && k < 8; k++) { const a = k / 8 * Math.PI * 2; touched = B.at(x + Math.cos(a) * b.r * 0.85, y + Math.sin(a) * b.r * 0.85, W, H) > 0.4; }
+      if (touched) {
+        st.bubbles.splice(i, 1); st.score++; st.shown = 2.5;
+        st.pops.push({ x, y, r: b.r, life: 1, hue: b.hue });
+        for (let k = 0; k < 16; k++) { const a = Math.random() * 6.28, sp = R * (0.2 + Math.random() * 0.5); st.drops.push({ x: x + Math.cos(a) * b.r * 0.8, y: y + Math.sin(a) * b.r * 0.8, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - R * 0.1, life: 1, s: 1 + Math.random() * 2.5 }); }
+        if (opts.sound) popSound(Math.min(1, b.r / (R * 0.12)));
+        continue;
+      }
+      drawBubble(ctx, x, y, b.r, b.hue + this.t * 40, b.ph);
+    }
+    // Estallidos: anillo que se abre y gotas que caen.
+    for (let i = st.pops.length - 1; i >= 0; i--) {
+      const p = st.pops[i]; p.life -= dt * 3.2;
+      if (p.life <= 0) { st.pops.splice(i, 1); continue; }
+      ctx.strokeStyle = `hsla(${p.hue},100%,75%,${p.life})`; ctx.lineWidth = 1 + p.life * 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 + (1 - p.life) * 0.8), 0, Math.PI * 2); ctx.stroke();
+    }
+    if (st.drops.length > 900) st.drops.splice(0, st.drops.length - 900);
+    for (let i = st.drops.length - 1; i >= 0; i--) {
+      const d = st.drops[i]; d.life -= dt * 1.4;
+      if (d.life <= 0) { st.drops.splice(i, 1); continue; }
+      d.vy += R * 1.2 * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vx *= 0.98;
+      ctx.fillStyle = `rgba(200,235,255,${d.life * 0.9})`;
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.s, 0, Math.PI * 2); ctx.fill();
+    }
+    // Contador (se ve un momento después de cada burbuja reventada).
+    st.shown = Math.max(0, st.shown - dt);
+    if (st.score && st.shown > 0 && opts.score !== false) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = Math.min(1, st.shown);
+      ctx.font = `800 ${Math.round(R * 0.07)}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillStyle = "#ffffff"; ctx.shadowColor = opts.color || "#4fc3ff"; ctx.shadowBlur = R * 0.03;
+      ctx.fillText(`🫧 ${st.score}`, W / 2, R * 0.03);
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
   ball(ctx, W, H, dt) {
     const B = this.b;
     if (!B.items.length) B.items.push({ x: W / 2, y: H / 2, vx: 120, vy: 60, r: Math.min(W, H) * 0.09, a: 0 });

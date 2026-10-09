@@ -166,6 +166,7 @@ export const NEW_MODE_IDS = new Set(NEW_MODES.map(m => m[0]));
 /** Galería del modo fácil: efecto → modo de cuerpo + animación que lo colorea. */
 export const INTERACTIVE_FX = [
   // Profesionales (simulación en la GPU, como los suelos y paredes interactivos comerciales)
+  { mode: "burbujas_pro", name: "🫧 Burbujas de jabón", desc: "Toca las burbujas proyectadas y revientan (con sonido y contador)", gen: "rainbow", color: "#4fc3ff", color2: "#06203f", pro: true },
   { mode: "agua", name: "💧 Agua real", desc: "Ondas de verdad que se propagan y rebotan al pisar", gen: "ocean", color: "#1a8cf0", color2: "#06203f", pro: true },
   { mode: "koi", name: "🐟 Estanque con peces koi", desc: "Agua con peces que huyen de la gente", gen: "ocean", pro: true },
   { mode: "fluido", name: "🌈 Fluido de colores", desc: "Tinta de colores que el cuerpo empuja y arremolina", gen: "rainbow", pro: true },

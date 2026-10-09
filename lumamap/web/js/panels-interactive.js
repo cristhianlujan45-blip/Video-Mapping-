@@ -95,6 +95,27 @@ const interactivePanel = {
     wrap.append(h("p", { class: `istate ${T.status === "ai" || T.status === "motion" || T.status === "depth" ? "ok" : ""}` }, h("i"),
       `Cámara: ${stTxt} · Alineación: ${cal.enabled ? "activa" : "sin alinear"}${surf ? " · Efecto en «" + surf.name + "»" : ""}`));
 
+    // ---- Cómo funciona (con dibujo): proyector + cámara aparte + persona que toca ----
+    const how = h("details", { class: "fold ihow", open: !surf },
+      h("summary", {}, "¿Cómo funciona? (proyector + cámara + personas)"),
+      h("div", { class: "ihowbody" },
+        h("div", { class: "ihowsketch", html: `<svg viewBox="0 0 320 150"><rect width="320" height="150" fill="#0b0d12"/>
+          <rect x="190" y="10" width="120" height="130" rx="4" fill="#06203f" stroke="#2a3346"/><text x="250" y="148" fill="#8a93a6" font-size="9" text-anchor="middle">pared o suelo</text>
+          <circle cx="225" cy="45" r="13" fill="none" stroke="#7fe9ff" stroke-width="2"/><circle cx="268" cy="80" r="10" fill="none" stroke="#ff8fd8" stroke-width="2"/><circle cx="240" cy="112" r="15" fill="none" stroke="#c6ff1a" stroke-width="2"/>
+          <path d="M275 62 l8 -8 M283 70 l10 0 M276 78 l9 7" stroke="#fff" stroke-width="2"/><text x="296" y="60" fill="#fff" font-size="9">¡pop!</text>
+          <circle cx="160" cy="62" r="7" fill="#e8b923"/><rect x="155" y="70" width="10" height="34" rx="4" fill="#e8b923"/><path d="M163 78 L196 74" stroke="#e8b923" stroke-width="5" stroke-linecap="round"/>
+          <rect x="18" y="30" width="34" height="18" rx="3" fill="#ffb400"/><text x="35" y="24" fill="#ffb400" font-size="9" text-anchor="middle">proyector</text>
+          <path d="M52 34 L190 12 M52 44 L190 138" stroke="#ffb400" stroke-dasharray="4 3" opacity=".6"/>
+          <rect x="22" y="92" width="26" height="16" rx="3" fill="#4fc3ff"/><circle cx="48" cy="100" r="5" fill="#9ff6ff"/><text x="35" y="122" fill="#4fc3ff" font-size="9" text-anchor="middle">cámara</text>
+          <path d="M53 97 L190 20 M53 103 L190 132" stroke="#4fc3ff" stroke-dasharray="2 3" opacity=".7"/></svg>` }),
+        h("ol", {},
+          h("li", {}, "El proyector proyecta el juego (por ejemplo burbujas) en la pared o el suelo."),
+          h("li", {}, "Una cámara aparte (webcam USB, la del portátil o del móvil, o un sensor) mira esa misma zona; ponla junto al proyector."),
+          h("li", {}, "La IA ve a las personas: cuando alguien toca una burbuja en la proyección, revienta. Pulsa una vez «Alinear automáticamente» para que coincida justo donde toca.")),
+        row(btn({ label: "🫧 Montar burbujas interactivas", kind: "wide primary", onClick: () => { const ex = EXPERIENCES.find(e => e.id === "burbujas"); toast(applyExperience(app, ex)); } }),
+          btn({ label: "Ver más juegos", kind: "wide", onClick: () => wrap.querySelector(".exgrid")?.scrollIntoView({ behavior: "smooth", block: "center" }) }))));
+    wrap.append(how);
+
     // ---- 1 · Cámara ----
     // Cada cámara con su tipo detectado (sensor 3D, infrarroja, escáner, capturadora…).
     const camSel = h("select", { class: "text-in" }, h("option", { value: "" }, "Cámara por defecto"));

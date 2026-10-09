@@ -552,3 +552,8 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .create3d .c3colors{display:flex;gap:14px;align-items:center;font-size:13px;}
 .create3d .c3colors input[type=color]{width:38px;height:28px;border:none;background:none;vertical-align:middle;}
 .create3d .c3acts{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+
+/* Interactivo: cómo funciona */
+.interactive .ihow .ihowbody{padding:6px 2px;}
+.interactive .ihowsketch svg{width:100%;height:auto;border-radius:10px;display:block;margin-bottom:6px;}
+.interactive .ihow ol{margin:4px 0 8px 18px;padding:0;font-size:13px;line-height:1.45;}
