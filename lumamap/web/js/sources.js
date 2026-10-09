@@ -222,12 +222,54 @@ export function stopCamera(key) {
     cams.delete(k);
   }
 }
-/** Cámaras conectadas: [{ id, label }]. Los nombres aparecen tras dar permiso. */
+/**
+ * Qué es cada cámara, por el nombre con el que se anuncia (Windows, Android y
+ * macOS dan el modelo): sensor de profundidad 3D, cámara infrarroja, escáner 3D,
+ * capturadora, cámara virtual (móvil u OBS) o webcam. Los sensores 3D publican
+ * varias cámaras (color, profundidad e infrarrojos): stream dice cuál es cada una.
+ */
+const CAMERA_KINDS = [
+  { kind: "scanner", name: "Escáner 3D", re: /revopoint|cr-?scan|einscan|shining ?3d|artec|structure sensor|creality|\bpop ?[23]\b|range ?2|mini ?2/i },
+  { kind: "depth", name: "Sensor de profundidad 3D", re: /realsense|depth|profundidad|orbbec|astra|femto|gemini ?\d|\bzed\b|stereolabs|oak-?d|luxonis|kinect|xtion|primesense|\btof\b|time.of.flight|lidar|structure core|occipital|helios|tof camera/i },
+  { kind: "ir", name: "Cámara infrarroja", re: /infrared|infrarroj|\bir\b|ir camera|windows hello|night ?vision|noir/i },
+  { kind: "capture", name: "Capturadora", re: /capture|cam ?link|elgato|avermedia|hdmi|magewell|blackmagic|decklink|ezcap|usb3?\.?0? video|video grabber/i },
+  { kind: "virtual", name: "Cámara virtual / móvil", re: /\bobs\b|virtual|droidcam|iriun|\bcamo\b|\bndi\b|epoccam|manycam|snap camera|ivcam/i },
+];
+export function classifyCamera(label = "") {
+  const k = CAMERA_KINDS.find(x => x.re.test(label)) || { kind: "webcam", name: "Cámara" };
+  // La última palabra manda («RealSense Depth Camera 435 with RGB Module Depth» es la de profundidad).
+  const last = (label.trim().match(/([\p{L}]+)\W*$/u)?.[1] || "").toLowerCase();
+  const stream = /^(depth|profundidad)$/.test(last) ? "depth" : /^(infrared|infrarrojos|ir)$/.test(last) ? "ir" : /^(rgb|color|colour)$/.test(last) ? "color"
+    : /rgb|color|colour|hd camera/i.test(label) ? "color" : /depth|profundidad/i.test(label) ? "depth" : /infrared|infrarroj|\bir\b/i.test(label) ? "ir" : "color";
+  // Los sensores 3D y las cámaras infrarrojas ven a la gente aunque esté quieta y a oscuras.
+  const sensor = (k.kind === "depth" || k.kind === "scanner") && stream !== "color" || k.kind === "ir" || stream === "ir";
+  return { kind: k.kind, kindName: k.name, stream, sensor, is3d: k.kind === "depth" || k.kind === "scanner" };
+}
+/** Nombre para mostrar: el tipo delante y sin marcas que confundan. */
+export const cameraName = (c) => c.kind === "webcam" ? c.label : `${c.kindName}${c.stream === "depth" ? " (profundidad)" : c.stream === "ir" ? " (infrarrojos)" : c.is3d ? " (color)" : ""} · ${c.label.replace(/kinect/ig, "3D")}`;
+
+/** Cámaras conectadas: [{ id, label, kind, kindName, stream, sensor, is3d }]. Los nombres aparecen tras dar permiso. */
 export async function listCameras() {
   try {
     const all = await navigator.mediaDevices.enumerateDevices();
-    return all.filter(d => d.kind === "videoinput" && d.deviceId).map((d, i) => ({ id: d.deviceId, label: d.label || `Cámara ${i + 1}` }));
+    return all.filter(d => d.kind === "videoinput" && d.deviceId).map((d, i) => {
+      const label = d.label || `Cámara ${i + 1}`;
+      return { id: d.deviceId, label, ...classifyCamera(label) };
+    });
   } catch { return []; }
+}
+/** Avisa cuando se enchufa una cámara nueva: cb([cámaras nuevas]). */
+export function watchCameras(cb) {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.addEventListener) return;
+  let known = null;
+  const check = async () => {
+    const list = await listCameras();
+    const ids = new Set(list.map(c => c.id));
+    if (known) { const fresh = list.filter(c => !known.has(c.id)); if (fresh.length) cb(fresh, list); }
+    known = ids;
+  };
+  check();
+  navigator.mediaDevices.addEventListener("devicechange", check);
 }
 
 /* ---------------- Texto ---------------- */

@@ -56,7 +56,24 @@ await test("galería: cada efecto interactivo usa un modo que existe", async () 
   const { BODY_MODES } = await import("../web/js/body.js");
   const modes = new Set(BODY_MODES.map(m => m[0]));
   for (const f of I.INTERACTIVE_FX) assert.ok(modes.has(f.mode), f.mode);
-  assert.ok(I.INTERACTIVE_FX.length >= 15);
+  assert.ok(I.INTERACTIVE_FX.length >= 24, "efectos: " + I.INTERACTIVE_FX.length);
+  assert.equal(new Set(I.INTERACTIVE_FX.map(f => f.mode)).size, I.INTERACTIVE_FX.length, "sin efectos repetidos");
+});
+
+await test("cámaras: se reconoce el tipo por el nombre (sensor 3D, infrarroja, escáner, capturadora, móvil)", async () => {
+  const { classifyCamera: c, cameraName } = await import("../web/js/sources.js");
+  const rs = "Intel(R) RealSense(TM) Depth Camera 435 with RGB Module";
+  assert.deepEqual([c(rs + " Depth").kind, c(rs + " Depth").stream, c(rs + " Depth").sensor], ["depth", "depth", true]);
+  assert.deepEqual([c(rs + " RGB").stream, c(rs + " RGB").sensor], ["color", false], "la cámara de color del sensor no es el sensor");
+  assert.equal(c(rs + " Infrared").stream, "ir");
+  assert.equal(c("Orbbec Femto Bolt Depth").kind, "depth");
+  assert.equal(c("ZED 2i").is3d, true);
+  assert.deepEqual([c("Integrated IR Camera").kind, c("Integrated IR Camera").sensor], ["ir", true]);
+  assert.equal(c("Revopoint POP 3").kind, "scanner");
+  assert.equal(c("Cam Link 4K").kind, "capture");
+  assert.equal(c("DroidCam Source 3").kind, "virtual");
+  assert.deepEqual([c("HD Pro Webcam C920").kind, c("HD Pro Webcam C920").sensor], ["webcam", false]);
+  assert.doesNotMatch(cameraName({ label: "Azure Kinect 4K Camera", ...c("Azure Kinect 4K Camera") }), /kinect/i, "sin el nombre «Kinect»");
 });
 
 report();

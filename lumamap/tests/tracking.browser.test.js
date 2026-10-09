@@ -31,6 +31,7 @@ const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, p
 const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", e => errors.push(e.message));
+page.on("console", m => { if (m.type() === "error" && /TypeError|ReferenceError|RangeError|SyntaxError/.test(m.text())) errors.push("consola: " + m.text().slice(0, 300)); });
 await page.goto(`http://127.0.0.1:${srv.address().port}/`);
 await page.waitForFunction(() => window.__lumamap?.tracking);
 await page.waitForTimeout(500);

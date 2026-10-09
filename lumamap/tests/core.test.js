@@ -399,4 +399,13 @@ await test("imagen vacía: no inventa superficies", () => {
   assert.equal(detectQuads(synthImage(60, 40, () => {})).length, 0);
 });
 
+await test("modo sin conexión (APK y navegador): todos los módulos están en la caché", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const sw = readFileSync(new URL("../web/sw.js", import.meta.url), "utf8");
+  const walk = (d) => readdirSync(new URL("../web/" + d, import.meta.url), { withFileTypes: true })
+    .flatMap(e => e.isDirectory() ? walk(d + "/" + e.name) : e.name.endsWith(".js") ? [d + "/" + e.name] : []);
+  const missing = walk("js").filter(f => !sw.includes(`"${f}"`));
+  assert.deepEqual(missing, []);
+});
+
 report();

@@ -31,14 +31,31 @@ class BodyTracker {
   constructor() {
     this.seg = null;
     this.loading = null;
-    this.status = "off";          // off | loading | ai | motion | error
+    this.status = "off";          // off | loading | ai | motion | depth | error
     this.mask = canvas();         // máscara IA: blanco con alfa = persona
     this.motion = canvas(160, 90);// máscara de movimiento
     this.prev = null; this.acc = null;
     this.lastVideoTime = -1; this.lastTs = 0; this.version = 0;
     this.sens = 0.5;
+    this.depthOn = false;          // modo sensor (profundidad / infrarrojos): fondo aprendido
+    this.dmask = canvas(160, 90); this.bg = null; this.bgLearn = 0; this.dacc = null;
     this.onStatus = () => {};
   }
+
+  /**
+   * Modo sensor para cámaras de profundidad e infrarrojas: aprende la zona vacía
+   * y marca lo que está más cerca o más lejos que ese fondo. Así ve a la gente
+   * aunque esté quieta o a oscuras, y la luz del proyector no le afecta.
+   * Sirve con cualquier codificación de profundidad (cerca claro u oscuro).
+   */
+  setDepth(on) {
+    on = !!on;
+    if (on === this.depthOn) return;
+    this.depthOn = on; this.bg = null;
+    this.setStatus(on ? "depth" : this.seg ? "ai" : this.loading ? "motion" : "off");
+  }
+  /** Vuelve a aprender el fondo (con la zona vacía). */
+  learnBackground() { this.bg = null; }
 
   setStatus(s) { if (this.status !== s) { this.status = s; this.onStatus(s); } }
 
@@ -68,6 +85,7 @@ class BodyTracker {
     this.lastVideoTime = video.currentTime;
     const ts = Math.max(this.lastTs + 1, now);
     this.lastTs = ts;
+    if (this.depthOn) { this.updateDepth(video); this.version++; return true; }
     if (useAI && this.status === "off") this.load();
     if (useAI && this.seg) {
       try {
@@ -126,8 +144,37 @@ class BodyTracker {
     ctx.putImageData(px, 0, 0);
   }
 
-  /** Máscara a usar: IA si está lista (y no se pidió movimiento), si no, movimiento. */
-  source(motionOnly) { return !motionOnly && this.status === "ai" && this.mask.width > 2 ? this.mask : this.motion; }
+  updateDepth(video) {
+    const w = 160, h = Math.max(48, Math.round(160 * video.videoHeight / video.videoWidth));
+    const c = this.dmask;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; this.bg = null; }
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.globalCompositeOperation = "copy";
+    ctx.drawImage(video, 0, 0, w, h);
+    const px = ctx.getImageData(0, 0, w, h), d = px.data, n = w * h;
+    if (!this.bg || this.bg.length !== n) { this.bg = new Float32Array(n).fill(-1); this.dacc = new Float32Array(n); this.bgLearn = 30; }
+    const bg = this.bg, acc = this.dacc, learning = this.bgLearn > 0;
+    const thr = 4 + (1 - this.sens) * 30;
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      const l = d[j] * 0.3 + d[j + 1] * 0.59 + d[j + 2] * 0.11;
+      let on = 0;
+      if (learning) bg[i] = bg[i] < 0 ? l : bg[i] * 0.8 + l * 0.2;
+      else {
+        // 0 = el sensor no midió ese punto: no cuenta.
+        on = l > 2 && bg[i] > 2 && Math.abs(l - bg[i]) > thr ? 1 : 0;
+        // El fondo se adapta muy despacio donde no hay nadie (algo que se movió para siempre).
+        if (!on) bg[i] = bg[i] * 0.995 + l * 0.005;
+      }
+      acc[i] = Math.max(acc[i] * 0.7, on);
+      d[j] = d[j + 1] = d[j + 2] = 255;
+      d[j + 3] = acc[i] * 255;
+    }
+    if (learning) this.bgLearn--;
+    ctx.putImageData(px, 0, 0);
+  }
+
+  /** Máscara a usar: sensor, IA si está lista (y no se pidió movimiento), si no, movimiento. */
+  source(motionOnly) { return this.depthOn ? this.dmask : !motionOnly && this.status === "ai" && this.mask.width > 2 ? this.mask : this.motion; }
 }
 
 const trackers = new Map();
@@ -155,6 +202,7 @@ export class BodyFX {
     if (NEW_MODE_IDS.has(mode)) return this.renderInteractive(video, src, cam, mode);
     const T = bodyTracker(cam);
     T.sens = src.bodySens ?? 0.5;
+    T.setDepth(calib()?.depth);
     T.update(video, mode !== "movimiento");
     if (T.version === this.lastSrc) return this;
     this.lastSrc = T.version;
@@ -358,6 +406,7 @@ BodyFX.prototype.renderPose = function (video, src, cam, mode) {
 BodyFX.prototype.renderInteractive = function (video, src, cam, mode) {
   const T = bodyTracker(cam);
   T.sens = src.bodySens ?? 0.5;
+  T.setDepth(calib()?.depth);
   T.update(video, true);
   const W = 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
   for (const c of [this.out, this.m]) if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }

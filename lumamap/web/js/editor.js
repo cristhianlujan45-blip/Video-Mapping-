@@ -6,7 +6,7 @@ import * as Store from "./store.js";
 import { History } from "./history.js";
 import { Renderer, webgl2Supported } from "./renderer.js";
 import { Compositor, sceneLayers, deckB } from "./compose.js";
-import { MediaPool, createRuntime, kindOf, getCamera, stopCamera, cameraIfReady } from "./sources.js";
+import { MediaPool, createRuntime, kindOf, getCamera, stopCamera, cameraIfReady, watchCameras, cameraName } from "./sources.js";
 import { motionSensor } from "./body.js";
 import { AudioEngine } from "./audio.js";
 import { Link, nativeBridge } from "./link.js";
@@ -29,6 +29,10 @@ import { ensure3d, handle3dKey, closeWorkspace } from "./panels-3d.js";
 import { TrackingManager } from "./tracking.js";
 import { runAction } from "./rules.js";
 import { whatNow, aiOf } from "./panels-assistant.js";
+import { LIGHT_FX, prepareFx } from "./lightfx.js";
+import { InteractiveFX } from "./interactive.js";
+import { analyzeProject } from "./ai/analyzer.js";
+import { buildProjectContext } from "./ai/context.js";
 import { Remote } from "./remote.js";
 import * as Updater from "./updater.js";
 
@@ -1343,6 +1347,65 @@ A.hardwareProfile = async (first = false) => {
     h("div", { class: "row" }, ...Object.entries(QUALITY).map(([k, q]) => btn({ label: q.label + (k === rec ? " ★" : ""), kind: k === rec ? "primary" : "", onClick: () => { A.applyQuality(k); closeDialog(); } }))));
   await dlg;
   if (first && !localStorage.getItem("lumamap:quality")) A.applyQuality(rec);
+};
+
+/* ---------------- Prueba de velocidad (cualquier equipo: Windows, Android, navegador) ---------------- */
+// Mide de verdad lo que este equipo tarda en: el bucle de la app, los efectos de
+// luces (2000 LED), un efecto interactivo y el diagnóstico del proyecto. Con eso
+// recomienda la calidad de la vista previa (la salida no cambia nunca).
+const median = (a) => { const b = [...a].sort((x, y) => x - y); return b[Math.floor(b.length / 2)] || 0; };
+function timeIt(fn, n) { const ts = []; for (let i = 0; i < n; i++) { const t0 = performance.now(); fn(i); ts.push(performance.now() - t0); } return median(ts); }
+function speedBench() {
+  // Luces: 2000 LED con un efecto que se mueve (por fotograma).
+  const out = [0, 0, 0], fx = LIGHT_FX.find(f => /arco|rainbow/i.test(f.name)) || LIGHT_FX[0];
+  const lightsMs = timeIt((i) => { const run = prepareFx({ id: fx.id }, i / 60, {}, 120); for (let k = 0; k < 2000; k++) run(k, 2000, (k % 50) / 50, Math.floor(k / 50) / 40, out); }, 15);
+  // Interactivo: una máscara de 480×270 con una persona simulada → efecto «Ondas».
+  const W = 480, H = 270, mask = document.createElement("canvas"), dst = document.createElement("canvas");
+  mask.width = dst.width = W; mask.height = dst.height = H;
+  const mk = mask.getContext("2d"), ifx = new InteractiveFX();
+  const interMs = timeIt((i) => { mk.clearRect(0, 0, W, H); mk.fillStyle = "#fff"; mk.fillRect(100 + i * 8, 60, 60, 180); ifx.render(dst, mask, "ondas", W, H, 1 / 30, 0.5); }, 12);
+  // Diagnóstico del proyecto (lo que usa «¿Qué hago ahora?»).
+  let analyzeMs = 0;
+  try { analyzeMs = timeIt(() => analyzeProject(buildProjectContext(app)), 5); } catch {}
+  // CPU pura (cálculo fijo): referencia entre equipos.
+  const cpuMs = timeIt(() => { let x = 0; for (let k = 0; k < 2e6; k++) x += Math.sin(k) * 1e-3; return x; }, 5);
+  return { lightsMs, interMs, analyzeMs, cpuMs };
+}
+function recommendFromSpeed(r) {
+  const slowLoop = r.workMs > 12 || (r.refreshHz >= 55 && r.fps < 40);
+  if (slowLoop || r.lightsMs > 6 || r.interMs > 20 || r.cpuMs > 120) return "low";
+  if (r.workMs > 6 || r.fps < 55 || r.lightsMs > 2.5 || r.interMs > 8 || r.cpuMs > 50) return "balanced";
+  return "high";
+}
+A.speedTest = async ({ silent = false } = {}) => {
+  const box = h("div", { class: "hwprof" }, hint("Midiendo la velocidad de este equipo (3 segundos)…"));
+  const dlg = silent ? null : dialog({ title: "Prueba de velocidad", content: box, wide: true, buttons: [] });
+  perf.reset();
+  await new Promise(r => setTimeout(r, 2500));
+  const loop = perf.snapshot();
+  const r = { fps: loop.fps, workMs: loop.workMs, refreshHz: loop.refreshHz, dropped: loop.dropped, ...speedBench() };
+  r.rec = recommendFromSpeed(r);
+  app.lastSpeedTest = r;
+  if (silent) return r;
+  const ms = (v) => v < 1 ? v.toFixed(2) + " ms" : v.toFixed(1) + " ms";
+  const mark = (ok) => ok ? "✓ " : "⚠ ";
+  const rows = [
+    ["Fotogramas por segundo", mark(r.fps >= 50) + Math.round(r.fps) + " fps" + (r.refreshHz ? ` (pantalla ${Math.round(r.refreshHz)} Hz)` : "")],
+    ["Trabajo por fotograma", mark(r.workMs <= 8) + ms(r.workMs)],
+    ["Luces (2000 LED)", mark(r.lightsMs <= 2.5) + ms(r.lightsMs)],
+    ["Efecto interactivo", mark(r.interMs <= 8) + ms(r.interMs)],
+    ["Diagnóstico del proyecto", mark(r.analyzeMs <= 20) + ms(r.analyzeMs)],
+    ["Procesador (cálculo fijo)", mark(r.cpuMs <= 50) + ms(r.cpuMs)],
+  ];
+  box.innerHTML = "";
+  box.append(h("div", { class: "perf" }, ...rows.map(([k, v]) => h("div", { class: "pc" }, h("small", {}, k), h("b", {}, v)))),
+    h("p", {}, "Calidad recomendada para que vaya fluido: ", h("b", {}, QUALITY[r.rec].label)),
+    hint("Solo cambia la vista previa del editor y el muestreo interno; lo que sale al proyector mantiene su resolución y sus fps."),
+    h("div", { class: "row" },
+      btn({ label: `Aplicar ${QUALITY[r.rec].label}`, kind: "primary", onClick: () => { A.applyQuality(r.rec); closeDialog(); } }),
+      btn({ label: "Dejarlo como está", onClick: () => closeDialog() })));
+  await dlg;
+  return r;
 };
 
 /* ---------------- Copias de seguridad automáticas (cada 5 minutos si hubo cambios) ---------------- */
@@ -2688,6 +2751,12 @@ async function init() {
     checkDisplays(false);
     window.LumaDesktop.onDisplaysChanged(() => checkDisplays(true));
   }
+  // Cámara o sensor 3D enchufado: se avisa con su tipo y la pestaña Interactivo lo ofrece.
+  watchCameras((fresh) => {
+    const c = fresh.find(x => x.sensor) || fresh.find(x => x.is3d) || fresh[0];
+    toast(`Conectado: ${cameraName(c)}${c.sensor ? " · úsalo en «Interactivo»" : ""}`);
+    if (S.tab === "interactive") renderPanel();
+  });
   buildChrome();
   buildPerfHud();
   bindStage();
@@ -2736,6 +2805,12 @@ async function init() {
   }
   // Perfil de hardware: la primera vez en la app de escritorio.
   if (window.LumaDesktop?.hardwareProfile && !localStorage.getItem("lumamap:quality")) setTimeout(() => A.hardwareProfile(true), 2500);
+  // En Android y en el navegador: la primera vez se mide la velocidad sin molestar
+  // y, si el equipo va justo, se baja la calidad de la vista previa (se avisa y se puede cambiar).
+  else if (!localStorage.getItem("lumamap:quality") && !navigator.webdriver) setTimeout(async () => {
+    const r = await A.speedTest({ silent: true }).catch(() => null);
+    if (r && r.rec !== "high" && !localStorage.getItem("lumamap:quality")) A.applyQuality(r.rec);
+  }, 6000);
 }
 
 init();

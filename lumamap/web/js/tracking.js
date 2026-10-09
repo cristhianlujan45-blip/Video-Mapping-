@@ -16,7 +16,7 @@ export const PROVIDERS = [
   { id: "webcam", name: "Cámara + IA (cuerpo y manos)", available: true },
   { id: "motion", name: "Cámara: solo movimiento (sin IA)", available: true },
   { id: "ipcam", name: "Cámara IP / RTSP / NDI", available: false, note: "EN DESARROLLO: llegará con el video por red" },
-  { id: "depth", name: "Sensor de profundidad 3D (infrarrojos)", available: false, note: "EN DESARROLLO: hoy cualquier sensor que dé imagen de color funciona como cámara con «Cámara + IA»" },
+  { id: "depth", name: "Sensor de profundidad 3D (infrarrojos)", available: false, note: "EN DESARROLLO (esqueleto 3D y nube de puntos). Hoy los sensores de profundidad e infrarrojos ya funcionan en la pestaña «Interactivo» con el modo sensor" },
 ];
 export const QUALITIES = { low: 256, medium: 384, high: 512, ultra: 640 };
 export const J = { nose: 0, lShoulder: 11, rShoulder: 12, lElbow: 13, rElbow: 14, lWrist: 15, rWrist: 16, lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnkle: 27, rAnkle: 28, lFoot: 31, rFoot: 32 };

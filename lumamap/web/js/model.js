@@ -706,7 +706,8 @@ export function normalizeTracking(t) {
 /** Ajustes del proyecto. react = modo ritmo global (todo late con la música). */
 /** Proyección interactiva: cámara y alineación cámara ↔ proyección (interactive.js). */
 export function defaultInteractive() {
-  return { enabled: false, camId: "", quad: [[0, 0], [1, 0], [1, 1], [0, 1]], mirror: false };
+  // depth: modo sensor (cámaras de profundidad o infrarrojas: fondo aprendido).
+  return { enabled: false, camId: "", quad: [[0, 0], [1, 0], [1, 1], [0, 1]], mirror: false, depth: false };
 }
 export function normalizeInteractive(c) {
   const d = defaultInteractive();

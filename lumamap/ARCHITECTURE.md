@@ -95,6 +95,13 @@ que los entrega a la WebView del proyector con `evaluateJavascript`.
 - Permisos de cámara/micrófono se piden al primer uso desde `onPermissionRequest`.
 - Exportación por trozos (`saveBegin/saveChunk/saveEnd`) a un archivo temporal y
   `ACTION_CREATE_DOCUMENT`.
+- UDP para las luces (`UdpHub.kt`): un hilo de recepción por socket, datos en
+  base64 por el puente y «multicast lock» de Wi-Fi mientras hay sockets abiertos.
+- Velocidad: las miniaturas (animaciones, generadores, mezclador) se crean al verse
+  y en tandas de ≈10 ms (`lazyThumb` en ui.js); la primera vez se mide el equipo
+  (`A.speedTest`) y, si va justo, se baja la calidad de la vista previa.
+  `tests/perf.test.js` mide cada versión como un móvil (412×915, CPU ×4) con
+  límites de arranque, pestañas, fotograma, luces, interactivo y memoria.
 
 ## Límites conocidos
 
@@ -150,6 +157,14 @@ el canal `Link` de siempre.
   nada. El servicio de red (proceso aparte) envía a la frecuencia configurada,
   con retardo por universo, ArtPoll, entrada Art-Net/sACN (prioridad sACN) y
   estadísticas. Se ata a la IP de la interfaz elegida: nunca sale por otra.
+- El núcleo de red es común (`dmxnet.js`, `DmxNet(adaptador, post)`): en Windows
+  el adaptador son los sockets `dgram` de Node (`desktop/dmx-service.mjs`) y en
+  Android los sockets UDP nativos (`UdpHub.kt` por el puente, `dmx-android.js`).
+- Detección: RDM E1.20 sobre Art-Net (`rdm.js`: ArtTodRequest/TodData/ArtRdm,
+  DEVICE_INFO, fabricante, modelo, etiqueta y SLOT_INFO → tipo de luz, canales y
+  dirección); USB-DMX con el protocolo DMX USB Pro por Web Serial (`usbdmx.js`);
+  anuncios de láseres Ether Dream (UDP 7654). Sin RDM: perfiles por tipo y prueba
+  guiada canal a canal.
 
 ### Show (`show.js`, `ltc-core.js`)
 - Transiciones en el mismo shader (sin pasadas extra): fundido/destello/glitch por
@@ -181,6 +196,12 @@ el canal `Link` de siempre.
   de triángulos afines. Calibración automática: diferencia blanco − negro
   proyectados → contorno de 4 lados (`automap.js`). Efectos nuevos con una
   rejilla de presencia/movimiento; mismo código de canales R/G/B que body.js.
+- Cámaras: `classifyCamera` (sources.js) reconoce por el nombre del dispositivo
+  sensores de profundidad (y si la cámara es la de profundidad, infrarrojos o
+  color), cámaras infrarrojas, escáneres 3D, capturadoras y cámaras virtuales.
+  `watchCameras` avisa al enchufarlas. Con profundidad o infrarrojos se activa el
+  modo sensor del detector (`BodyTracker.updateDepth`): fondo aprendido de la zona
+  vacía y diferencia por píxel; vale para cualquier codificación de profundidad.
 
 ### Luces (`lightfx.js`)
 - 75 efectos como funciones por LED (posición, tiempo, tempo, audio); CPU pura y

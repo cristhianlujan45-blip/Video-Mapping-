@@ -5,10 +5,10 @@ import {
   GENERATORS, ANIM_LIBRARY, ANIM_CATEGORIES, FX_LIBRARY, FX_CATEGORIES, COLORMAPS, RECORD_QUALITIES, BLEND_MODES, BORDER_ANIMS, AUDIO_TARGETS, AUDIO_BANDS,
   DRAW_TOOLS, DRAW_ANIMS, SHAPES, DEFAULT_FX, lookOf, SCREEN_FX, SENSOR_ACTIONS, sensorThreshold,
 } from "./model.js";
-import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog } from "./ui.js";
+import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog, lazyThumb } from "./ui.js";
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
-import { genThumbs, animThumb } from "./thumbs.js";
+import { genThumb, animThumb } from "./thumbs.js";
 import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./sources.js";
 import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
 import { PRO_PANELS, PRO_TABS } from "./panels-pro.js";
@@ -146,7 +146,7 @@ function animCatalog(app, onPick) {
     const list = ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || a.cat === animUI.cat) && (!q || norm(a.name + " " + a.cat).includes(q)));
     grid.innerHTML = "";
     const on = cur?.type === "gen" ? list.find(a => a.gen === cur.gen && a.color === cur.color && a.color2 === cur.color2)?.id : null;
-    grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: animThumb(a) })), { value: on, cols: 4, onPick: (id) => onPick(ANIM_LIBRARY.find(x => x.id === id)) }) : hint("Ninguna animación con ese nombre."));
+    grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: () => animThumb(a) })), { value: on, cols: 4, onPick: (id) => onPick(ANIM_LIBRARY.find(x => x.id === id)) }) : hint("Ninguna animación con ese nombre."));
   };
   for (const c of ["Todas", ...ANIM_CATEGORIES]) {
     const n = c === "Todas" ? ANIM_LIBRARY.length : ANIM_LIBRARY.filter(a => a.cat === c).length;
@@ -221,7 +221,7 @@ function cameraPicker(app, value, onChange) {
 function sourceThumb(app, src, fx) {
   if (src.type === "gen") {
     const key = `k:${src.gen}:${src.color}:${src.color2}:${src.speed}:${src.scale}:${fx ? JSON.stringify(fx) : ""}`;
-    return { img: animThumb({ id: key, gen: src.gen, color: src.color, color2: src.color2, speed: src.speed, scale: src.scale, fx }), label: GENERATORS.find(g => g.id === src.gen)?.name || "Animación" };
+    return { img: () => animThumb({ id: key, gen: src.gen, color: src.color, color2: src.color2, speed: src.speed, scale: src.scale, fx }), label: GENERATORS.find(g => g.id === src.gen)?.name || "Animación" };
   }
   if (src.type === "media") {
     const m = app.S.project.media.find(x => x.id === src.mediaId);
@@ -322,8 +322,10 @@ const live = {
       const a = sourceThumb(app, look.source, look.fx);
       const slot = (cls, tag, t, onClick) => {
         const el = h("button", { class: `slot ${cls}`, onclick: onClick });
-        el.innerHTML = (t.img ? `<img src="${t.img}" alt="">` : "") + `<b>${tag}</b><span></span>`;
+        const lazy = typeof t.img === "function";
+        el.innerHTML = (lazy ? `<img alt="">` : t.img ? `<img src="${t.img}" alt="">` : "") + `<b>${tag}</b><span></span>`;
         el.querySelector("span").textContent = t.label;
+        if (lazy) lazyThumb(el.firstChild, t.img, el);   // la miniatura se crea al verse, sin frenar la pestaña
         return el;
       };
       const b = look.next ? sourceThumb(app, look.next.source, look.next.fx) : { img: "", label: "+ Elegir" };
@@ -409,7 +411,7 @@ const content = {
     if (src.type === "gen") {
       wrap.append(animCatalog(app, (a) => applyAnim(app, a)));
       wrap.append(fold(`Animaciones base (${GENERATORS.length})`, false,
-        tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: genThumbs()[g.id] })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) })));
+        tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: () => genThumb(g.id) })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) })));
       wrap.append(section("Colores",
         swatches({ label: "Color principal", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
         swatches({ label: "Color secundario", value: src.color2, onChange: (c) => app.edit(() => { src.color2 = c; }) }),
@@ -472,7 +474,7 @@ const content = {
         cameraPicker(app, src.camId || "", (v) => app.actions.setSource({ camId: v }))));
       if (src.bodyMode !== "persona") {
         wrap.append(section("Animación dentro del cuerpo",
-          tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: genThumbs()[g.id] })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) }),
+          tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: () => genThumb(g.id) })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) }),
           swatches({ label: "Color principal (contorno)", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
           swatches({ label: "Color secundario", value: src.color2, onChange: (c) => app.edit(() => { src.color2 = c; }) }),
           slider({ label: "Velocidad", min: 0, max: 4, step: 0.05, value: src.speed, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { src.speed = v; }) })));
@@ -940,6 +942,7 @@ const menu = {
         item("live", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), "Controla el show desde el teléfono o una mesa OSC"),
         item("help", "Ayuda y atajos", () => A.help()),
         item("save", "Copias de seguridad", () => A.backups(), "Se guarda una copia cada 5 minutos · recuperar una anterior"),
+        item("gauge", "Prueba de velocidad", () => A.speedTest(), "Mide este equipo y elige la calidad para que todo vaya fluido"),
         window.LumaDesktop ? item("gauge", "Analizar el equipo y calidad", () => A.hardwareProfile(false), "GPU, CPU, pantallas, cámaras y códecs por hardware") : null,
         app.updateInfo?.canRollback ? item("undo", "Volver a la versión anterior", () => A.rollbackUpdate(), "Restaura la versión instalada antes de la última actualización") : null,
         window.LumaDesktop?.repairInstall ? item("restart", "Reparar instalación", () => A.repairInstall(), "Reinstala esta versión sin tocar tus proyectos") : null,

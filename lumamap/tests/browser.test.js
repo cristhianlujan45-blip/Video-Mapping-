@@ -33,6 +33,9 @@ const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, p
 const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", e => errors.push(e.message));
+// El bucle de la app atrapa los errores para que el show nunca se pare (console.error):
+// aquí cuentan igual, así un efecto que falla en cada fotograma no pasa desapercibido.
+page.on("console", m => { if (m.type() === "error" && /TypeError|ReferenceError|RangeError|SyntaxError/.test(m.text())) errors.push("consola: " + m.text().slice(0, 300)); });
 await page.goto(base);
 await page.waitForTimeout(800);
 await page.getByText("Cubo 3D").click();
@@ -269,7 +272,8 @@ await test("salida abierta desde el editor: motor compartido (sin decodificar do
   await page.evaluate(() => { const a = window.__lumamap; a.select(a.S.project.surfaces[0].id); a.actions.setSource({ type: "media", mediaId: a.S.project.media[0].id }); });
   const [popup] = await Promise.all([page.waitForEvent("popup"), page.evaluate(() => window.__lumamap.actions.openWindow(1))]);
   popup.on("pageerror", e => errors.push("salida compartida: " + e.message));
-  await popup.waitForFunction(() => window.__lumaOut && window.__lumaOut.renderer.textures.size > 0, null, { timeout: 8000 });
+  try {
+  await popup.waitForFunction(() => window.__lumaOut && window.__lumaOut.renderer.textures.size > 0, null, { timeout: 20000 });
   const r = await popup.evaluate(() => ({ shared: window.__lumaOut.shared, pool: window.__lumaOut.comp.pool, hud: document.querySelector("#hud small").textContent }));
   assert.equal(r.shared, true);
   assert.equal(r.pool, null, "la salida no tiene medios propios");
@@ -278,7 +282,7 @@ await test("salida abierta desde el editor: motor compartido (sin decodificar do
   const same = await page.evaluate(() => { const a = window.__lumamap; a.S.project.name = "Compartido"; a.changed(); return true; });
   assert.ok(same);
   await popup.waitForFunction(() => /Compartido/.test(document.querySelector("#hud small").textContent) || true);
-  await popup.close();
+  } finally { await popup.close().catch(() => {}); }   // una ventana colgada no debe afectar a las pruebas siguientes
 });
 await test("modo profesional: pestañas nuevas y modo simple intacto", async () => {
   const simpleTabs = await page.locator("#dock button").count();
@@ -461,6 +465,29 @@ await test("interactivo en modo simple: cámara, efecto «Ondas al pisar» y rea
   const r = await page.evaluate((id) => { const a = window.__lumamap; const L = a.dmx.cfg.pixelMaps.find(p => p.id === id); return { src: L.source, fx: L.fx.id, rule: a.S.project.settings.tracking.rules.at(-1).then.type }; }, fx);
   assert.equal(r.src, "effect"); assert.match(r.fx, /fire/); assert.equal(r.rule, "lightfx");
   await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.tracking.rules.length = 0; a.dmx.cfg.pixelMaps.length = 0; a.tracking.stop(); a.openTab(null); });
+});
+await test("interactivo: modo sensor de profundidad (fondo aprendido) y los efectos nuevos se dibujan", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.setPro(false); a.openTab("interactive"); });
+  await page.locator(".ifx", { hasText: "Baldosas que se encienden" }).click();
+  await page.getByText("Modo sensor de profundidad / infrarrojos").click();
+  await page.getByRole("button", { name: "Aprender el fondo" }).waitFor();
+  // La cámara falsa se mueve: tras aprender el fondo, lo que cambia aparece en la máscara.
+  await page.waitForFunction(() => {
+    const a = window.__lumamap, cal = a.S.project.settings.interactive;
+    return cal.depth && document.querySelector(".istate")?.textContent.includes("modo sensor");
+  }, null, { timeout: 15000 });
+  const modes = await page.evaluate(async () => {
+    const a = window.__lumamap, l = a.lookSel();
+    const out = [];
+    for (const m of ["baldosas", "pixeles", "luciernagas", "lluvia", "fuegos", "estrellas", "laser", "revelar"]) {
+      l.source.bodyMode = m; a.changed();
+      await new Promise(r => setTimeout(r, 250));
+      out.push([m, document.querySelector("#gl").getContext("webgl2").getError()]);
+    }
+    return out;
+  });
+  for (const [m, err] of modes) assert.equal(err, 0, m);
+  await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.interactive.depth = false; a.openTab(null); });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

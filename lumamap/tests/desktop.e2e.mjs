@@ -111,9 +111,10 @@ await test("entrada DMX: una consola mueve un canal y el motor de parámetros lo
   const send = (v) => new Promise(r => { const d = new Uint8Array(512); d[4] = v; console1.send(P.artDmx(9, d), P.ARTNET_PORT, "127.0.0.1", r); });
   await send(200);
   assert.equal(await learning, "artnet:9:c5");
-  await send(51);
-  await win.waitForFunction(() => Math.abs(window.__lumamap.S.master - 0.2) < 0.01, null, { timeout: 5000 });
-  console1.close();
+  // Una consola real repite el universo sin parar (~40 por segundo): si un paquete UDP se pierde, llega el siguiente.
+  const stream = setInterval(() => send(51), 100);
+  try { await win.waitForFunction(() => Math.abs(window.__lumamap.S.master - 0.2) < 0.01, null, { timeout: 8000 }); }
+  finally { clearInterval(stream); console1.close(); }
 });
 
 await test("apagón: todos los universos a 0 al instante", async () => {

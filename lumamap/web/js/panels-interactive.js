@@ -4,13 +4,13 @@
 //   1 · Cámara o sensor  →  2 · Alinear con la proyección  →  3 · Efecto  →  4 · Reacciones
 import { h, section, row, btn, toggle, slider, hint, toast } from "./ui.js";
 import * as M from "./model.js";
-import { listCameras, getCamera, cameraIfReady } from "./sources.js";
+import { listCameras, getCamera, cameraIfReady, cameraName } from "./sources.js";
 import { bodyTracker } from "./body.js";
 import { INTERACTIVE_FX, calibOf, autoCalibrate } from "./interactive.js";
 import { runAction } from "./rules.js";
 import { findFx } from "./lightfx.js";
 
-const ui = { editing: false };
+const ui = { editing: false, cams: null };
 const pct = (v) => Math.round(v * 100) + "%";
 
 /** Superficie interactiva: la seleccionada si ya es interactiva; si no, una a pantalla completa. */
@@ -89,20 +89,42 @@ const interactivePanel = {
     T.onStatus = () => { if (S.tab === "interactive") app.renderPanel(); };
     getCamera(cal.camId || "default").catch((e) => { wrap.querySelector(".istate")?.replaceChildren(h("i"), "No se pudo abrir la cámara: " + (e.message || e)); });
 
-    const stTxt = { off: "esperando la cámara", loading: "cargando la IA que detecta personas…", ai: "IA activa: ve la silueta de las personas", motion: "detecta lo que se mueve (sin IA en este equipo)", error: "no se pudo iniciar la detección" }[T.status] || "";
-    wrap.append(h("p", { class: `istate ${T.status === "ai" || T.status === "motion" ? "ok" : ""}` }, h("i"),
+    const stTxt = { off: "esperando la cámara", loading: "cargando la IA que detecta personas…", ai: "IA activa: ve la silueta de las personas", motion: "detecta lo que se mueve (sin IA en este equipo)",
+      depth: "modo sensor: ve a las personas aunque estén quietas o a oscuras", error: "no se pudo iniciar la detección" }[T.status] || "";
+    wrap.append(h("p", { class: `istate ${T.status === "ai" || T.status === "motion" || T.status === "depth" ? "ok" : ""}` }, h("i"),
       `Cámara: ${stTxt} · Alineación: ${cal.enabled ? "activa" : "sin alinear"}${surf ? " · Efecto en «" + surf.name + "»" : ""}`));
 
     // ---- 1 · Cámara ----
+    // Cada cámara con su tipo detectado (sensor 3D, infrarroja, escáner, capturadora…).
     const camSel = h("select", { class: "text-in" }, h("option", { value: "" }, "Cámara por defecto"));
-    listCameras().then(cs => { for (const c of cs) camSel.append(h("option", { value: c.id, selected: c.id === cal.camId }, c.label)); });
-    camSel.addEventListener("change", () => set(() => {
-      cal.camId = camSel.value;
+    const useCam = (c) => set(() => {
+      cal.camId = c?.id || "";
+      // Profundidad e infrarrojos: el modo sensor se pone solo.
+      cal.depth = !!c?.sensor;
       for (const sc of P.scenes) for (const l of Object.values(sc.looks)) if (l.source.type === "body") l.source.camId = cal.camId;
-    }));
+    });
+    camSel.addEventListener("change", () => useCam(ui.cams?.find(c => c.id === camSel.value)));
+    const detected = h("div", { class: "icamkind" });
+    const fill = (cs) => {
+      ui.cams = cs;
+      camSel.replaceChildren(h("option", { value: "" }, "Cámara por defecto"), ...cs.map(c => h("option", { value: c.id, selected: c.id === cal.camId, title: c.label }, cameraName(c))));
+      const cur = cs.find(c => c.id === cal.camId);
+      const sensor = cs.find(c => c.sensor && c.stream === "depth") || cs.find(c => c.sensor);
+      const scanner = cs.find(c => c.kind === "scanner");
+      detected.replaceChildren(
+        cur && cur.kind !== "webcam" ? h("p", { class: "ok" }, h("i"), `Detectado: ${cameraName(cur)}`) : null,
+        sensor && sensor !== cur ? h("div", { class: "idetect" }, h("span", {}, `Se detectó un ${sensor.kindName.toLowerCase()}: ve a las personas aunque estén quietas o a oscuras.`),
+          btn({ label: "Usarlo", kind: "primary", onClick: () => useCam(sensor) })) : null,
+        scanner ? hint("Escáner 3D detectado: escanea la sala o el objeto con el programa del escáner, exporta en OBJ, GLB o PLY e impórtalo en la pestaña 3D para mapear encima. Escanear directamente desde LumaMap: EN DESARROLLO.") : null);
+    };
+    if (ui.cams) fill(ui.cams);
+    listCameras().then(fill);
     wrap.append(section("1 · Cámara o sensor",
-      hint("Sirve cualquier cámara: web, USB, capturadora HDMI o un sensor que dé imagen. Colócala viendo toda la zona donde proyectas (pared o suelo)."),
-      camSel, cameraView(app, cal)));
+      hint("Sirve cualquier cámara: web, USB, capturadora HDMI, cámara infrarroja o sensor de profundidad 3D. Colócala viendo toda la zona donde proyectas (pared o suelo)."),
+      camSel, detected, cameraView(app, cal),
+      row(toggle({ label: "Modo sensor de profundidad / infrarrojos", value: !!cal.depth, onChange: (v) => set(() => { cal.depth = v; }) }),
+        cal.depth ? btn({ label: "Aprender el fondo", kind: "small", onClick: () => { T.learnBackground(); toast("Deja la zona vacía un segundo: aprendiendo el fondo…"); } }) : null),
+      cal.depth ? hint("Modo sensor: LumaMap aprende la zona vacía y marca lo que cambia de distancia. Si hay falsos toques, deja la zona vacía y pulsa «Aprender el fondo».") : null));
 
     // ---- 2 · Alinear ----
     wrap.append(section("2 · Alinear con la proyección",

@@ -104,11 +104,38 @@ export function stepper({ label, value, min, max, onChange }) {
 }
 
 /** Rejilla de opciones grandes con icono o imagen. */
+/**
+ * Miniaturas bajo demanda: solo las que se ven y poco a poco (≈10 ms por tanda),
+ * así un catálogo de cien animaciones abre al instante también en un móvil lento.
+ */
+const lazyQ = [];
+let lazyBusy = false, lazyIO = null;
+function lazyPump() {
+  lazyBusy = true;
+  const t0 = performance.now();
+  while (lazyQ.length && performance.now() - t0 < 10) {
+    const [img, fn] = lazyQ.shift();
+    if (!img.isConnected) continue;
+    try { const src = fn(); if (src) img.src = src; } catch {}
+  }
+  if (lazyQ.length) setTimeout(lazyPump, 16); else lazyBusy = false;
+}
+export function lazyThumb(img, fn, target = img) {
+  const go = () => { lazyQ.push([img, fn]); if (!lazyBusy) { lazyBusy = true; setTimeout(lazyPump, 0); } };
+  if (typeof IntersectionObserver === "undefined") return go();
+  lazyIO ??= new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) { lazyIO.unobserve(e.target); e.target.__lazy?.(); e.target.__lazy = null; } }, { rootMargin: "300px" });
+  target.__lazy = go;
+  lazyIO.observe(target);
+}
+
+/** Rejilla de opciones con imagen. img puede ser una función: la miniatura se crea al verse. */
 export function tiles(items, { value, onPick, cols } = {}) {
   const wrap = h("div", { class: "tiles", style: cols ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : undefined });
   for (const it of items) {
     const b = h("button", { class: `tile ${it.id === value ? "on" : ""}`, title: it.desc || it.label, onclick: () => onPick(it.id, it) });
-    b.innerHTML = (it.img ? `<img src="${it.img}" alt="">` : it.ic ? icon(it.ic) : "") + `<span>${esc(it.label)}</span>`;
+    const lazy = typeof it.img === "function";
+    b.innerHTML = (lazy ? `<img alt="">` : it.img ? `<img src="${it.img}" alt="">` : it.ic ? icon(it.ic) : "") + `<span>${esc(it.label)}</span>`;
+    if (lazy) lazyThumb(b.firstChild, it.img, b);
     wrap.append(b);
   }
   return wrap;

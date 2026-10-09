@@ -157,6 +157,9 @@ export async function autoCalibrate(camKey, showPattern) {
 export const NEW_MODES = [
   ["ondas", "Ondas al pisar o tocar"], ["pintar", "Pintar con el cuerpo"], ["burbujas", "Burbujas que explotan"],
   ["apartar", "Partículas que se apartan"], ["huellas", "Huellas de luz"], ["chispas", "Chispas al tocar"],
+  ["baldosas", "Baldosas que se encienden"], ["pixeles", "Silueta de píxeles"], ["luciernagas", "Luciérnagas que te siguen"],
+  ["lluvia", "Lluvia que te esquiva"], ["fuegos", "Fuegos artificiales"], ["estrellas", "Estela de estrellas"],
+  ["laser", "Rayos láser a las personas"], ["revelar", "Revelar la imagen"],
 ];
 export const NEW_MODE_IDS = new Set(NEW_MODES.map(m => m[0]));
 
@@ -172,6 +175,14 @@ export const INTERACTIVE_FX = [
   { mode: "apartar", name: "Partículas que se apartan", desc: "Una nube de partículas que te esquiva", gen: "galaxy" },
   { mode: "huellas", name: "Huellas de luz", desc: "Para el suelo: cada paso deja luz", gen: "fire" },
   { mode: "chispas", name: "Chispas al tocar", desc: "Donde tocas saltan chispas", gen: "fire" },
+  { mode: "baldosas", name: "Baldosas que se encienden", desc: "Suelo de discoteca: se ilumina donde pisas", gen: "rainbow" },
+  { mode: "pixeles", name: "Silueta de píxeles", desc: "La persona hecha de cuadrados de colores", gen: "rainbow" },
+  { mode: "luciernagas", name: "Luciérnagas que te siguen", desc: "Lucecitas que vuelan hacia la gente", gen: "fire" },
+  { mode: "lluvia", name: "Lluvia que te esquiva", desc: "Cae lluvia y la persona hace de paraguas", gen: "ocean" },
+  { mode: "fuegos", name: "Fuegos artificiales", desc: "Al moverte salen fuegos hacia arriba", gen: "rainbow" },
+  { mode: "estrellas", name: "Estela de estrellas", desc: "Al moverte dejas estrellas brillantes", gen: "galaxy" },
+  { mode: "laser", name: "Rayos láser a las personas", desc: "Rayos desde arriba que siguen a la gente", gen: "plasma" },
+  { mode: "revelar", name: "Revelar la imagen", desc: "Por donde pasas aparece la animación oculta", gen: "galaxy" },
   { mode: "particulas", name: "Partículas de manos y pies", desc: "Salen de manos y pies al moverse", gen: "rainbow" },
   { mode: "fuego", name: "Manos de fuego", desc: "Fuego que sale de manos y pies", gen: "fire" },
   { mode: "humo", name: "Humo", desc: "Humo que sigue al cuerpo", gen: "smoke" },
@@ -214,7 +225,7 @@ export class InteractiveFX {
     ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = "lighter";
     const now = performance.now() / 1000;
-    for (let k = 0; k < g.cool.length; k++) g.cool && (this.cool[k] = Math.max(0, this.cool[k] - dt));
+    for (let k = 0; k < this.cool.length; k++) this.cool[k] = Math.max(0, this.cool[k] - dt);
     const triggers = [];
     for (let k = 0; k < g.motion.length; k++) if (g.motion[k] > thr && this.cool[k] <= 0) { triggers.push(k); this.cool[k] = 0.35; }
 
@@ -294,6 +305,121 @@ export class InteractiveFX {
         q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 0.96; q.vy *= 0.96;
         ctx.fillStyle = `rgba(255,0,0,${q.life})`; ctx.beginPath(); ctx.arc(q.x, q.y, 3, 0, Math.PI * 2); ctx.fill();
       }
+    }
+    if (mode === "baldosas" || mode === "pixeles") {
+      // Rejilla de casillas: se encienden donde hay alguien y se apagan despacio.
+      const cols = mode === "baldosas" ? 10 : 32, rows = Math.max(4, Math.round(cols * H / W)), tw = W / cols, th = H / rows;
+      if (!this.tiles || this.tiles.length !== cols * rows) this.tiles = new Float32Array(cols * rows);
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        let sum = 0, n = 0;
+        for (let y = Math.floor(j * th / ch); y < Math.ceil((j + 1) * th / ch) && y < g.gh; y++) for (let x = Math.floor(i * tw / cw); x < Math.ceil((i + 1) * tw / cw) && x < g.gw; x++) { sum += g.pres[y * g.gw + x]; n++; }
+        const on = n ? sum / n : 0, k = j * cols + i;
+        this.tiles[k] = Math.max(on > 0.25 ? 1 : 0, this.tiles[k] - dt * (mode === "baldosas" ? 0.8 : 4));
+        const v = this.tiles[k];
+        if (v <= 0.01) continue;
+        ctx.fillStyle = `rgba(255,0,0,${v})`; ctx.fillRect(i * tw + 2, j * th + 2, tw - 4, th - 4);
+        if (mode === "baldosas") { ctx.strokeStyle = `rgba(0,255,0,${v})`; ctx.lineWidth = 2; ctx.strokeRect(i * tw + 3, j * th + 3, tw - 6, th - 6); }
+      }
+    }
+    if (mode === "luciernagas") {
+      const ps = this.parts;
+      while (ps.length < 260) ps.push({ x: Math.random() * W, y: Math.random() * H, vx: 0, vy: 0, life: 1, ph: Math.random() * 6 });
+      // Hacia el cuerpo: el punto con presencia más cercano de una muestra.
+      const hot = [];
+      for (let k = 0; k < g.pres.length; k += 3) if (g.pres[k] > 0.5) hot.push(k);
+      for (const q of ps) {
+        if (hot.length) {
+          const k = hot[(Math.abs(Math.floor(q.ph * 1000)) + Math.floor(now)) % hot.length];
+          const tx = (k % g.gw + 0.5) * cw, ty = (Math.floor(k / g.gw) + 0.5) * ch;
+          q.vx += (tx - q.x) * 0.6 * dt; q.vy += (ty - q.y) * 0.6 * dt;
+        }
+        q.vx += Math.sin(now * 2 + q.ph) * 30 * dt; q.vy += Math.cos(now * 1.7 + q.ph) * 30 * dt;
+        q.vx *= 0.96; q.vy *= 0.96; q.x += q.vx * dt; q.y += q.vy * dt;
+        const glow = 0.5 + 0.5 * Math.sin(now * 4 + q.ph * 3);
+        const rg = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, 7);
+        rg.addColorStop(0, `rgba(255,255,0,${glow})`); rg.addColorStop(1, "rgba(255,0,0,0)");
+        ctx.fillStyle = rg; ctx.fillRect(q.x - 7, q.y - 7, 14, 14);
+      }
+    }
+    if (mode === "lluvia") {
+      const ps = this.parts;
+      for (let k = 0; k < 6; k++) ps.push({ x: Math.random() * W, y: -10, vx: 0, vy: 500 + Math.random() * 300, life: 1, drop: true });
+      if (ps.length > 1500) ps.splice(0, ps.length - 1500);
+      for (let i = ps.length - 1; i >= 0; i--) {
+        const q = ps[i];
+        q.x += q.vx * dt; q.y += q.vy * dt;
+        if (q.drop) {
+          if (q.y > H || g.pres[at(q.x, q.y)] > 0.5) {   // choca con el suelo o con una persona: salpica
+            for (let k = 0; k < 3; k++) ps.push({ x: q.x, y: q.y, vx: (Math.random() - 0.5) * 160, vy: -60 - Math.random() * 120, life: 1, drop: false });
+            ps.splice(i, 1); continue;
+          }
+          ctx.strokeStyle = "rgba(255,0,0,0.8)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(q.x, q.y - 12); ctx.stroke();
+        } else {
+          q.vy += 600 * dt; q.life -= dt * 2.5;
+          if (q.life <= 0) { ps.splice(i, 1); continue; }
+          ctx.fillStyle = `rgba(0,255,0,${q.life})`; ctx.fillRect(q.x - 1, q.y - 1, 2.5, 2.5);
+        }
+      }
+    }
+    if (mode === "fuegos") {
+      for (const k of triggers.slice(0, 2)) if (this.items.length < 12) this.items.push({ x: (k % g.gw + 0.5) * cw, y: H, ty: (Math.floor(k / g.gw) + 0.5) * ch * 0.6, vy: -H * 1.1, life: 1, hue: Math.random() });
+      for (let i = this.items.length - 1; i >= 0; i--) {
+        const r = this.items[i];
+        r.y += r.vy * dt;
+        ctx.fillStyle = "rgba(0,255,0,0.9)"; ctx.fillRect(r.x - 1.5, r.y - 6, 3, 10);
+        if (r.y <= r.ty) {
+          for (let k = 0; k < 50; k++) { const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 220; this.parts.push({ x: r.x, y: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1 }); }
+          this.items.splice(i, 1);
+        }
+      }
+      if (this.parts.length > 2500) this.parts.splice(0, this.parts.length - 2500);
+      for (let i = this.parts.length - 1; i >= 0; i--) {
+        const q = this.parts[i];
+        q.life -= dt * 0.7; if (q.life <= 0) { this.parts.splice(i, 1); continue; }
+        q.vy += 90 * dt; q.vx *= 0.985; q.vy *= 0.985; q.x += q.vx * dt; q.y += q.vy * dt;
+        ctx.fillStyle = `rgba(255,0,0,${q.life})`; ctx.fillRect(q.x - 1.5, q.y - 1.5, 3, 3);
+      }
+    }
+    if (mode === "estrellas") {
+      for (const k of triggers) for (let n = 0; n < 3; n++) this.parts.push({ x: (k % g.gw + Math.random()) * cw, y: (Math.floor(k / g.gw) + Math.random()) * ch, vx: (Math.random() - 0.5) * 20, vy: -10 - Math.random() * 20, life: 1, s: 1.5 + Math.random() * 3 });
+      if (this.parts.length > 2000) this.parts.splice(0, this.parts.length - 2000);
+      for (let i = this.parts.length - 1; i >= 0; i--) {
+        const q = this.parts[i];
+        q.life -= dt * 0.5; if (q.life <= 0) { this.parts.splice(i, 1); continue; }
+        q.x += q.vx * dt; q.y += q.vy * dt;
+        const tw = q.life * (0.6 + 0.4 * Math.sin(now * 9 + q.x));
+        ctx.strokeStyle = `rgba(0,255,0,${tw})`; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(q.x - q.s * 2, q.y); ctx.lineTo(q.x + q.s * 2, q.y); ctx.moveTo(q.x, q.y - q.s * 2); ctx.lineTo(q.x, q.y + q.s * 2); ctx.stroke();
+      }
+    }
+    if (mode === "laser") {
+      // Hasta 4 «personas»: columnas con más presencia; los rayos salen de arriba y las apuntan.
+      const colSum = new Float32Array(g.gw);
+      for (let k = 0; k < g.pres.length; k++) colSum[k % g.gw] += g.pres[k];
+      const targets = [];
+      for (let x = 1; x < g.gw - 1; x++) if (colSum[x] > g.gh * 0.15 && colSum[x] >= colSum[x - 1] && colSum[x] >= colSum[x + 1]) targets.push(x);
+      targets.sort((a, b) => colSum[b] - colSum[a]);
+      const srcs = [[0, 0], [W / 2, 0], [W, 0]];
+      ctx.lineWidth = 3;
+      for (const x of targets.slice(0, 4)) {
+        let top = 0; for (let y = 0; y < g.gh; y++) if (g.pres[y * g.gw + x] > 0.5) { top = y; break; }
+        const tx = (x + 0.5) * cw, ty = (top + 1.5) * ch;
+        for (const [sx, sy] of srcs) { ctx.strokeStyle = "rgba(0,255,0,0.85)"; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tx, ty); ctx.stroke(); }
+        const rg = ctx.createRadialGradient(tx, ty, 0, tx, ty, 26); rg.addColorStop(0, "rgba(255,0,0,1)"); rg.addColorStop(1, "rgba(255,0,0,0)");
+        ctx.fillStyle = rg; ctx.fillRect(tx - 26, ty - 26, 52, 52);
+      }
+    }
+    if (mode === "revelar") {
+      if (!this.paint) this.paint = document.createElement("canvas");
+      if (this.paint.width !== W || this.paint.height !== H) { this.paint.width = W; this.paint.height = H; }
+      const p = this.paint.getContext("2d");
+      p.globalCompositeOperation = "destination-out"; p.fillStyle = `rgba(0,0,0,${0.002 + (1 - sens) * 0.006})`; p.fillRect(0, 0, W, H);
+      p.globalCompositeOperation = "source-over"; p.drawImage(mask, 0, 0, W, H);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(this.paint, 0, 0);
+      ctx.globalCompositeOperation = "source-in"; ctx.fillStyle = "#ff0000"; ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = "destination-over"; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = "lighter";
     }
     if (mode === "apartar") {
       const ps = this.parts;

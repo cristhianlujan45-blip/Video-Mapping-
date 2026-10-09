@@ -74,6 +74,9 @@ jobs:
       - name: Tracking real (cámara falsa con una persona → IA → regla)
         working-directory: lumamap
         run: node tests/tracking.browser.test.js
+      - name: Pruebas de velocidad (móvil con CPU ×4, como la APK)
+        working-directory: lumamap
+        run: node tests/perf.test.js
       - name: Pruebas de la app de escritorio (Electron + red)
         working-directory: lumamap
         run: xvfb-run -a node tests/desktop.e2e.mjs
