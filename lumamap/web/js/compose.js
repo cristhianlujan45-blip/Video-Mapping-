@@ -32,6 +32,15 @@ export class Compositor {
       case "media": {
         const rt = this.pool.get(src.mediaId);
         if (!rt) { this.pool.ensure(src.mediaId); return null; }
+        // «Quitar el fondo» de un video de una persona (holograma tipo Tupac): la IA de cuerpo
+        // recorta a la persona fotograma a fotograma y el resto queda en negro puro.
+        if (src.cutout && rt.kind === "video") {
+          const el = rt.source(o.time);
+          if (!el || el.readyState < 2) return null;
+          const key = scene.id + ":" + s.id + k;
+          const fx = this.bodies.get(key, el, { bodyMode: "persona", bodySens: src.cutoutSens ?? 0.5, bodyGlow: src.cutoutGlow || 0, media: true }, "media:" + rt.id);
+          return { id: "b:" + key, el: fx.out, key: fx.version };
+        }
         return { id: "m:" + rt.id, el: rt.source(o.time), key: rt.frameKey(o.time) };
       }
       case "projector3d": {

@@ -90,6 +90,11 @@ export function parseCommand(app, text) {
   if (/optimiza/.test(t)) return { intent: "optimize", reply: "Busco qué se puede optimizar.", actions: [] };
   if (/(problema|revisa|analiza|diagn[oó]stico|detecta)/.test(t) && !/superficie|pared|foto|imagen/.test(t)) return { intent: "diagnose", reply: "Analizo el proyecto.", actions: [] };
   if (/(proyectar sobre|detecta|analiza|reconoce).*(pared|superficie|fachada|foto|imagen|objeto)|auto ?map|(mapping|mapear|mapeo|proyectar|proyecta) (de |en |sobre )?(una |la |el |mi )?(fachada|edificio|casa|iglesia)/.test(t)) return { intent: "automap", reply: "Perfecto. Primero vamos a detectar la superficie: elige una foto de la pared (o activa la cámara).", actions: [] };
+  if (/holograma|\bholo\b|tupac|pepper|persona flotando/.test(t)) {
+    const pn = t.match(/\b(1|2|3|4|un|uno|dos|tres|cuatro)\s+proyector/);
+    return { reply: "Te abro el asistente de holograma: eliges qué aparece y cuántos proyectores, y lo monto solo (quito el fondo de la persona, uno los proyectores y te digo cómo colocarlo).",
+      actions: [A("hologram_setup", { type: /pir[aá]mide/.test(t) ? "piramide" : /\b(tul|tela|gasa)\b/.test(t) ? "tul" : "escenario", n: pn ? num(pn[1]) : 1 })] };
+  }
   if (/(c[oó]mo|ens[eé][ñn]ame|mu[eé]strame|aprender|tutorial|explica)/.test(t)) {
     const lesson = /m[aá]scara/.test(t) ? 2 : /malla|warp|curv/.test(t) ? 3 : /varias superficies/.test(t) ? 4 : /proyectores|blending|bordes/.test(t) ? 5 : /vj|en vivo/.test(t) ? 6 : /audio|m[uú]sica/.test(t) ? 7 : /luz|luces|dmx/.test(t) ? 8 : /interactiv|tracking|c[aá]mara/.test(t) ? 9 : /show|escena|cue/.test(t) ? 10 : /calibr|esquina|mapping|empez/.test(t) ? 1 : 0;
     return { intent: "explain", reply: lesson ? "Te lo enseño paso a paso." : "", actions: lesson ? [A("start_lesson", { level: lesson })] : [] };
@@ -119,7 +124,7 @@ export function parseCommand(app, text) {
     if (/(mando|xbox|playstation|play ?station|ps4|ps5|gamepad|joystick|control de)/.test(t)) return { reply: "Te dejo el mando listo (puedes cambiar cada botón en En vivo → «Mandos, teclado y MIDI»). Puedes usar varios mandos y el teclado a la vez.", actions: [A("gamepad_map", {}), A("open_panel", { tab: "live" })] };
   }
   // Varios proyectores y hologramas: se hacen en el espacio 3D.
-  if (/holograma|varios proyectores|\b(2|3|4|dos|tres|cuatro) proyectores/.test(t)) return { reply: "Eso se monta en 3D: «3 · Proyectores» → elige 2, 3, 4 o «Holograma» y pon las animaciones en las caras del objeto.", actions: [A("open_panel", { tab: "3d" })] };
+  if (/varios proyectores|\b(2|3|4|dos|tres|cuatro) proyectores/.test(t)) return { reply: "Para un objeto (cubo, caja…) con varios proyectores: 3D → «3 · Proyectores» → elige 2, 3 o 4 y pon las animaciones en las caras. Para una persona flotando, pide «holograma».", actions: [A("open_panel", { tab: "3d" })] };
   // Reproducción.
   if (/^(reproduce|reproducir|play|dale( al)? play|arranca|empieza|inicia|reanuda|contin[uú]a)\b/.test(t)) return { reply: "Propongo esto:", actions: [A("transport", { do: "play" })] };
   if (/^(pausa|pausar|pon pausa|det[eé]n|detener|para|parar|stop)\b/.test(t) && !/luces/.test(t)) return { reply: "Propongo esto:", actions: [A("transport", { do: "pause" })] };

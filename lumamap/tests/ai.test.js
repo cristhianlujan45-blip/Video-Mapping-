@@ -287,7 +287,7 @@ await test("IA arreglada: entiende las frases de todos los días (y las aplica)"
     ["pon el efecto glitch", "set_fx"], ["quita los efectos", "reset_fx"], ["luces rojas", "light_color"], ["apaga las luces", "lights_play"],
     ["pon un gif de fuego", "search_gif"], ["asigna el botón A del mando al apagón", "assign_control"], ["quiero usar el mando de xbox", "gamepad_map"],
     ["graba un video", "record_video"], ["pon la cuadrícula", "test_pattern"], ["pon el tempo a 128", "set_bpm"], ["fundido a negro", "blackout"],
-    ["haz un holograma", "open_panel"], ["duplica la superficie", "duplicate_surface"], ["pon un lago interactivo", "interactive_experience"],
+    ["haz un holograma como el de tupac con 2 proyectores", "hologram_setup"], ["duplica la superficie", "duplicate_surface"], ["pon un lago interactivo", "interactive_experience"],
     ["haz que cambie de color con la música", "enable_audio_reactive"],
   ];
   app.S.sel = app.S.project.surfaces[0].id;

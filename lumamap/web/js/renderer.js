@@ -1463,10 +1463,13 @@ export class Renderer {
       gl.bindTexture(gl.TEXTURE_2D, o.tex.tex);
       gl.uniform1i(L.u_tex, 0);
       const ta = o.tex.w / Math.max(1, o.tex.h);
+      // span = { a, b }: esta superficie muestra solo el trozo a..b (en horizontal) de una imagen
+      // repartida entre varios proyectores (holograma ancho, pantallas unidas con bordes suaves).
+      const sp = look.span, sw = sp ? Math.max(0.01, sp.b - sp.a) : 1, asp = aspect / sw;
       let sx = 1, sy = 1;
-      if (look.fit === "cover") { if (ta > aspect) sx = aspect / ta; else sy = ta / aspect; }
-      else if (look.fit === "contain") { if (ta > aspect) sy = ta / aspect; else sx = aspect / ta; }
-      gl.uniform4f(L.u_fit, sx, sy, 0, 0);
+      if (look.fit === "cover") { if (ta > asp) sx = asp / ta; else sy = ta / asp; }
+      else if (look.fit === "contain") { if (ta > asp) sy = ta / asp; else sx = asp / ta; }
+      gl.uniform4f(L.u_fit, sx * sw, sy, sp ? sx * ((sp.a + sp.b) / 2 - 0.5) : 0, 0);
       gl.uniform1i(L.u_contain, look.fit === "contain" ? 1 : 0);
     } else {
       gl.uniform4f(L.u_fit, 1, 1, 0, 0);

@@ -24,6 +24,7 @@ import { detectFromImageFile } from "./automap.js";
 import { MidiDriver } from "./midi.js";
 import { GamepadHub, basicPadMap, padControlName } from "./gamepad.js";
 import { openGifSearch } from "./panels-gif.js";
+import { openHologram } from "./panels-hologram.js";
 import { ParamEngine, describe, applyModList } from "./params.js";
 import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
@@ -834,6 +835,8 @@ A.addGif = async (file, { mode = "layer", surfaceId = S.sel, credit = "" } = {})
   return "GIF añadido encima · arrástralo o mueve sus esquinas";
 };
 A.searchGifs = (opts = {}) => openGifSearch(app, opts);
+/** Asistente de holograma (escenario como Tupac, tela/tul o pirámide; 1-4 proyectores). */
+A.hologramWizard = (preset = {}) => openHologram(app, preset);
 
 A.removeMedia = async (id) => {
   const m = S.project.media.find(x => x.id === id);
@@ -908,8 +911,9 @@ A.newProject = async () => {
   const pick = await chooseTemplate("Nuevo proyecto", "El proyecto actual se guarda automáticamente en «Abrir».");
   if (!pick) return;
   await keepCurrent();
-  setProject(M.TEMPLATES[pick].build());
-  if (pick === "draw") openTab("draw");
+  setProject(M.TEMPLATES[pick === "holo" ? "blank" : pick].build());
+  if (pick === "holo") setTimeout(() => A.hologramWizard(), 50);
+  else if (pick === "draw") openTab("draw");
 };
 
 function chooseTemplate(title, sub) {
@@ -919,6 +923,7 @@ function chooseTemplate(title, sub) {
     { id: "cube", label: "Cubo 3D", ic: "cube" },
     { id: "facade", label: "Fachada", ic: "building" },
     { id: "stage", label: "Escenario", ic: "stage" },
+    { id: "holo", label: "Holograma", ic: "body" },
     { id: "blank", label: "Vacío", ic: "plus" },
   ];
   const content = h("div", {}, sub ? h("p", { class: "hint" }, sub) : null, tiles(items, { onPick: (id) => closeDialog(id), cols: 3 }));
@@ -2883,12 +2888,13 @@ async function welcome() {
   const items = [
     { id: "draw", label: "Dibujar en la pared", ic: "pen" }, { id: "screen", label: "Pantalla", ic: "screen" },
     { id: "cube", label: "Cubo 3D", ic: "cube" }, { id: "facade", label: "Fachada", ic: "building" },
-    { id: "stage", label: "Escenario", ic: "stage" }, { id: "blank", label: "Vacío", ic: "plus" },
+    { id: "stage", label: "Escenario", ic: "stage" }, { id: "holo", label: "Holograma", ic: "body" }, { id: "blank", label: "Vacío", ic: "plus" },
   ];
   content.append(tiles(items, { onPick: (id) => closeDialog(id), cols: 3 }));
   const pick = (await dialog({ title: "Bienvenido", content, buttons: [] })) || "screen";
-  setProject(M.TEMPLATES[pick].build());
-  if (pick === "draw") openTab("draw");
+  setProject(M.TEMPLATES[pick === "holo" ? "blank" : pick].build());
+  if (pick === "holo") setTimeout(() => A.hologramWizard(), 50);
+  else if (pick === "draw") openTab("draw");
   else openTab("add");
 }
 

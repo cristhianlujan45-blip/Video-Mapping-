@@ -19,6 +19,7 @@ export function buildCommands(app) {
   add("Archivo", "export", "Exportar proyecto .lumamap", A.exportProject, { keys: "Ctrl+E", ic: "download" });
   add("Archivo", "importProject", "Importar proyecto", A.importProject, { keys: "Ctrl+Shift+O", ic: "upload" });
   add("Archivo", "importMedia", "Importar video, imagen o GIF", () => A.importMedia(), { keys: "Ctrl+I", ic: "upload" });
+  add("Archivo", "hologram", "Holograma (escenario como Tupac, tul o pirámide)", () => A.hologramWizard(), { ic: "body" });
   add("Archivo", "searchGifs", "Buscar GIF animado en internet", () => A.searchGifs(), { ic: "gif" });
   add("Archivo", "record", "Grabar video de la salida (iniciar / detener)", A.record, { keys: "Ctrl+R", ic: "camera" });
   add("Archivo", "snapshot", "Capturar imagen de la salida (PNG)", A.snapshot, { keys: "Ctrl+Shift+P", ic: "photo" });

@@ -305,6 +305,12 @@ export const ACTIONS = {
       return `Tiempos en marcha (${r.steps.length} pasos)`;
     },
   },
+  hologram_setup: {
+    label: "Holograma (escenario como Tupac, tela/tul o pirámide; 1-4 proyectores)", params: { type: "escenario|tul|piramide", n: "1-4 proyectores" },
+    check: (app, p) => ({ type: oneOf(p.type, "type", ["escenario", "tul", "piramide"], "escenario"), n: Math.round(num(p.n, "n", 1, 4, 1)) }),
+    text: (app, p) => `Abrir el asistente de holograma: ${({ escenario: "escenario (como Tupac)", tul: "tela holográfica", piramide: "pirámide" })[p.type]}${p.n > 1 ? `, ${p.n} proyectores` : ""}`,
+    run: (app, p) => { app.actions.hologramWizard({ type: p.type, n: p.type === "piramide" && p.n > 1 && p.n < 4 ? 1 : p.n }); return "Asistente de holograma abierto"; },
+  },
   duplicate_surface: {
     label: "Duplicar una superficie", params: { surface: "id o nombre (por defecto la seleccionada)" },
     check: (app, p) => ({ surface: surfaceRef(app, p.surface) }),

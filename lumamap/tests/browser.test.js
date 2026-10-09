@@ -454,7 +454,7 @@ await test("interactivo en modo simple: cámara, efecto «Ondas al pisar» y rea
   await page.evaluate(() => { const a = window.__lumamap; a.setPro(false); a.openTab("interactive"); });
   await page.getByText("1 · Cámara o sensor").waitFor();
   await page.locator(".icam").waitFor();
-  await page.locator(".ifx", { hasText: "Ondas al pisar" }).click();
+  await page.locator(".ifxgrid:not(.exgrid) .ifx", { hasText: "Ondas al pisar" }).click();
   const src = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces.find(x => x.name === "Interactivo"); return s && a.lookSel().source; });
   assert.equal(src?.type, "body"); assert.equal(src?.bodyMode, "ondas");
   await page.waitForTimeout(1500);   // la cámara falsa se mueve: el efecto se calcula en vivo
@@ -468,7 +468,7 @@ await test("interactivo en modo simple: cámara, efecto «Ondas al pisar» y rea
 });
 await test("interactivo: modo sensor de profundidad (fondo aprendido) y los efectos nuevos se dibujan", async () => {
   await page.evaluate(() => { const a = window.__lumamap; a.setPro(false); a.openTab("interactive"); });
-  await page.locator(".ifx", { hasText: "Baldosas que se encienden" }).click();
+  await page.locator(".ifxgrid:not(.exgrid) .ifx", { hasText: "Baldosas que se encienden" }).click();
   await page.getByText("Modo sensor de profundidad / infrarrojos").click();
   await page.getByRole("button", { name: "Aprender el fondo" }).waitFor();
   // La cámara falsa se mueve: tras aprender el fondo, lo que cambia aparece en la máscara.
@@ -576,6 +576,36 @@ await test("buscar GIF animado: buscar, tocar uno y entra en vivo (con fundido) 
   assert.match(await page.evaluate(() => window.__lumamap.S.project.surfaces.at(-1).name), /^GIF /);
   await page.unroute("https://api.openverse.org/**"); await page.unroute("https://upload.example.org/**");
   await page.evaluate(() => window.__lumamap.openTab(null));
+});
+await test("holograma: asistente fácil (escenario como Tupac, 2 proyectores), uniones suaves, girar/espejo y prueba de orientación", async () => {
+  await page.evaluate(() => window.__lumamap.actions.hologramWizard());
+  const box = page.locator(".holo");
+  await box.waitFor();
+  assert.equal(await box.locator(".holotype").count(), 3);
+  assert.ok(!/\bnull\b/.test(await box.textContent()), "sin textos sueltos");
+  await box.locator(".holotype", { hasText: "Escenario (como Tupac)" }).click();
+  await box.locator(".seg button", { hasText: "Animación" }).click();
+  await box.locator(".seg button", { hasText: /^2$/ }).click();
+  await box.getByRole("button", { name: "✨ Crear holograma" }).click();
+  await box.locator(".holohow li").first().waitFor();
+  assert.match(await box.locator(".holohow").textContent(), /45°/);
+  let r = await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId);
+    return P.surfaces.filter(s => s.holo).map(s => ({ scr: s.screen, span: sc.looks[s.id].span, fx: sc.looks[s.id].fx.flipY, edge: P.settings.screens[s.screen].edge })); });
+  assert.equal(r.length, 2);
+  assert.deepEqual(r.map(x => x.scr), [1, 2]);
+  assert.ok(r[0].span.b > 0.5 && r[1].span.a < 0.5, "se solapan en el centro");
+  assert.deepEqual([r[0].edge.right, r[1].edge.left], [0.15, 0.15]);
+  await box.getByRole("button", { name: "↕ Girar" }).click();
+  r = await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId); return P.surfaces.filter(s => s.holo).map(s => sc.looks[s.id].fx.flipY); });
+  assert.deepEqual(r, [true, true]);
+  await box.getByRole("button", { name: "Probar orientación" }).click();
+  assert.equal(await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId); return sc.looks[P.surfaces.find(s => s.holo).id].source.text; }), "↑ ARRIBA  R");
+  await box.getByRole("button", { name: "Volver a mi contenido" }).click();
+  assert.equal(await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId); return sc.looks[P.surfaces.find(s => s.holo).id].source.type; }), "gen");
+  await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(() => document.querySelector("#gl").getContext("webgl2").getError()), 0);
+  await page.getByRole("button", { name: "Cerrar" }).click();
+  await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; P.surfaces = P.surfaces.filter(x => !x.holo); for (const n of [1, 2]) delete P.settings.screens[n].edge; a.changed({ panel: true }); });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

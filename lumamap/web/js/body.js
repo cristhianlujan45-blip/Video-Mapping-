@@ -285,14 +285,16 @@ export class BodyFX {
     if (NEW_MODE_IDS.has(mode) || PRO_MODE_IDS.has(mode)) return this.renderInteractive(video, src, cam, mode);
     const T = bodyTracker(cam);
     T.sens = src.bodySens ?? 0.5;
-    T.setDepth(calib()?.depth);
+    // Un video (src.media): sin la alineación cámara↔proyección ni el modo sensor.
+    T.setDepth(src.media ? false : calib()?.depth);
     T.update(video, mode !== "movimiento");
-    if (T.version === this.lastSrc) return this;
+    if (T.version === this.lastSrc && !src.media) return this;
     this.lastSrc = T.version;
 
-    const W = 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
+    // Persona de un video (holograma): más resolución, se ve de cerca y en grande.
+    const W = src.media ? 960 : 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
     for (const c of [this.out, this.trail, this.tmp, this.m]) if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-    const mirror = !!src.bodyMirror, cal = calib();
+    const mirror = !!src.bodyMirror, cal = src.media ? null : calib();
     // Con la alineación activa la cámara se lleva al lugar exacto de la proyección.
     const place = (ctx, img) => drawAligned(ctx, img, cal, W, H, mirror);
     // Máscara suavizada a la medida de salida.

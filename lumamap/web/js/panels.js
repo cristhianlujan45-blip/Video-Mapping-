@@ -92,7 +92,8 @@ const add = {
           { id: "cube", label: "Cubo 3D", ic: "cube" },
           { id: "facade", label: "Fachada", ic: "building" },
           { id: "stage", label: "Escenario", ic: "stage" },
-        ], { onPick: (id) => A.addTemplate(id) }),
+          { id: "holo", label: "Holograma", ic: "body" },
+        ], { onPick: (id) => id === "holo" ? A.hologramWizard() : A.addTemplate(id) }),
         btn({ label: "Detectar superficies en una foto (experimental)", ic: "wand", kind: "block", onClick: A.detectFromPhoto })),
     );
   },
@@ -965,6 +966,7 @@ const menu = {
           value: app.autoOptimize(), onChange: (v) => app.setAutoOptimize(v) })),
       section("Control", h("div", { class: "list" },
         item("midi", "Conectar controlador MIDI", () => { A.midi(); if (S.pro) app.openTab("control"); }, S.pro ? "Asigna cualquier control con clic derecho → Aprender" : "Activa el Modo profesional para asignar knobs y faders"),
+        item("body", "Holograma (como Tupac, tul o pirámide)", () => A.hologramWizard(), "Varios proyectores, quita el fondo de la persona solo"),
         item("live", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), "Controla el show desde el teléfono o una mesa OSC"),
         item("help", "Ayuda y atajos", () => A.help()),
         item("save", "Copias de seguridad", () => A.backups(), "Se guarda una copia cada 5 minutos · recuperar una anterior"),
