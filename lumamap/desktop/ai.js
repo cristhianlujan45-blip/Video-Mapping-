@@ -7,6 +7,7 @@ const { ipcMain, safeStorage, app } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
+const { pullModel } = require("./ollama-pull.js");
 
 const MODEL = "claude-opus-5-5";
 const keyFile = () => path.join(app.getPath("userData"), "assistant-key.bin");
@@ -91,6 +92,14 @@ function setup(log = () => {}) {
   // problemas de CORS. Solo se permite hablar con este equipo o con la red local
   // (nunca con internet) y solo con las rutas de la API de Ollama.
   ipcMain.handle("ai:ollamaStart", (_e, endpoint) => startOllama(endpoint, log));
+  ipcMain.handle("ai:ollamaFound", () => ({ found: !!findOllama(), canInstall: process.platform === "win32" }));
+  let installing = null;
+  ipcMain.handle("ai:ollamaInstall", async (e) => {
+    if (installing) return { ok: false, error: "busy" };
+    installing = new AbortController();
+    try { return await installOllama({ signal: installing.signal, log, onProgress: (p) => { if (!e.sender.isDestroyed()) e.sender.send("ai:installProgress", p); } }); }
+    finally { installing = null; }
+  });
 
   // Descarga de un modelo con su progreso (lo que haría «ollama pull», sin terminal).
   const pulls = new Map();   // id de la ventana -> AbortController
@@ -101,29 +110,19 @@ function setup(log = () => {}) {
     const model = String(req?.model || "");
     if (!/^[\w.\-/]{1,80}(:[\w.\-]{1,40})?$/.test(model)) return { ok: false, error: "bad-model" };
     const ctl = new AbortController();
+    pulls.get(e.sender.id)?.abort();
     pulls.set(e.sender.id, ctl);
+    log("info", "IA local: descargando " + model);
     try {
-      const r = await fetch(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, stream: true }), signal: ctl.signal });
-      if (!r.ok || !r.body) return { ok: false, error: (await r.text().catch(() => "")).slice(0, 300) || "HTTP " + r.status };
-      const dec = new TextDecoder();
-      let buf = "", last = 0, lastStatus = "";
-      for await (const chunk of r.body) {
-        buf += dec.decode(chunk, { stream: true });
-        let i;
-        while ((i = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-          if (!line) continue;
-          let m; try { m = JSON.parse(line); } catch { continue; }
-          if (m.error) return { ok: false, error: String(m.error).slice(0, 300) };
-          lastStatus = m.status || lastStatus;
-          // Como mucho 5 avisos por segundo a la página.
-          if (Date.now() - last > 200 || m.status === "success") { last = Date.now(); if (!e.sender.isDestroyed()) e.sender.send("ai:pullProgress", { model, status: m.status || "", completed: m.completed || 0, total: m.total || 0 }); }
-        }
-      }
-      return lastStatus === "success" ? { ok: true } : { ok: false, error: "La descarga no terminó (" + (lastStatus || "sin respuesta") + ")" };
-    } catch (err) {
-      return { ok: false, error: err?.name === "AbortError" ? "cancelled" : (err?.cause?.code === "ECONNREFUSED" ? "offline" : String(err?.message || err)) };
-    } finally { pulls.delete(e.sender.id); }
+      // Descarga vigilada: si se para, se reanuda sola donde iba (desktop/ollama-pull.js).
+      const r = await pullModel({ endpoint: u.origin, model, signal: ctl.signal,
+        stallMs: Number(process.env.LUMAMAP_PULL_STALL_MS) || 45000,
+        retryDelay: Number(process.env.LUMAMAP_PULL_RETRY_MS) || 2000,
+        onStuck: () => restartOllama(u.origin, log),
+        onProgress: (p) => { if (!e.sender.isDestroyed()) e.sender.send("ai:pullProgress", { model, ...p }); } });
+      log(r.ok ? "info" : "warn", `IA local: descarga de ${model} ${r.ok ? "terminada" : "sin terminar: " + r.error}${r.retries ? ` (${r.retries} reanudaciones)` : ""}`);
+      return r;
+    } finally { if (pulls.get(e.sender.id) === ctl) pulls.delete(e.sender.id); }
   });
   ipcMain.handle("ai:pullCancel", (e) => { pulls.get(e.sender.id)?.abort(); return true; });
 
@@ -197,6 +196,71 @@ async function startOllama(endpoint = "http://localhost:11434", log = () => {}) 
   return { ok: false, found: true, error: "no-response" };
 }
 
+/**
+ * Reinicia Ollama (solo el de este equipo): se usa cuando una descarga se queda colgada
+ * por dentro y volver a pedirla no avanza. Después se abre de nuevo (startOllama).
+ */
+async function restartOllama(endpoint = "http://localhost:11434", log = () => {}) {
+  let u; try { u = new URL(endpoint); } catch { return { ok: false }; }
+  if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(u.hostname)) return { ok: false, error: "not-this-pc" };
+  log("warn", "IA local: la descarga no avanza; reiniciando Ollama");
+  const child = ollamaChildren.get(u.origin);
+  if (child && child.exitCode === null) { try { process.kill(child.pid); } catch {} }
+  if (process.platform === "win32") await execFileP("taskkill", ["/F", "/IM", "ollama.exe"], { timeout: 15000 });
+  for (let i = 0; i < 20 && await ollamaUp(u.origin, 500); i++) await new Promise(r => setTimeout(r, 250));
+  ollamaChildren.delete(u.origin);
+  return startOllama(endpoint, log);
+}
+
+/* ---------------- Instalar Ollama (Windows) ---------------- */
+// Un toque: descarga el instalador OFICIAL, comprueba su firma digital (Authenticode de
+// Ollama) y lo instala en silencio para este usuario (sin pedir permisos de administrador).
+// Si la firma no es válida, NO se ejecuta: se abre la página oficial de descarga.
+const OLLAMA_SETUP = "https://ollama.com/download/OllamaSetup.exe";
+const execFileP = (cmd, args, opts = {}) => new Promise((resolve) => require("node:child_process").execFile(cmd, args, { windowsHide: true, ...opts }, (err, out, errOut) => resolve({ err, out: String(out || ""), errOut: String(errOut || "") })));
+
+/** Firma digital de un .exe: { valid, subject }. */
+async function signatureOf(file) {
+  const ps = `$s = Get-AuthenticodeSignature -LiteralPath '${file.replace(/'/g, "''")}'; @{ status = [string]$s.Status; subject = [string]$s.SignerCertificate.Subject } | ConvertTo-Json -Compress`;
+  const r = await execFileP("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 60000 });
+  try { const j = JSON.parse(r.out.trim()); return { valid: j.status === "Valid", subject: j.subject || "" }; } catch { return { valid: false, subject: "" }; }
+}
+
+async function installOllama({ onProgress = () => {}, signal, log = () => {} } = {}) {
+  if (process.platform !== "win32") return { ok: false, error: "only-windows" };
+  if (findOllama()) return { ok: true, already: true };
+  const os = require("node:os");
+  const file = path.join(os.tmpdir(), "LumaMap-OllamaSetup.exe");
+  try {
+    onProgress({ phase: "download", completed: 0, total: 0 });
+    const r = await fetch(OLLAMA_SETUP, { signal, redirect: "follow" });
+    if (!r.ok || !r.body) return { ok: false, error: "HTTP " + r.status };
+    const total = Number(r.headers.get("content-length")) || 0;
+    const out = fs.createWriteStream(file);
+    let done = 0, last = 0;
+    for await (const chunk of r.body) {
+      done += chunk.length;
+      if (!out.write(chunk)) await new Promise(res => out.once("drain", res));
+      if (Date.now() - last > 250) { last = Date.now(); onProgress({ phase: "download", completed: done, total }); }
+    }
+    await new Promise((res, rej) => out.end((e) => e ? rej(e) : res()));
+    onProgress({ phase: "verify", completed: done, total });
+    const sig = await signatureOf(file);
+    log("info", `IA local: instalador de Ollama ${done} bytes, firma ${sig.valid ? "válida" : "NO válida"} (${sig.subject})`);
+    if (!sig.valid || !/ollama/i.test(sig.subject)) { fs.rmSync(file, { force: true }); return { ok: false, error: "bad-signature" }; }
+    onProgress({ phase: "install", completed: done, total });
+    const res = await execFileP(file, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"], { timeout: 15 * 60000 });
+    fs.rmSync(file, { force: true });
+    if (!findOllama()) return { ok: false, error: "install-failed" + (res.err ? ": " + res.err.message : "") };
+    onProgress({ phase: "start", completed: done, total });
+    const st = await startOllama("http://localhost:11434", log);
+    return { ok: st.ok, error: st.ok ? undefined : "no-start" };
+  } catch (e) {
+    try { fs.rmSync(file, { force: true }); } catch {}
+    return { ok: false, error: e?.name === "AbortError" ? "cancelled" : String(e?.message || e) };
+  }
+}
+
 /** ¿Es este equipo o una IP privada de la red local? */
 function isLocalHost(h) {
   h = h.replace(/^\[|\]$/g, "");
@@ -207,4 +271,4 @@ function isLocalHost(h) {
   return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
 }
 
-module.exports = { setup, MODEL, isLocalHost, ollamaCandidates, startOllama };
+module.exports = { setup, MODEL, isLocalHost, ollamaCandidates, startOllama, signatureOf };

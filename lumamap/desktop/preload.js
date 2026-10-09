@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
     ollamaStart: (endpoint) => ipcRenderer.invoke("ai:ollamaStart", endpoint),
     pull: (req) => ipcRenderer.invoke("ai:pull", req),
     pullCancel: () => ipcRenderer.invoke("ai:pullCancel"),
+    ollamaFound: () => ipcRenderer.invoke("ai:ollamaFound"),
+    ollamaInstall: () => ipcRenderer.invoke("ai:ollamaInstall"),
+    onInstallProgress: (cb) => { const f = (_e, p) => cb(p); ipcRenderer.on("ai:installProgress", f); return () => ipcRenderer.removeListener("ai:installProgress", f); },
     onPullProgress: (cb) => { const f = (_e, p) => cb(p); ipcRenderer.on("ai:pullProgress", f); return () => ipcRenderer.removeListener("ai:pullProgress", f); },
   },
 });

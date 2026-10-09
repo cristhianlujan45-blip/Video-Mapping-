@@ -425,6 +425,36 @@ await test("asistente con IA local (Ollama simulado): «Descargar la IA» con un
   await page.getByText("LumaMap funciona normal").waitFor();
   await page.evaluate(() => { const a = window.__lumamap; a.ai.setSettings({ endpoint: "http://localhost:11434", model: "" }); const s = a.S.project.surfaces.find(x => x.name === "Columna IA"); a.actions.remove(s.id); });
 });
+await test("descarga de la IA: dice en qué va (velocidad y tiempo, «se paró → continúa sola», comprobando) y no se queda congelada", async () => {
+  const texts = await page.evaluate(async () => {
+    const a = window.__lumamap, out = [];
+    let cb = null;
+    // La app de Windows (simulada): manda el progreso como desktop/ollama-pull.js.
+    window.LumaDesktop = { ai: { onPullProgress: (f) => { cb = f; return () => { cb = null; }; }, pullCancel: () => {},
+      pull: async ({ model }) => {
+        const step = async (p, ms = 700) => { cb?.({ model, ...p }); await new Promise(r => setTimeout(r, ms)); out.push(document.querySelector(".asst .aipull p")?.textContent || ""); };
+        await step({ phase: "download", total: 4.9e9, completed: 1.0e9 }, 1600);
+        await step({ phase: "download", total: 4.9e9, completed: 4.6e9 });
+        await step({ phase: "retry", retries: 1 });
+        await step({ phase: "restart", retries: 2 });
+        await step({ phase: "verify" });
+        return { ok: true, retries: 2 };
+      } } };
+    try {
+      if (a.S.tab !== "assistant") a.openTab("assistant");
+      const { downloadModel } = await import("./js/panels-assistant.js");
+      const p = downloadModel(a, "qwen3:4b", { quiet: true });
+      await new Promise(r => setTimeout(r, 50)); a.renderPanel();
+      await p;
+      return { out, pending: a.ai.settings.pullPending };
+    } finally { delete window.LumaDesktop; a.ai.setSettings({ model: "", pullPending: "" }); }
+  });
+  assert.match(texts.out[1], /Descargando qwen3:4b: 93 % \(4,3 GB de 4,6 GB\) · [\d,]+ MB\/s · quedan/);
+  assert.match(texts.out[2], /se paró: continuando sola donde iba/);
+  assert.match(texts.out[3], /reiniciando la IA/);
+  assert.match(texts.out[4], /Comprobando que la descarga/);
+  assert.equal(texts.pending, "", "terminada: no queda pendiente");
+});
 await test("«¿Qué hago ahora?»: recomienda UN paso y «Hacerlo conmigo» lo hace", async () => {
   await page.evaluate(() => { const a = window.__lumamap; if (!a.S.blackout) a.actions.blackout(); });
   await page.locator('#top [data-act="next"]').click();

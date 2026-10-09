@@ -47,7 +47,8 @@ if (process.platform !== "win32") {
 const app = await _electron.launch({
   executablePath: electronBin, cwd: desktop,
   args: [path.join(desktop, ".stage"), "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
-  env: { ...process.env, PATH: fakeOllamaDir + path.delimiter + process.env.PATH, OLLAMA_HOST: "", ANTHROPIC_API_KEY: "", LUMAMAP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-e2e-")) },
+  env: { ...process.env, PATH: fakeOllamaDir + path.delimiter + process.env.PATH, OLLAMA_HOST: "", FAKE_OLLAMA_STUCK: path.join(fakeOllamaDir, "stuck"),
+    LUMAMAP_PULL_STALL_MS: "1000", LUMAMAP_PULL_RETRY_MS: "100", ANTHROPIC_API_KEY: "", LUMAMAP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-e2e-")) },
 });
 const win = await app.firstWindow();
 const errors = [];
@@ -214,7 +215,7 @@ await test("asistente: sin clave lo dice claro; una clave falsa no se guarda; la
   assert.match(r.step.error, /Falta la clave/);
   assert.equal(r.bad.ok, false, "clave falsa rechazada: " + r.bad.error);
   assert.equal(r.st1.hasKey, false, "no se guardó");
-  assert.deepEqual(r.keys.sort(), ["cancel", "http", "ollamaStart", "onPullProgress", "pull", "pullCancel", "setKey", "status", "step"], "no hay forma de leer la clave desde la página");
+  assert.deepEqual(r.keys.sort(), ["cancel", "http", "ollamaFound", "ollamaInstall", "ollamaStart", "onInstallProgress", "onPullProgress", "pull", "pullCancel", "setKey", "status", "step"], "no hay forma de leer la clave desde la página");
 });
 await test("IA local por el proceso principal: habla con Ollama de este equipo; rechaza internet y rutas que no son de Ollama", async () => {
   const http = await import("node:http");
@@ -273,6 +274,33 @@ await test("IA local automática: Ollama instalado pero cerrado se abre solo y l
     assert.equal(r.remote.error, "not-this-pc", "solo abre Ollama en este equipo");
   } finally {
     // Se cierran los «Ollama» falsos (también el que abrió la app al arrancar, en el puerto normal).
+    for (const u of [ep, "http://127.0.0.1:11434"]) await fetch(u + "/quit", { signal: AbortSignal.timeout(2000) }).catch(() => {});
+  }
+});
+await test("IA local: si la descarga se queda colgada (también por dentro de Ollama), se reanuda y reinicia Ollama sola hasta terminar", async () => {
+  if (process.platform === "win32") return;
+  const net = await import("node:net");
+  const port = await new Promise(r => { const s = net.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
+  const ep = `http://127.0.0.1:${port}`;
+  fs.writeFileSync(path.join(fakeOllamaDir, "stuck"), "1");   // el próximo Ollama que se abra se colgará al 94 %
+  try {
+    const r = await win.evaluate(async (ep) => {
+      const D = window.LumaDesktop.ai;
+      const st = await D.ollamaStart(ep);
+      const phases = []; let maxPct = 0;
+      const off = D.onPullProgress(p => { phases.push(p.phase); if (p.total) maxPct = Math.max(maxPct, p.completed / p.total); });
+      const pull = await D.pull({ endpoint: ep, model: "qwen3:8b" });
+      await new Promise(r => setTimeout(r, 300));
+      off();
+      const tags = JSON.parse((await D.http({ url: ep + "/api/tags" })).text);
+      return { st, pull, phases: [...new Set(phases)], maxPct, tags };
+    }, ep);
+    assert.equal(r.st.started, true);
+    assert.equal(r.pull.ok, true, JSON.stringify(r.pull));
+    assert.ok(r.pull.retries >= 2, "reintentó: " + r.pull.retries);
+    for (const ph of ["download", "retry", "restart", "verify", "success"]) assert.ok(r.phases.includes(ph), `fase ${ph}: ${r.phases}`);
+    assert.deepEqual(r.tags.models.map(m => m.name), ["qwen3:8b"]);
+  } finally {
     for (const u of [ep, "http://127.0.0.1:11434"]) await fetch(u + "/quit", { signal: AbortSignal.timeout(2000) }).catch(() => {});
   }
 });

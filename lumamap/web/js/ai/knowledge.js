@@ -76,7 +76,7 @@ export const ARTICLES = [
     text: "Se guarda solo (autoguardado) y hay copias de seguridad. Menú → Guardar / Abrir / Exportar. Si la app se cierra de golpe, al abrirla recupera el último estado." },
   { id: "ia-local", title: "IA local gratis (Ollama)", tab: "assistant",
     keys: "ia local ollama qwen modelo gratis offline instalar inteligencia artificial",
-    text: "La IA es opcional. Para IA local gratis y sin internet: instala Ollama (ollama.com). LumaMap lo detecta y en Windows lo abre solo; después, en el Asistente, pulsa «Descargar la IA» (una sola vez, elige el modelo según tu equipo). Sin terminal. Sin IA, el asistente sigue funcionando con reglas y esta guía." },
+    text: "La IA es opcional. Para IA local gratis y sin internet: en Windows, Asistente → «Instalar la IA» instala Ollama (instalador oficial) y descarga la IA para tu equipo, todo solo; si ya tienes Ollama, la IA se descarga sola al abrir LumaMap y, si se corta, continúa donde iba. Sin terminal. Sin IA, el asistente sigue funcionando con reglas y esta guía." },
 ];
 
 const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9ñ\s-]/g, " ");

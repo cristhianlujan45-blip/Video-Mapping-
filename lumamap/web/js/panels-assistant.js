@@ -242,29 +242,96 @@ function paintAcademy(app) {
 }
 
 /* ---------------- IA local: instalar y descargar con un toque ---------------- */
-const pull = { model: "", status: "", done: 0, total: 0, error: "" };
+const pull = { model: "", phase: "", done: 0, total: 0, error: "", retries: 0, speed: 0, samples: [] };
 const GBf = (b) => (b / 1073741824).toFixed(1).replace(".", ",") + " GB";
-/** Texto del progreso de la descarga. */
-function pullText() {
-  if (pull.error) return pull.error;
-  if (pull.total) return `Descargando ${pull.model}: ${Math.floor(pull.done / pull.total * 100)} % (${GBf(pull.done)} de ${GBf(pull.total)})`;
-  return pull.status === "success" ? `✓ ${pull.model} descargado` : `Descargando ${pull.model}… (varios minutos; LumaMap sigue funcionando)`;
+const mins = (s) => s < 90 ? "menos de 2 min" : s < 3600 ? `~${Math.round(s / 60)} min` : `~${(s / 3600).toFixed(1).replace(".", ",")} h`;
+/** Texto del progreso de la descarga, según la fase en la que va Ollama. */
+export function pullText(P = pull) {
+  if (P.error) return P.error;
+  if (P.phase === "success") return `✓ ${P.model} descargado e instalado`;
+  if (P.phase === "verify") return `Comprobando que la descarga de ${P.model} está bien… (1-2 minutos, es normal que la barra no se mueva)`;
+  if (P.phase === "write") return `Instalando ${P.model}…`;
+  if (P.phase === "retry") return `La descarga se paró: continuando sola donde iba… (reintento ${P.retries})`;
+  if (P.phase === "restart") return "La descarga seguía sin avanzar: reiniciando la IA (Ollama) y continuando donde iba…";
+  if (P.total) {
+    const pct = Math.min(99, Math.floor(P.done / P.total * 100));
+    const rate = P.speed > 0 ? ` · ${(P.speed / 1048576).toFixed(1).replace(".", ",")} MB/s · quedan ${mins((P.total - P.done) / P.speed)}` : "";
+    return `Descargando ${P.model}: ${pct} % (${GBf(P.done)} de ${GBf(P.total)})${rate}`;
+  }
+  return `Preparando la descarga de ${P.model}… (LumaMap sigue funcionando)`;
 }
-/** Descarga la IA recomendada (o la indicada) y la deja lista. */
-export async function downloadModel(app, model) {
+/** Velocidad media de los últimos ~10 s. */
+function trackSpeed(done) {
+  const now = performance.now();
+  pull.samples.push([now, done]);
+  while (pull.samples.length > 2 && now - pull.samples[0][0] > 10000) pull.samples.shift();
+  const [t0, d0] = pull.samples[0];
+  if (now - t0 > 1500) pull.speed = Math.max(0, (done - d0) / ((now - t0) / 1000));
+}
+/**
+ * Descarga la IA recomendada (o la indicada) y la deja lista. Sigue aunque cierres el
+ * panel; si LumaMap se cierra a medias, la próxima vez continúa sola donde iba.
+ */
+export async function downloadModel(app, model, { quiet = false } = {}) {
   const ai = aiOf(app);
   if (ai.pulling) return;
   model = model || ai.recommended().model || "qwen3:4b";
-  Object.assign(pull, { model, status: "", done: 0, total: 0, error: "" });
+  Object.assign(pull, { model, phase: "", done: 0, total: 0, error: "", retries: 0, speed: 0, samples: [] });
   const repaint = () => { document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); };
+  ai.setSettings({ pullPending: model });
   repaint();
+  if (!quiet) toast(`⬇ Descargando la IA (${model}) una sola vez. Puedes seguir usando LumaMap.`);
   try {
-    await ai.pullModel(model, (p) => { pull.status = p.status; if (p.total) { pull.total = p.total; pull.done = p.completed || 0; } repaint(); });
+    await ai.pullModel(model, (p) => {
+      pull.phase = p.phase || (p.status === "success" ? "success" : pull.phase); pull.retries = p.retries || pull.retries;
+      if (p.total) { pull.total = p.total; pull.done = p.completed || 0; trackSpeed(pull.done); }
+      repaint();
+    });
+    ai.setSettings({ pullPending: "" });
     toast(`🧠 IA local lista · ${model}. Ya puedes escribirle al asistente.`);
-  } catch (e) { pull.error = e.message || String(e); toast(pull.error, "err"); }
+  } catch (e) {
+    pull.error = e.message || String(e);
+    if (/cancelad/i.test(pull.error)) ai.setSettings({ pullPending: "" });
+    toast(pull.error, "err");
+  }
   repaint();
   if (app.S.tab === "assistant") app.renderPanel();
 }
+/**
+ * Windows sin Ollama: lo instala (instalador oficial con firma comprobada, en silencio),
+ * lo abre y descarga la IA. Todo con un toque.
+ */
+const inst = { busy: false, phase: "", done: 0, total: 0, error: "" };
+export async function installAll(app) {
+  const ai = aiOf(app), D = globalThis.LumaDesktop?.ai;
+  if (inst.busy || !D?.ollamaInstall) return;
+  Object.assign(inst, { busy: true, phase: "download", done: 0, total: 0, error: "" });
+  const repaint = () => { document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); };
+  const off = D.onInstallProgress?.((p) => { Object.assign(inst, { phase: p.phase, done: p.completed || 0, total: p.total || 0 }); repaint(); });
+  repaint();
+  toast("⬇ Instalando la IA gratis (Ollama). Puedes seguir usando LumaMap.");
+  let r;
+  try { r = await D.ollamaInstall(); } finally { off?.(); inst.busy = false; }
+  if (!r?.ok) {
+    inst.error = r?.error === "bad-signature" ? "El instalador descargado no tiene la firma oficial de Ollama: por seguridad no se ha ejecutado. Instálalo desde ollama.com (se abre ahora)."
+      : r?.error === "cancelled" ? "Instalación cancelada." : "No se pudo instalar Ollama solo (" + (r?.error || "error") + "). Instálalo desde ollama.com y LumaMap hará el resto.";
+    if (r?.error === "bad-signature") window.open("https://ollama.com/download", "_blank");
+    toast(inst.error, "err"); repaint(); return;
+  }
+  ai.startTried = false;
+  const st = (await ai.refresh({ force: true })).local || {};
+  repaint();
+  if (st.code === "noModels" || (st.available && !ai.settings.model && !st.models?.some(m => m.name === ai.recommended().model) && !st.models?.length)) downloadModel(app);
+  else if (st.available) toast(`🧠 IA local lista · ${st.model}`);
+}
+function installText() {
+  if (inst.error) return inst.error;
+  if (inst.phase === "verify") return "Comprobando la firma digital del instalador oficial…";
+  if (inst.phase === "install") return "Instalando Ollama… (1-2 minutos)";
+  if (inst.phase === "start") return "Abriendo Ollama…";
+  return inst.total ? `Descargando Ollama: ${Math.floor(inst.done / inst.total * 100)} % (${GBf(inst.done)} de ${GBf(inst.total)})` : "Descargando Ollama…";
+}
+
 /** Caja con el estado de la IA local y el siguiente paso (un solo botón). */
 export function pullBox(app) {
   const ai = aiOf(app), st = ai.state.local || {}, tier = ai.recommended();
@@ -283,6 +350,17 @@ export function pullBox(app) {
       pull.error ? h("p", { class: "warn" }, pull.error) : null,
       row(btn({ label: "⬇ Descargar la IA", kind: "primary", onClick: () => downloadModel(app) }),
         st.code === "noModel" && st.models?.length ? btn({ label: "Usar la que ya tengo", kind: "small", onClick: async () => { ai.setSettings({ model: "" }); await ai.refresh({ force: true }); app.renderPanel(); } }) : null));
+    return box;
+  }
+  if (inst.busy) {
+    add(h("p", {}, installText()), h("div", { class: "pbar" }, h("i", { style: `width:${inst.total ? Math.round(inst.done / inst.total * 100) : inst.phase === "download" ? 2 : 100}%` })));
+    return box;
+  }
+  if (st.code === "notInstalled" && globalThis.LumaDesktop?.ai?.ollamaInstall && /Windows/.test(navigator.userAgent)) {
+    add(h("p", {}, "La IA local es gratis y funciona sin internet. LumaMap la instala sola: Ollama (instalador oficial) y la IA para tu equipo (unos 3-6 GB, una sola vez)."),
+      inst.error ? h("p", { class: "warn" }, inst.error) : null,
+      row(btn({ label: "⬇ Instalar la IA (todo automático)", kind: "primary", onClick: () => installAll(app) }),
+        btn({ label: "Ya lo instalé: comprobar", kind: "small", onClick: async () => { ai.startTried = false; await ai.refresh({ force: true }); app.renderPanel(); document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); } })));
     return box;
   }
   if (st.code === "notInstalled") {
@@ -395,8 +473,7 @@ const assistantPanel = {
     if (ai.pulling || (!stl.ok && ["noModels", "noModel"].includes(ai.state.local?.code) && ai.settings.allowLocal)) {
       wrap.append(pullBox(app));
     } else if (!stl.ok && ai.state.local?.code === "notInstalled" && !ai.settings.setupDismissed && ai.settings.allowLocal) {
-      wrap.append(h("div", { class: "aicard soft" }, h("p", {}, "Puedes utilizar LumaMap normalmente. Si deseas activar IA local: instala Ollama (gratis)."),
-        row(btn({ label: "Configurar IA", kind: "primary small", onClick: () => aiSettings(app) }), btn({ label: "Ahora no", kind: "small", onClick: () => { ai.setSettings({ setupDismissed: true }); app.renderPanel(); } }))));
+      wrap.append(pullBox(app), row(btn({ label: "Ahora no", kind: "small", onClick: () => { ai.setSettings({ setupDismissed: true }); app.renderPanel(); } })));
     } else if (!stl.ok && stl.why && ai.settings.allowLocal && ai.state.local?.code !== "notInstalled" && ai.state.local?.code !== "off") {
       wrap.append(h("div", { class: "aicard soft" }, h("p", {}, stl.why), row(btn({ label: "Reintentar", kind: "small", onClick: async () => { await ai.refresh({ force: true }); app.renderPanel(); } }), btn({ label: "Configuración", kind: "small", onClick: () => aiSettings(app) }))));
     }

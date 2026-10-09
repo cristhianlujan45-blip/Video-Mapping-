@@ -35,7 +35,7 @@ import { ShowEngine, parseTc, fmtTc } from "./show.js";
 import { ensure3d, handle3dKey, closeWorkspace } from "./panels-3d.js";
 import { TrackingManager } from "./tracking.js";
 import { runAction } from "./rules.js";
-import { whatNow, aiOf } from "./panels-assistant.js";
+import { whatNow, aiOf, downloadModel } from "./panels-assistant.js";
 import { LIGHT_FX, prepareFx } from "./lightfx.js";
 import { InteractiveFX } from "./interactive.js";
 import { analyzeProject } from "./ai/analyzer.js";
@@ -3064,13 +3064,19 @@ async function init() {
   window.__lumamap = app; // depuración y pruebas
   // IA opcional: se mira en segundo plano si hay IA local (nunca bloquea ni se repite sola).
   // IA local: se busca (y en Windows se abre Ollama si está cerrado) al poco de arrancar.
-  // Si Ollama está pero falta el modelo, se avisa UNA vez de que se descarga con un toque.
+  // Si Ollama está pero falta la IA, en Windows se descarga SOLA en segundo plano (una
+  // vez), y si una descarga se quedó a medias, continúa donde iba.
   setTimeout(async () => {
     try {
       const ai = aiOf(app);
       if (!ai.settings.enabled || !ai.settings.allowLocal) return;
       const st = (await ai.refresh()).local || {};
-      if ((st.code === "noModels" || st.code === "noModel") && !ai.settings.pullOffered) {
+      const running = st.available || st.code === "noModels" || st.code === "noModel";
+      const pending = ai.settings.pullPending, have = (st.models || []).map(m => m.name);
+      if (pending && have.includes(pending)) { ai.setSettings({ pullPending: "" }); return; }
+      if (running && globalThis.LumaDesktop?.ai?.pull && ai.settings.autoPull && (pending || st.code === "noModels")) {
+        downloadModel(app, pending || undefined);
+      } else if ((st.code === "noModels" || st.code === "noModel") && !ai.settings.pullOffered) {
         ai.setSettings({ pullOffered: true });
         toast("🧠 Ollama detectado: falta descargar la IA una sola vez. Asistente → «Descargar la IA».");
       } else if (st.available && st.autoStarted) toast(`🧠 IA local lista · ${st.model} (Ollama se abrió solo)`);

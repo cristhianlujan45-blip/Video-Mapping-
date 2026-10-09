@@ -27,6 +27,7 @@ export const DEFAULT_SETTINGS = {
   autoSuggestions: true, vision: false,
   endpoint: "http://localhost:11434", model: "", temperature: 0.3, contextSize: 8192,
   setupDismissed: false, pullOffered: false,
+  autoPull: true, pullPending: "",          // la IA se descarga sola (y continúa si se cortó)
 };
 export function loadSettings() {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch { return { ...DEFAULT_SETTINGS }; }
