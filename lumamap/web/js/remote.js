@@ -1,12 +1,13 @@
 // web/js/remote.js
 // Cliente WebSocket del protocolo LumaMap (control remoto + sincronización).
 export class Remote {
-  constructor({ url, role = "display", name = "display", pin = "", onControl, onState, onDisplays, onStatus, onOsc, onAuth } = {}) {
+  constructor({ url, role = "display", name = "display", pin = "", onControl, onState, onDisplays, onStatus, onOsc, onAuth, onMessage } = {}) {
     this.url = url || ((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
     this.role = role; this.name = name;
     this.onControl = onControl; this.onState = onState;
     this.onDisplays = onDisplays; this.onStatus = onStatus || (() => {});
     this.onOsc = onOsc; this.onAuth = onAuth; this.pin = pin;
+    this.onMessage = onMessage;   // el resto (p. ej. cámaras de los móviles)
     this.ws = null; this.retry = 0; this.closed = false;
   }
   connect() {
@@ -25,6 +26,7 @@ export class Remote {
       else if (msg.type === "displays" && this.onDisplays) this.onDisplays(msg.displays);
       else if (msg.type === "osc" && this.onOsc) this.onOsc(msg);
       else if (msg.type === "auth") { this.authOk = msg.ok; if (!msg.ok) this.closedByAuth = true; this.onAuth?.(msg); }
+      else this.onMessage?.(msg);
     };
     this.ws.onclose = () => { this.onStatus("desconectado"); this.scheduleRetry(); };
     this.ws.onerror = () => { try { this.ws.close(); } catch {} };

@@ -10,6 +10,8 @@ import { INTERACTIVE_FX, calibOf, autoCalibrate } from "./interactive.js";
 import { runAction } from "./rules.js";
 import { findFx } from "./lightfx.js";
 import { EXPERIENCES, EXPERIENCE_CATS, applyExperience } from "./experiences.js";
+import { openPhoneCam } from "./panels-phonecam.js";
+import { onPhoneChange } from "./phonecam.js";
 
 const ui = { editing: false, cams: null };
 const pct = (v) => Math.round(v * 100) + "%";
@@ -129,21 +131,28 @@ const interactivePanel = {
     const detected = h("div", { class: "icamkind" });
     const fill = (cs) => {
       ui.cams = cs;
-      camSel.replaceChildren(h("option", { value: "" }, "Cámara por defecto"), ...cs.map(c => h("option", { value: c.id, selected: c.id === cal.camId, title: c.label }, cameraName(c))));
+      // replaceChildren() escribiría «null» por las partes que no aplican: se filtran.
+      camSel.replaceChildren(...[h("option", { value: "" }, "Cámara por defecto"), ...cs.map(c => h("option", { value: c.id, selected: c.id === cal.camId, title: c.label }, cameraName(c))),
+        // Un móvil elegido antes que ahora no está conectado: se sigue viendo (y vuelve solo al conectarlo).
+        String(cal.camId).startsWith("phone:") && !cs.some(c => c.id === cal.camId) ? h("option", { value: cal.camId, selected: true }, "Móvil (desconectado: abre la página de cámara en el móvil)") : null].filter(Boolean));
       const cur = cs.find(c => c.id === cal.camId);
       const sensor = cs.find(c => c.sensor && c.stream === "depth") || cs.find(c => c.sensor);
       const scanner = cs.find(c => c.kind === "scanner");
-      detected.replaceChildren(
+      detected.replaceChildren(...[
         cur && cur.kind !== "webcam" ? h("p", { class: "ok" }, h("i"), `Detectado: ${cameraName(cur)}`) : null,
         sensor && sensor !== cur ? h("div", { class: "idetect" }, h("span", {}, `Se detectó un ${sensor.kindName.toLowerCase()}: ve a las personas aunque estén quietas o a oscuras.`),
           btn({ label: "Usarlo", kind: "primary", onClick: () => useCam(sensor) })) : null,
-        scanner ? hint("Escáner 3D detectado: escanea la sala o el objeto con el programa del escáner, exporta en OBJ, GLB o PLY e impórtalo en la pestaña 3D para mapear encima. Escanear directamente desde LumaMap: EN DESARROLLO.") : null);
+        scanner ? hint("Escáner 3D detectado: escanea la sala o el objeto con el programa del escáner, exporta en OBJ, GLB o PLY e impórtalo en la pestaña 3D para mapear encima. Escanear directamente desde LumaMap: EN DESARROLLO.") : null].filter(Boolean));
     };
     if (ui.cams) fill(ui.cams);
     listCameras().then(fill);
+    // Un móvil se conecta o se va: la lista se actualiza sola.
+    ui.phoneSub ??= onPhoneChange(() => { if (app.S.tab === "interactive") listCameras().then(cs => { ui.cams = cs; if (app.S.tab === "interactive") app.renderPanel(); }); });
     wrap.append(section("1 · Cámara o sensor",
-      hint("Sirve cualquier cámara: web, USB, capturadora HDMI, cámara infrarroja o sensor de profundidad 3D. Colócala viendo toda la zona donde proyectas (pared o suelo)."),
-      camSel, detected, cameraView(app, cal),
+      hint("Sirve cualquier cámara: web, USB, la de tu móvil, capturadora HDMI, cámara infrarroja o sensor de profundidad 3D. Colócala viendo toda la zona donde proyectas (pared o suelo)."),
+      camSel, detected,
+      btn({ label: "📱 Usar el móvil como cámara (Wi-Fi o USB)", kind: "block", onClick: () => openPhoneCam(app) }),
+      cameraView(app, cal),
       row(toggle({ label: "Modo sensor de profundidad / infrarrojos", value: !!cal.depth, onChange: (v) => set(() => { cal.depth = v; }) }),
         cal.depth ? btn({ label: "Aprender el fondo", kind: "small", onClick: () => { T.learnBackground(); toast("Deja la zona vacía un segundo: aprendiendo el fondo…"); } }) : null),
       cal.depth ? hint("Modo sensor: LumaMap aprende la zona vacía y marca lo que cambia de distancia. Si hay falsos toques, deja la zona vacía y pulsa «Aprender el fondo».") : null));

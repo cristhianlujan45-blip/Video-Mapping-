@@ -561,3 +561,10 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .aipull .pbar { height: 8px; border-radius: 4px; background: var(--bg3, #1c2230); overflow: hidden; margin: 6px 0; }
 .aipull .pbar i { display: block; height: 100%; background: var(--accent, #4fc3ff); transition: width .3s; }
 .aipull .warn { color: #ffb340; }
+/* Móvil como cámara */
+.phonecam .pcgrid { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.phonecam .pcqr { background: #fff; padding: 6px; border-radius: 10px; line-height: 0; flex: none; }
+.phonecam .pcqr svg { width: 210px; height: 210px; }
+.phonecam .pcsteps { flex: 1; min-width: 220px; margin: 0; padding-left: 18px; line-height: 1.45; }
+.phonecam .pcurl { word-break: break-all; font-size: 13px; }
+.phonecam .pclive .ok { color: #34c759; }

@@ -269,30 +269,31 @@ export async function downloadModel(app, model) {
 export function pullBox(app) {
   const ai = aiOf(app), st = ai.state.local || {}, tier = ai.recommended();
   const box = h("div", { class: "aipull aicard soft" });
+  const add = (...xs) => box.append(...xs.filter(Boolean));   // append() escribiría «null»
   if (ai.pulling) {
     const pct = pull.total ? pull.done / pull.total : 0;
-    box.append(h("p", {}, pullText()), h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(pct * 100)}%` })),
+    add(h("p", {}, pullText()), h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(pct * 100)}%` })),
       globalThis.LumaDesktop?.ai?.pullCancel ? btn({ label: "Cancelar", kind: "small", onClick: () => ai.cancelPull() }) : null);
     return box;
   }
-  if (st.available) { box.append(h("p", {}, `✓ IA local lista · ${st.model}${st.autoStarted ? " (Ollama se abrió solo)" : ""}`)); return box; }
+  if (st.available) { add(h("p", {}, `✓ IA local lista · ${st.model}${st.autoStarted ? " (Ollama se abrió solo)" : ""}`)); return box; }
   const size = MODEL_TIERS.find(t => t.model === tier.model)?.size || "";
   if (st.code === "noModels" || st.code === "noModel") {
-    box.append(h("p", {}, `Ollama está listo. Falta descargar la IA una sola vez (luego funciona sin internet). Para tu equipo: ${tier.model || "qwen3:4b"}${size ? " · " + size : ""}.`),
+    add(h("p", {}, `Ollama está listo. Falta descargar la IA una sola vez (luego funciona sin internet). Para tu equipo: ${tier.model || "qwen3:4b"}${size ? " · " + size : ""}.`),
       pull.error ? h("p", { class: "warn" }, pull.error) : null,
       row(btn({ label: "⬇ Descargar la IA", kind: "primary", onClick: () => downloadModel(app) }),
         st.code === "noModel" && st.models?.length ? btn({ label: "Usar la que ya tengo", kind: "small", onClick: async () => { ai.setSettings({ model: "" }); await ai.refresh({ force: true }); app.renderPanel(); } }) : null));
     return box;
   }
   if (st.code === "notInstalled") {
-    box.append(h("p", {}, globalThis.LumaNative
+    add(h("p", {}, globalThis.LumaNative
       ? "La IA local va en un PC con Ollama de tu misma red Wi-Fi (en Ajustes de la IA, «Dirección de Ollama»)."
       : "Instala Ollama (gratis) desde ollama.com. Después no hace falta nada más: LumaMap lo abre solo y descarga la IA con un toque."),
       row(globalThis.LumaNative ? null : btn({ label: "Abrir ollama.com", kind: "small", onClick: () => window.open("https://ollama.com/download", "_blank") }),
         btn({ label: "Ya lo instalé: comprobar", kind: "small", onClick: async () => { ai.startTried = false; await ai.refresh({ force: true }); app.renderPanel(); document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); } })));
     return box;
   }
-  box.append(h("p", {}, st.reason || MSG.generic), btn({ label: "Comprobar de nuevo", kind: "small", onClick: async () => { ai.startTried = false; await ai.refresh({ force: true }); app.renderPanel(); document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); } }));
+  add(h("p", {}, st.reason || MSG.generic), btn({ label: "Comprobar de nuevo", kind: "small", onClick: async () => { ai.startTried = false; await ai.refresh({ force: true }); app.renderPanel(); document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); } }));
   return box;
 }
 
@@ -446,9 +447,9 @@ const assistantPanel = {
     const redraw = () => { if (app.S.tab === "assistant") app.renderPanel(); };
     const go = () => { const t = input.value; input.value = ""; send(app, t, redraw); };
     input.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); } });
-    wrap.append(h("h3", { class: "sub" }, "Preguntar"), ui.log.length ? log : hint("Ejemplos: «crear una superficie», «¿por qué tengo baja velocidad?», «quiero que las luces cambien con el beat», «cuando levante la mano cambia el color a rojo»."),
+    wrap.append(...[h("h3", { class: "sub" }, "Preguntar"), ui.log.length ? log : hint("Ejemplos: «crear una superficie», «¿por qué tengo baja velocidad?», «quiero que las luces cambien con el beat», «cuando levante la mano cambia el color a rojo»."),
       h("div", { class: "asst-row" }, input, btn({ label: "Enviar", ic: "play", kind: "primary", disabled: ui.busy, onClick: go })),
-      ui.log.length ? btn({ label: "Borrar conversación", kind: "small", onClick: () => { ui.log = []; remember(app); app.renderPanel(); } }) : null);
+      ui.log.length ? btn({ label: "Borrar conversación", kind: "small", onClick: () => { ui.log = []; remember(app); app.renderPanel(); } }) : null].filter(Boolean));
     setTimeout(() => { log.scrollTop = log.scrollHeight; }, 0);
     return wrap;
   },

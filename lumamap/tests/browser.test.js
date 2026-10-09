@@ -1,7 +1,7 @@
 // tests/browser.test.js — prueba de extremo a extremo en Chromium (opcional).
 // Requiere Playwright: `npm i -D playwright && npx playwright install chromium`
 // (o PLAYWRIGHT_MODULE=/ruta/a/playwright/index.mjs). Ejecuta: npm run test:browser
-import { createServer } from "../server/index.js";
+import { createServer, startHttps } from "../server/index.js";
 import { test, report, setOnFail } from "./harness.js";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -27,6 +27,8 @@ function makePng(file) {
 const srv = createServer({ port: 0, osc: false });
 await new Promise(r => srv.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${srv.address().port}/`;
+// https propio (cámara del móvil): en el primer puerto libre desde uno al azar.
+const httpsPort = await startHttps({ want: 20000 + Math.floor(Math.random() * 20000), dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-tls-")), host: "127.0.0.1" });
 const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
   "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera", "midi"] });
@@ -404,6 +406,7 @@ await test("asistente con IA local (Ollama simulado): «Descargar la IA» con un
   // Sin modelo: un solo botón la descarga (sin terminal) y queda elegida.
   await page.locator(".asst .aipull").getByRole("button", { name: "⬇ Descargar la IA" }).click();
   await page.locator(".asst .aipull .pbar").waitFor();
+  assert.ok(!/\bnull\b/.test(await page.locator(".asst .aipull").textContent()), "sin textos sueltos");
   await page.getByText(/Modelo: qwen3:/).waitFor({ timeout: 15000 });
   assert.equal(pulled.stream, false);
   const model = pulled.model;
@@ -678,6 +681,41 @@ await test("burbujas interactivas: si alguien toca la proyección donde hay burb
   assert.equal(r.before.score, 0, "sin nadie no revienta ninguna");
   assert.ok(r.before.bubbles > 3, "hay burbujas flotando");
   assert.ok(r.after >= 3, "al tocarlas revientan (" + r.after + ")");
+});
+await test("móvil como cámara: código QR, el móvil manda su cámara por WebRTC y el programa la usa para lo interactivo", async () => {
+  assert.ok(httpsPort > 0, "https activo");
+  await page.evaluate(() => { const a = window.__lumamap; a.setPro(false); if (a.S.tab !== "interactive") a.openTab("interactive"); });
+  await page.getByRole("button", { name: "📱 Usar el móvil como cámara (Wi-Fi o USB)" }).click();
+  await page.locator(".phonecam .pcqr svg").waitFor();
+  assert.match(await page.locator(".phonecam .pcurl code").textContent(), new RegExp(`^https://[\\d.]+:${httpsPort}/phonecam\\.html`));
+  await page.locator(".phonecam").getByText("Esperando al móvil").waitFor();
+  assert.ok(!/\bnull\b/.test(await page.locator(".phonecam").textContent()), "sin textos sueltos");
+  // El «móvil»: otra pestaña con la cámara de prueba (http://127.0.0.1 cuenta como página segura).
+  const phone = await ctx.newPage();
+  const phoneErrors = []; phone.on("pageerror", e => phoneErrors.push(e.message));
+  await phone.goto(base + "phonecam.html?auto=1");
+  await phone.locator("#state.ok").waitFor({ timeout: 30000 });
+  // En el programa aparece, se usa sola para lo interactivo y llega imagen de verdad.
+  await page.locator(".phonecam .pclive", { hasText: "enviando imagen" }).waitFor({ timeout: 20000 });
+  await page.locator(".phonecam .pclive").getByText("En uso").waitFor();
+  assert.ok(!/\bnull\b/.test(await page.locator("#panelBody .interactive").textContent()), "panel sin textos sueltos");
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, cal = a.S.project.settings.interactive;
+    const { getCamera, listCameras } = await import("./js/sources.js");
+    const cam = await getCamera(cal.camId);
+    for (let i = 0; i < 40 && !cam.el.videoWidth; i++) await new Promise(r => setTimeout(r, 100));
+    const cs = await listCameras();
+    return { camId: cal.camId, w: cam.el.videoWidth, h: cam.el.videoHeight, listed: cs.find(c => c.id === cal.camId)?.kindName };
+  });
+  assert.match(r.camId, /^phone:/);
+  assert.ok(r.w >= 320 && r.h >= 180, `imagen del móvil ${r.w}×${r.h}`);
+  assert.equal(r.listed, "Móvil (Wi-Fi)");
+  await page.getByRole("button", { name: "Listo" }).click();
+  // El móvil se va: el programa lo marca desconectado (y la cámara vuelve sola si reconecta).
+  await phone.close();
+  await page.waitForFunction(async () => { const { listPhones } = await import("./js/phonecam.js"); return listPhones().every(p => !p.online); }, null, { timeout: 15000 });
+  assert.deepEqual(phoneErrors, [], JSON.stringify(phoneErrors));
+  await page.evaluate(() => { const a = window.__lumamap, cal = a.S.project.settings.interactive; cal.camId = ""; a.openTab(null); });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

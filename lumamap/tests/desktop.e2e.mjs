@@ -178,6 +178,12 @@ await test("OSC por UDP: /lumamap/param/... fija un parámetro y OSC LEARN asign
 
 await test("mando remoto: sin PIN no entra; con PIN controla cualquier parámetro", async () => {
   const info = await win.evaluate(() => window.LumaDesktop.remoteInfo());
+  // Cámara del móvil: https propio con la página para el móvil (y su dirección para el código QR).
+  assert.ok(info.httpsPort > 0, "https de la cámara del móvil activo");
+  for (const u of info.urls) assert.match(u.cam, new RegExp(`^https://${u.ip.replace(/\./g, "\\.")}:${info.httpsPort}/phonecam\\.html$`));
+  const httpsMod = await import("node:https");
+  const camPage = await new Promise((res, rej) => httpsMod.get({ host: "127.0.0.1", port: info.httpsPort, path: "/phonecam.html", rejectUnauthorized: false }, (r) => { let b = ""; r.on("data", d => b += d); r.on("end", () => res(b)); }).on("error", rej));
+  assert.match(camPage, /Cámara del móvil/);
   const connect = (pin) => new Promise((resolve) => {
     const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`);
     ws.onopen = () => ws.send(JSON.stringify({ type: "hello", role: "controller", name: "test", pin }));

@@ -28,6 +28,7 @@ import { openHologram } from "./panels-hologram.js";
 import { openCreate3D } from "./panels-create3d.js";
 import { exportOBJ } from "./render3d.js";
 import { warmThumbs } from "./thumbs.js";
+import { startPhoneCams } from "./phonecam.js";
 import { ParamEngine, describe, applyModList } from "./params.js";
 import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
@@ -2804,7 +2805,10 @@ async function connectRemote() {
     url, role: "display", name: "LumaMap",
     onControl: remoteControl,
     onOsc: (m) => oscIn(m.address, m.args),
+    // Móviles como cámara (señalización WebRTC y lista de móviles conectados).
+    onMessage: (m) => phoneCams.handle(m),
   });
+  const phoneCams = startPhoneCams(remote);
   remote.connect();
   setInterval(() => {
     const i = S.project.scenes.findIndex(s => s.id === S.project.sceneId);

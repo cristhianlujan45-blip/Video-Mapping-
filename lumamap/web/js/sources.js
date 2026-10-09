@@ -3,6 +3,7 @@
 // animados (ImageDecoder), cámara en vivo y textos. Lo usan el editor y la
 // salida; cada ventana carga sus propios elementos desde IndexedDB.
 import { getMedia } from "./store.js";
+import { isPhoneKey, phoneStream, waitPhone, listPhones, onPhoneChange } from "./phonecam.js";
 
 export const ACCEPT = "image/*,video/*,.gif,.webp,.mp4,.webm,.mov,.mkv,.m4v,.avi,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf";
 
@@ -176,10 +177,14 @@ export function getCamera(key = "default") {
   if (cams.has(key)) return Promise.resolve(cams.get(key));
   if (opening.has(key)) return opening.get(key);
   const p = (async () => {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador no permite usar la cámara");
-    const size = { width: { ideal: 1280 }, height: { ideal: 720 } };
-    const video = key === "default" ? { facingMode: { ideal: facing }, ...size } : { deviceId: { exact: key }, ...size };
-    const stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    let stream;
+    if (isPhoneKey(key)) stream = phoneStream(key) || await waitPhone(key);   // móvil por Wi-Fi/USB (WebRTC)
+    else {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador no permite usar la cámara");
+      const size = { width: { ideal: 1280 }, height: { ideal: 720 } };
+      const video = key === "default" ? { facingMode: { ideal: facing }, ...size } : { deviceId: { exact: key }, ...size };
+      stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    }
     const v = document.createElement("video");
     v.muted = true; v.playsInline = true; v.setAttribute("playsinline", "");
     v.srcObject = stream;
@@ -218,7 +223,7 @@ export function offlineImage() {
 export function stopCamera(key) {
   for (const [k, c] of [...cams]) {
     if (key && k !== key) continue;
-    c.stream.getTracks().forEach(t => t.stop());
+    if (!isPhoneKey(k)) c.stream.getTracks().forEach(t => t.stop());   // el video del móvil lo gestiona phonecam.js
     cams.delete(k);
   }
 }
@@ -233,6 +238,7 @@ const CAMERA_KINDS = [
   { kind: "depth", name: "Sensor de profundidad 3D", re: /realsense|depth|profundidad|orbbec|astra|femto|gemini ?\d|\bzed\b|stereolabs|oak-?d|luxonis|kinect|xtion|primesense|\btof\b|time.of.flight|lidar|structure core|occipital|helios|tof camera/i },
   { kind: "ir", name: "Cámara infrarroja", re: /infrared|infrarroj|\bir\b|ir camera|windows hello|night ?vision|noir/i },
   { kind: "capture", name: "Capturadora", re: /capture|cam ?link|elgato|avermedia|hdmi|magewell|blackmagic|decklink|ezcap|usb3?\.?0? video|video grabber/i },
+  { kind: "phone", name: "Móvil por USB", re: /android webcam|android camera|pixel \d|galaxy|iphone|continuity|redmi|xiaomi|motorola|moto [ge]\d|oneplus|huawei|honor/i },
   { kind: "virtual", name: "Cámara virtual / móvil", re: /\bobs\b|virtual|droidcam|iriun|\bcamo\b|\bndi\b|epoccam|manycam|snap camera|ivcam/i },
 ];
 export function classifyCamera(label = "") {
@@ -250,14 +256,25 @@ export const cameraName = (c) => c.kind === "webcam" ? c.label : `${c.kindName}$
 
 /** Cámaras conectadas: [{ id, label, kind, kindName, stream, sensor, is3d }]. Los nombres aparecen tras dar permiso. */
 export async function listCameras() {
+  let out = [];
   try {
     const all = await navigator.mediaDevices.enumerateDevices();
-    return all.filter(d => d.kind === "videoinput" && d.deviceId).map((d, i) => {
+    out = all.filter(d => d.kind === "videoinput" && d.deviceId).map((d, i) => {
       const label = d.label || `Cámara ${i + 1}`;
       return { id: d.deviceId, label, ...classifyCamera(label) };
     });
-  } catch { return []; }
+  } catch {}
+  // Y los móviles conectados por Wi-Fi o cable USB (página de cámara de LumaMap).
+  return [...out, ...listPhones().filter(p => p.online || cams.has(p.id))];
 }
+// Un móvil que vuelve (o manda un video nuevo): se recoge solo, como una webcam que se vuelve a enchufar.
+onPhoneChange((key) => {
+  const s = phoneStream(key), c = cams.get(key);
+  if (s && c && c.stream !== s) { c.stream = s; c.el.srcObject = s; c.el.play().catch(() => {}); lost.delete(key); for (const tr of s.getVideoTracks()) tr.addEventListener("ended", () => { if (cams.get(key) === c) { cams.delete(key); lost.set(key, Date.now()); } }); }
+  else if (s && lost.has(key)) getCamera(key).catch(() => {});
+  // Se cortó: «CÁMARA DESCONECTADA» y vuelve sola cuando el móvil reconecta.
+  else if (!s && c) { cams.delete(key); lost.set(key, Date.now()); }
+});
 /** Avisa cuando se enchufa una cámara nueva: cb([cámaras nuevas]). */
 export function watchCameras(cb) {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.addEventListener) return;
