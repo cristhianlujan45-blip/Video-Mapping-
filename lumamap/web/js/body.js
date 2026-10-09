@@ -142,7 +142,7 @@ class BodyTracker {
       const t0 = performance.now();
       try {
         // Cuerpo entero a 320 px de ancho: ve personas lejos sin cargar el equipo.
-        const img = this.prepare(video, 320);
+        const img = this.prepare(video, this.forceCPU ? 256 : 320);   // en CPU, algo más pequeña: igual de útil y más ligera
         this.pose.detectForVideo(img, ts, (r) => {
           const ms = r.segmentationMasks || [];
           this.people = ms.length;
