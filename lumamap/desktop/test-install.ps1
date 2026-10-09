@@ -25,45 +25,85 @@ $ver = (Get-Item $Setup).VersionInfo.ProductVersion
 $lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "LumaMap.lnk"
 $startLnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\LumaMap.lnk"
 
-# ---- Clics de verdad en las ventanas (UI Automation), como un usuario ----
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-$AE = [System.Windows.Automation.AutomationElement]
-$Scope = [System.Windows.Automation.TreeScope]
-function Controls($procId, $type) {
-  $byProc = New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $procId)
-  $byType = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $type)
-  foreach ($w in $AE::RootElement.FindAll($Scope::Children, $byProc)) { foreach ($c in $w.FindAll($Scope::Descendants, $byType)) { $c } }
+# ---- Clics de verdad en las ventanas del instalador, como un usuario ----
+# API de Windows directa: busca las ventanas del instalador (y de sus procesos hijos),
+# lee sus botones y casillas y «pulsa» con el mismo mensaje que manda un clic.
+Add-Type -TypeDefinition @"
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+public static class W {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr p, EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+  [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  public static string Text(IntPtr h) { var s = new StringBuilder(512); GetWindowText(h, s, 512); return s.ToString(); }
+  public static string Cls(IntPtr h) { var s = new StringBuilder(256); GetClassName(h, s, 256); return s.ToString(); }
+  public static uint Pid(IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }
+  public static List<IntPtr> Tops() { var r = new List<IntPtr>(); EnumWindows((h, l) => { if (IsWindowVisible(h)) r.Add(h); return true; }, IntPtr.Zero); return r; }
+  public static List<IntPtr> Kids(IntPtr p) { var r = new List<IntPtr>(); EnumChildWindows(p, (h, l) => { r.Add(h); return true; }, IntPtr.Zero); return r; }
+  public static bool IsRadio(IntPtr h) { int t = GetWindowLong(h, -16) & 0xF; return t == 4 || t == 9; }
+  public static bool IsCheck(IntPtr h) { int t = GetWindowLong(h, -16) & 0xF; return t == 2 || t == 3; }
+  public static bool Checked(IntPtr h) { return (long)SendMessage(h, 0x00F0, IntPtr.Zero, IntPtr.Zero) == 1; }
+  // Un clic: WM_COMMAND (BN_CLICKED) a la ventana dueña del botón, como hace Windows al pulsarlo.
+  public static void Click(IntPtr btn) { SendMessage(GetParent(btn), 0x0111, (IntPtr)(GetDlgCtrlID(btn) & 0xffff), btn); }
 }
-function Press($procId, [string[]]$names) {
-  foreach ($b in (Controls $procId ([System.Windows.Automation.ControlType]::Button))) {
-    $n = ($b.Current.Name -replace "&", "").Trim()
-    foreach ($want in $names) {
-      if ($n -like $want -and $b.Current.IsEnabled) { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); return $n }
-    }
-  }
+"@
+function TreePids($root) {
+  $all = @([uint32]$root)
+  for ($i = 0; $i -lt 4; $i++) { foreach ($p in Get-CimInstance Win32_Process) { if ($all -contains $p.ParentProcessId -and -not ($all -contains $p.ProcessId)) { $all += [uint32]$p.ProcessId } } }
+  return $all
+}
+function Ctrls($root) {
+  $pids = TreePids $root
+  foreach ($t in [W]::Tops()) { if ($pids -contains [W]::Pid($t)) { foreach ($k in [W]::Kids($t)) { if ([W]::Cls($k) -eq "Button") {
+    [pscustomobject]@{ H = $k; Text = ([W]::Text($k) -replace "&", "").Trim(); On = ([W]::IsWindowEnabled($k) -and [W]::IsWindowVisible($k)); Radio = [W]::IsRadio($k); Check = [W]::IsCheck($k) } } } } }
+}
+function Press($root, [string[]]$names) {
+  foreach ($b in (Ctrls $root)) { if (-not $b.On -or $b.Radio -or $b.Check) { continue }; foreach ($n in $names) { if ($b.Text -like $n) { [W]::Click($b.H); return $b.Text } } }
   return $null
+}
+function Dump($root) {
+  Write-Host "  — ventanas visibles —"
+  foreach ($t in [W]::Tops()) { $tx = [W]::Text($t); if ($tx) { Write-Host ("    [{0}] {1} · {2}" -f [W]::Pid($t), $tx, [W]::Cls($t)) } }
+  Write-Host "  — procesos del instalador: $((TreePids $root) -join ', ') — botones: $(((Ctrls $root) | % { $_.Text }) -join ' | ')"
+}
+$shots = Join-Path $env:RUNNER_TEMP "capturas-instalador"
+function Shot($name) {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    New-Item -ItemType Directory -Force -Path $shots | Out-Null
+    $r = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bmp = New-Object System.Drawing.Bitmap $r.Width, $r.Height
+    [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($r.Location, [System.Drawing.Point]::Empty, $r.Size)
+    $bmp.Save((Join-Path $shots "$name.png")); Write-Host "  captura: $name.png"
+  } catch { Write-Host "  (sin captura: $($_.Exception.Message))" }
 }
 function LinkTarget($f) { (New-Object -ComObject WScript.Shell).CreateShortcut($f).TargetPath }
 
 Step "0. Instalar con el asistente (doble clic y «Siguiente», como un usuario)"
 $wiz = Start-Process -FilePath $Setup -PassThru
-$clicked = @(); $sawCheck = $false; $sawRadio = $false
+$clicked = @(); $sawCheck = $false; $sawRadio = $false; $n = 0
 $deadline = (Get-Date).AddMinutes(5)
 while (-not $wiz.HasExited -and (Get-Date) -lt $deadline) {
+  $all = @(Ctrls $wiz.Id)
   # La casilla del acceso directo tiene que salir, marcada; la pregunta «¿para quién?» ya no.
-  foreach ($c in (Controls $wiz.Id ([System.Windows.Automation.ControlType]::CheckBox))) {
-    if ($c.Current.Name -like "*acceso directo*escritorio*") {
-      $sawCheck = $true
-      $st = $c.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState
-      if ("$st" -ne "On") { Fail "la casilla del acceso directo no viene marcada ($st)" }
-    }
+  foreach ($c in $all) {
+    if ($c.Check -and $c.Text -like "*acceso directo*escritorio*") { $sawCheck = $true; if (-not [W]::Checked($c.H)) { Shot "casilla"; Fail "la casilla del acceso directo no viene marcada" } }
+    if ($c.Radio -and $c.On) { $sawRadio = $true }
   }
-  if (@(Controls $wiz.Id ([System.Windows.Automation.ControlType]::RadioButton)).Count -gt 0) { $sawRadio = $true }
   $c = Press $wiz.Id @("Terminar", "Finish", "Instalar", "Install", "Siguiente*", "Next*")
   if ($c) { $clicked += $c; Write-Host "  clic: $c" }
+  if ((++$n % 25) -eq 0) { Dump $wiz.Id }
   Start-Sleep -Milliseconds 800
 }
-if (-not $wiz.HasExited) { $wiz.Kill(); Fail "el asistente no terminó (pulsado: $($clicked -join ', '))" }
+if (-not $wiz.HasExited) { Dump $wiz.Id; Shot "asistente"; $wiz.Kill(); Fail "el asistente no terminó (pulsado: $($clicked -join ', '))" }
 Write-Host "Pulsado: $($clicked -join ' → ')"
 if (-not $sawCheck) { Fail "no apareció la casilla «Crear un acceso directo en el escritorio»" }
 if ($sawRadio) { Fail "sigue apareciendo la pregunta «¿para quién instalar?»" }
@@ -84,7 +124,7 @@ $stamp = (Get-Item $exe).LastWriteTimeUtc
 $again = Start-Process -FilePath $Setup -PassThru
 $c = $null; $t = 0
 while (-not $c -and -not $again.HasExited -and $t -lt 60) { Start-Sleep -Milliseconds 500; $c = Press $again.Id @("Sí", "Si", "Yes"); $t++ }
-if (-not $c) { if (-not $again.HasExited) { $again.Kill() }; Fail "no salió el aviso «LumaMap ya está instalado»" }
+if (-not $c) { Dump $again.Id; Shot "ya-instalado"; if (-not $again.HasExited) { $again.Kill() }; Fail "no salió el aviso «LumaMap ya está instalado»" }
 if (-not $again.WaitForExit(20000)) { $again.Kill(); Fail "el instalador no se cerró tras elegir abrir LumaMap" }
 $t = 0; while (-not (Get-Process LumaMap -ErrorAction SilentlyContinue) -and $t -lt 30) { Start-Sleep 1; $t++ }
 if (-not (Get-Process LumaMap -ErrorAction SilentlyContinue)) { Fail "no se abrió LumaMap desde el aviso" }

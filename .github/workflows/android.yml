@@ -122,6 +122,14 @@ jobs:
         working-directory: lumamap/desktop
         run: ./test-install.ps1
 
+      - name: Capturas del instalador (si falla)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-instalador
+          path: ${{ runner.temp }}/capturas-instalador
+          if-no-files-found: ignore
+
       - name: Upload LumaMap Windows installer
         uses: actions/upload-artifact@v4
         with:
