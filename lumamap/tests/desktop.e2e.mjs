@@ -50,6 +50,8 @@ win.on("pageerror", (e) => errors.push(e.message));
 await win.waitForFunction(() => window.__lumamap && window.__lumamap.S, null, { timeout: 30000 });
 await win.waitForTimeout(800);
 await win.evaluate(() => { const b = [...document.querySelectorAll(".tile")].find(x => /Pantalla/.test(x.textContent)); b?.click(); });
+// Sin tarjeta gráfica: vista previa en calidad baja (la que la app elige sola en estos equipos).
+await win.evaluate(() => window.__lumamap.actions.applyQuality("low"));
 
 await test("el servicio DMX arranca en un proceso aparte y lista las interfaces de red", async () => {
   await win.evaluate(() => { const a = window.__lumamap; a.setPro(true); a.dmx.cfg.enabled = true; a.dmx.connect(); });
@@ -95,8 +97,10 @@ await test("video → luces: el color de la superficie llega a los LED por sACN 
     a.dmx.addPixelMap({ shape: "grid", cols: 4, rows: 2, count: 8, colorOrder: "RGB", universe: 2, channel: 1, source: "video", x: 0.2, y: 0.2, w: 0.6, h: 0.6 });
   });
   const t0 = Date.now();
-  while (Date.now() - t0 < 10000 && !sacnPkts.some(p => p.universe === 7 && p.data[2] > 200)) await new Promise(r => setTimeout(r, 100));
-  const p = sacnPkts.filter(p => p.universe === 7).at(-1);
+  // Se espera a que el azul llegue a TODOS los LED (en un equipo lento el primer fotograma tarda).
+  const blue = (p) => p.universe === 7 && [...p.data.slice(0, 24)].every((v, i) => i % 3 === 2 ? v === 255 : v === 0);
+  while (Date.now() - t0 < 25000 && !sacnPkts.some(blue)) await new Promise(r => setTimeout(r, 100));
+  const p = sacnPkts.filter(blue).at(-1) || sacnPkts.filter(p => p.universe === 7).at(-1);
   assert.ok(p, "no llegó sACN al universo 7");
   assert.deepEqual([...p.data.slice(0, 6)], [0, 0, 255, 0, 0, 255]);
   assert.equal(p.sourceName, "LumaMap");
@@ -107,14 +111,20 @@ await test("entrada DMX: una consola mueve un canal y el motor de parámetros lo
   await win.waitForTimeout(800);
   const learning = win.evaluate(() => window.__lumamap.params.learn("global/master").then(m => m && m.key));
   await win.waitForTimeout(200);
-  const console1 = dgram.createSocket("udp4");
-  const send = (v) => new Promise(r => { const d = new Uint8Array(512); d[4] = v; console1.send(P.artDmx(9, d), P.ARTNET_PORT, "127.0.0.1", r); });
+  // Como una consola Art-Net real: por broadcast. (En unicast, con dos programas escuchando en el
+  // puerto 6454 —LumaMap y el nodo falso—, Linux entrega cada paquete a uno solo y la prueba fallaba al azar.)
+  const console1 = dgram.createSocket({ type: "udp4", reuseAddr: true });
+  await new Promise(r => console1.bind(0, "127.0.0.1", r));
+  console1.setBroadcast(true);
+  const send = (v) => new Promise(r => { const d = new Uint8Array(512); d[4] = v; console1.send(P.artDmx(9, d), P.ARTNET_PORT, "127.255.255.255", r); });
   await send(200);
   assert.equal(await learning, "artnet:9:c5");
   // Una consola real repite el universo sin parar (~40 por segundo): si un paquete UDP se pierde, llega el siguiente.
   const stream = setInterval(() => send(51), 100);
-  try { await win.waitForFunction(() => Math.abs(window.__lumamap.S.master - 0.2) < 0.01, null, { timeout: 8000 }); }
+  try { await win.waitForFunction(() => Math.abs(window.__lumamap.S.master - 0.2) < 0.01, null, { timeout: 15000 }); }
   finally { clearInterval(stream); console1.close(); }
+  // Limpieza: la consola deja de mandar el master (si no, pelearía con las pruebas siguientes).
+  await win.evaluate(() => { const a = window.__lumamap; a.S.project.settings.control.mappings = a.S.project.settings.control.mappings.filter(m => m.target !== "global/master"); a.paramMappingsChanged?.(); a.dmx.cfg.inputs = []; });
 });
 
 await test("apagón: todos los universos a 0 al instante", async () => {
@@ -173,7 +183,7 @@ await test("mando remoto: sin PIN no entra; con PIN controla cualquier parámetr
   const good = await connect(info.pin);
   assert.equal(good.ok, true);
   good.ws.send(JSON.stringify({ type: "control", action: "param", id: "global/master", value: 0.66 }));
-  await win.waitForFunction(() => Math.abs(window.__lumamap.S.master - 0.66) < 1e-6, null, { timeout: 5000 });
+  await win.waitForFunction(() => Math.abs(window.__lumamap.S.master - 0.66) < 1e-6, null, { timeout: 10000 });
   // El mando recibe el estado (escenas, macros, luces).
   const st = await new Promise((resolve) => { good.ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === "state") resolve(m.state); }; });
   assert.ok(Array.isArray(st.scenes) && st.lights && "snapshots" in st.lights);

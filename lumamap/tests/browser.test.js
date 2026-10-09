@@ -48,6 +48,9 @@ setOnFail(async (name) => {
 await page.goto(base);
 await page.waitForTimeout(800);
 await page.getByText("Cubo 3D").click();
+// Sin tarjeta gráfica (SwiftShader) la vista previa a resolución completa va a ~5 fps y cada clic
+// de Playwright espera fotogramas: calidad «baja» como la app elige sola en estos equipos (salida igual).
+await page.evaluate(() => window.__lumamap.actions.applyQuality("low"));
 await page.waitForTimeout(300);
 
 const toScreen = (p) => page.evaluate(([x, y]) => {
