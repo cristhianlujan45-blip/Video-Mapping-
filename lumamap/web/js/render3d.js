@@ -122,6 +122,7 @@ export class ModelView {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#000000");
     this.scene.environment = this.studio();
+    this.scene.environmentIntensity = 1.35;
     this.scene.add(new THREE.HemisphereLight("#dfe8ff", "#1a1410", 0.55));
     const key = new THREE.DirectionalLight("#ffffff", 2.4); key.position.set(4, 7, 5); this.scene.add(key);
     const rim = new THREE.DirectionalLight("#9fc7ff", 1.4); rim.position.set(-5, 4, -4); this.scene.add(rim);
@@ -131,9 +132,9 @@ export class ModelView {
   /** Estudio fotográfico sencillo para los reflejos (paneles de luz), generado aquí mismo. */
   studio() {
     const env = new THREE.Scene();
-    env.add(new THREE.Mesh(new THREE.SphereGeometry(30, 32, 16), new THREE.MeshBasicMaterial({ color: "#20242c", side: THREE.BackSide })));
+    env.add(new THREE.Mesh(new THREE.SphereGeometry(30, 32, 16), new THREE.MeshBasicMaterial({ color: "#4a5262", side: THREE.BackSide })));
     const panel = (x, y, z, w, h, c) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 0, 0); env.add(m); };
-    panel(0, 14, 0, 20, 20, "#ffffff"); panel(18, 6, 8, 10, 14, "#f4f7ff"); panel(-18, 4, -6, 8, 12, "#bcd4ff"); panel(0, 3, 20, 24, 4, "#ffffff");
+    panel(0, 14, 0, 24, 24, "#ffffff"); panel(18, 6, 8, 14, 16, "#f4f7ff"); panel(-18, 4, -6, 12, 14, "#cfe0ff"); panel(0, 3, 20, 28, 6, "#ffffff"); panel(4, 2, -20, 16, 8, "#fff2e0");
     const pm = new THREE.PMREMGenerator(this.r);
     return pm.fromScene(env, 0.02).texture;
   }
@@ -162,7 +163,8 @@ export class ModelView {
     const [az, el] = VIEW_ANGLES[o.view] || VIEW_ANGLES.three;
     const cam = this.camera, aspect = w / h;
     cam.aspect = aspect;
-    const fit = e.radius / Math.sin(cam.fov * Math.PI / 360) * (aspect < 1 ? 1 / aspect : 1) * 1.05 / (o.zoom || 1);
+    // Encuadre: la esfera que envuelve el objeto llena casi todo el alto (el objeto se ve grande).
+    const fit = e.radius / Math.sin(cam.fov * Math.PI / 360) * (aspect < 1 ? 1 / aspect : 1) * 0.95 / (o.zoom || 1);
     const a = az * Math.PI / 180, b = el * Math.PI / 180;
     cam.position.set(e.center.x + Math.sin(a) * Math.cos(b) * fit, e.center.y + Math.sin(b) * fit, e.center.z + Math.cos(a) * Math.cos(b) * fit);
     cam.lookAt(e.center);

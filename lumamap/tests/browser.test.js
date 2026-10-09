@@ -614,6 +614,25 @@ await test("holograma: asistente fácil (escenario como Tupac, 2 proyectores), u
   await page.getByRole("button", { name: "Cerrar" }).click();
   await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; P.surfaces = P.surfaces.filter(x => !x.holo); for (const n of [1, 2]) delete P.settings.screens[n].edge; a.changed({ panel: true }); });
 });
+await test("objetos 3D: «hazme un carro» desde la IA sin conexión, vista previa girando y se proyecta en una superficie", async () => {
+  // La orden en el asistente propone «Crear el objeto 3D»; se aplica y abre el creador.
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.actions.create3D({ prompt: "un carro azul deportivo" }); });
+  await page.locator(".create3d .c3preview").waitFor();
+  await page.waitForFunction(() => /biblioteca 3D/.test(document.querySelector(".c3status")?.textContent || ""), null, { timeout: 20000 });
+  await page.waitForTimeout(600);
+  // La vista previa tiene dibujo (no es todo negro).
+  const lit = await page.evaluate(() => { const c = document.querySelector(".c3preview"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 16) if (d[i] + d[i + 1] + d[i + 2] > 60) n++; return n; });
+  assert.ok(lit > 200, "la vista previa dibuja el carro (" + lit + ")");
+  await page.locator(".create3d .seg button", { hasText: "Camioneta" }).click();
+  const n0 = await page.evaluate(() => window.__lumamap.S.project.surfaces.length);
+  await page.getByRole("button", { name: "▶ Proyectar (superficie nueva)" }).click();
+  await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0);
+  await page.waitForTimeout(1500);
+  const r = await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId), l = sc.looks[P.surfaces.at(-1).id];
+    return { type: l.source.type, style: l.source.model.style, color: l.source.model.color, gl: document.querySelector("#gl").getContext("webgl2").getError() }; });
+  assert.deepEqual(r, { type: "model3d", style: "camioneta", color: "#1f5fff", gl: 0 });
+  await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; a.actions.remove?.(P.surfaces.at(-1).id); a.openTab(null); });
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();

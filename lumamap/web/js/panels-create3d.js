@@ -44,6 +44,8 @@ export async function openCreate3D(app, opts = {}) {
     const req = parseRequest(text);
     if (req) {
       ui.recipe = libraryRecipe(req.id, req);
+      // El texto 3D se lee mejor de frente y quieto; el resto, en 3/4 girando.
+      if (req.id === "texto") { ui.view = "front"; ui.spin = 0; } else if (ui.view === "front" && ui.spin === 0) { ui.view = "three"; ui.spin = 1; }
       status.textContent = `${OBJECTS3D.find(o => o.id === req.id).emoji} Hecho con la biblioteca 3D de LumaMap (sin internet).`;
       return draw();
     }

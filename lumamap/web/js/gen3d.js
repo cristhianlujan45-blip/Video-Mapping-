@@ -58,11 +58,11 @@ export const OBJECTS3D = [
       const cab = style === "cabana";
       return [
         P("box", [0, 1, 0], [4, 2, 3], c1, cab ? "matte" : "paint"),
-        P("cylinder", [0, 2.6, 0], [3.6, 4.4, 2.4], c2, "matte", [90, 0, 90], { seg: 3 }),          // tejado (prisma triangular)
+        P("cylinder", [0, 2.47, 0], [3.93, 4.4, 1.87], c2, "matte", [-90, 0, 90], { seg: 3 }),      // tejado (prisma triangular, cumbrera a lo largo)
         P("box", [2.01, 0.6, 0], [0.04, 1.2, 0.7], cab ? "#5a3a22" : "#2b2f38", "matte"),            // puerta
         P("box", [2.01, 1.2, 1], [0.04, 0.6, 0.6], "#ffe7a3", "light"), P("box", [2.01, 1.2, -1], [0.04, 0.6, 0.6], "#ffe7a3", "light"),
         P("box", [0, 1.2, 1.51], [0.8, 0.6, 0.04], "#ffe7a3", "light"),
-        P("box", [-1, 3.1, 0.6], [0.4, 1, 0.4], cab ? "#6b4a2f" : "#8a93a6", "matte"),               // chimenea
+        P("box", [-1, 2.95, 0.7], [0.4, 1, 0.4], cab ? "#6b4a2f" : "#8a93a6", "matte"),              // chimenea
       ];
     } },
   { id: "arbol", name: "Árbol", emoji: "🌲", words: /\b(arbol|árbol|pino|tree|navidad)\b/, styles: [["pino", "Pino"], ["frondoso", "Frondoso"]], colors: ["#1e9e4a", "#7a4a2a"],
