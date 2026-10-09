@@ -1,5 +1,6 @@
 # desktop/test-install.ps1 — prueba real del ciclo de vida en Windows (CI).
-# Instalación limpia → abrir → actualizar con la app ABIERTA → rollback por fallo
+# Instalación con el asistente (clics de verdad) → no reinstalar al reabrirlo → accesos
+# directos que se recrean solos → instalación silenciosa → abrir → actualizar con la app ABIERTA → rollback por fallo
 # → volver a la versión anterior → reparar → desinstalar (conserva datos) →
 # reinstalar. Cada paso comprueba el resultado; cualquier fallo detiene la prueba.
 param([string]$Setup = (Get-ChildItem "$PSScriptRoot\dist\LumaMap-Setup*.exe" | Select-Object -First 1).FullName)
@@ -21,12 +22,88 @@ function RunUpdater($extra) {
 }
 function ReadResult { if (-not (Test-Path $result)) { Fail "el actualizador no dejó resultado" }; return (Get-Content $result -Raw -Encoding UTF8 | ConvertFrom-Json) }
 $ver = (Get-Item $Setup).VersionInfo.ProductVersion
+$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "LumaMap.lnk"
+$startLnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\LumaMap.lnk"
 
-Step "1. Instalación limpia ($Setup, versión $ver)"
+# ---- Clics de verdad en las ventanas (UI Automation), como un usuario ----
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$AE = [System.Windows.Automation.AutomationElement]
+$Scope = [System.Windows.Automation.TreeScope]
+function Controls($procId, $type) {
+  $byProc = New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $procId)
+  $byType = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $type)
+  foreach ($w in $AE::RootElement.FindAll($Scope::Children, $byProc)) { foreach ($c in $w.FindAll($Scope::Descendants, $byType)) { $c } }
+}
+function Press($procId, [string[]]$names) {
+  foreach ($b in (Controls $procId ([System.Windows.Automation.ControlType]::Button))) {
+    $n = ($b.Current.Name -replace "&", "").Trim()
+    foreach ($want in $names) {
+      if ($n -like $want -and $b.Current.IsEnabled) { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); return $n }
+    }
+  }
+  return $null
+}
+function LinkTarget($f) { (New-Object -ComObject WScript.Shell).CreateShortcut($f).TargetPath }
+
+Step "0. Instalar con el asistente (doble clic y «Siguiente», como un usuario)"
+$wiz = Start-Process -FilePath $Setup -PassThru
+$clicked = @(); $sawCheck = $false; $sawRadio = $false
+$deadline = (Get-Date).AddMinutes(5)
+while (-not $wiz.HasExited -and (Get-Date) -lt $deadline) {
+  # La casilla del acceso directo tiene que salir, marcada; la pregunta «¿para quién?» ya no.
+  foreach ($c in (Controls $wiz.Id ([System.Windows.Automation.ControlType]::CheckBox))) {
+    if ($c.Current.Name -like "*acceso directo*escritorio*") {
+      $sawCheck = $true
+      $st = $c.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState
+      if ("$st" -ne "On") { Fail "la casilla del acceso directo no viene marcada ($st)" }
+    }
+  }
+  if (@(Controls $wiz.Id ([System.Windows.Automation.ControlType]::RadioButton)).Count -gt 0) { $sawRadio = $true }
+  $c = Press $wiz.Id @("Terminar", "Finish", "Instalar", "Install", "Siguiente*", "Next*")
+  if ($c) { $clicked += $c; Write-Host "  clic: $c" }
+  Start-Sleep -Milliseconds 800
+}
+if (-not $wiz.HasExited) { $wiz.Kill(); Fail "el asistente no terminó (pulsado: $($clicked -join ', '))" }
+Write-Host "Pulsado: $($clicked -join ' → ')"
+if (-not $sawCheck) { Fail "no apareció la casilla «Crear un acceso directo en el escritorio»" }
+if ($sawRadio) { Fail "sigue apareciendo la pregunta «¿para quién instalar?»" }
+if (-not (Test-Path $exe)) { Fail "el asistente no instaló $exe" }
+if (-not (Test-Path $lnk)) { Fail "el asistente no creó el acceso directo del escritorio ($lnk)" }
+if ((LinkTarget $lnk) -ne $exe) { Fail "el acceso directo apunta a '$(LinkTarget $lnk)' en vez de a $exe" }
+if (-not (Test-Path $startLnk)) { Fail "no está en el menú Inicio ($startLnk)" }
+$reg = Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | ? { (Get-ItemProperty $_.PSPath).DisplayName -like "LumaMap*" }
+if (-not $reg) { Fail "no aparece en «Aplicaciones instaladas» de Windows" }
+# «Terminar» abre LumaMap (casilla «Ejecutar LumaMap»).
+$t = 0; while (-not (Get-Process LumaMap -ErrorAction SilentlyContinue) -and $t -lt 30) { Start-Sleep 1; $t++ }
+if (-not (Get-Process LumaMap -ErrorAction SilentlyContinue)) { Fail "al terminar no se abrió LumaMap" }
+Write-Host "Instalado con el asistente: escritorio → $(LinkTarget $lnk), menú Inicio y Aplicaciones instaladas"
+Start-Sleep -Seconds 6; StopAll
+
+Step "0b. Abrir otra vez el MISMO instalador: no reinstala, ofrece abrir LumaMap"
+$stamp = (Get-Item $exe).LastWriteTimeUtc
+$again = Start-Process -FilePath $Setup -PassThru
+$c = $null; $t = 0
+while (-not $c -and -not $again.HasExited -and $t -lt 60) { Start-Sleep -Milliseconds 500; $c = Press $again.Id @("Sí", "Si", "Yes"); $t++ }
+if (-not $c) { if (-not $again.HasExited) { $again.Kill() }; Fail "no salió el aviso «LumaMap ya está instalado»" }
+if (-not $again.WaitForExit(20000)) { $again.Kill(); Fail "el instalador no se cerró tras elegir abrir LumaMap" }
+$t = 0; while (-not (Get-Process LumaMap -ErrorAction SilentlyContinue) -and $t -lt 30) { Start-Sleep 1; $t++ }
+if (-not (Get-Process LumaMap -ErrorAction SilentlyContinue)) { Fail "no se abrió LumaMap desde el aviso" }
+if ((Get-Item $exe).LastWriteTimeUtc -ne $stamp) { Fail "se reinstaló aunque ya estaba instalado" }
+StopAll
+
+Step "0c. Si alguien borra el acceso directo, LumaMap lo vuelve a crear al abrirse"
+Remove-Item $lnk, $startLnk -Force
+$p = Launch
+$t = 0; while (-not ((Test-Path $lnk) -and (Test-Path $startLnk)) -and $t -lt 30) { Start-Sleep 1; $t++ }
+if (-not (Test-Path $lnk)) { Fail "LumaMap no recreó el acceso directo del escritorio" }
+if (-not (Test-Path $startLnk)) { Fail "LumaMap no recreó el acceso del menú Inicio" }
+if ((LinkTarget $lnk) -ne $exe) { Fail "el acceso directo recreado apunta a '$(LinkTarget $lnk)'" }
+StopAll
+
+Step "1. Instalación encima en silencio ($Setup, versión $ver)"
 Start-Process -Wait -FilePath $Setup -ArgumentList "/S"
 if (-not (Test-Path $exe)) { Fail "no se instaló $exe" }
 Write-Host "Instalado: $exe ($((Get-Item $exe).VersionInfo.ProductVersion))"
-$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "LumaMap.lnk"
 if (-not (Test-Path $lnk)) { Fail "no se creó el acceso directo en el escritorio ($lnk)" }
 Write-Host "Acceso directo: $lnk"
 

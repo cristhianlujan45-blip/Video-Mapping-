@@ -1,6 +1,15 @@
 ; desktop/build/installer.nsh — personalización del instalador NSIS de LumaMap.
 
 !include "nsDialogs.nsh"
+!include "WordFunc.nsh"
+
+; ---- Siempre para este usuario ----
+; Sin la página «¿Para quién instalar?»: elegir «todos los usuarios» relanzaba el
+; instalador como administrador y se perdían cosas (como la casilla del acceso
+; directo). LumaMap se instala en la carpeta del usuario, sin pedir permisos.
+!macro customInstallMode
+  StrCpy $isForceCurrentInstall "1"
+!macroend
 
 ; ---- ¿Ya está instalado? ----
 ; Si vuelves a abrir LumaMap-Setup.exe con la MISMA versión ya instalada, no hace
@@ -16,12 +25,20 @@
       ReadRegStr $R9 HKLM "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
       ReadRegStr $R8 HKLM "${INSTALL_REGISTRY_KEY}" "InstallLocation"
     ${EndIf}
-    ${If} $R9 == "${VERSION}"
+    ${If} $R9 != ""
     ${AndIf} $R8 != ""
     ${AndIf} ${FileExists} "$R8\${APP_EXECUTABLE_FILENAME}"
-      MessageBox MB_YESNO|MB_ICONINFORMATION "LumaMap ${VERSION} ya está instalado en este equipo.$\r$\n$\r$\nNo hace falta volver a instalarlo: a partir de ahora ábrelo desde su icono del escritorio o del menú Inicio.$\r$\n$\r$\n¿Abrir LumaMap ahora?$\r$\n(«No» lo reinstala, por si quieres repararlo.)" IDNO lumaReinstall
-        Exec '"$R8\${APP_EXECUTABLE_FILENAME}"'
-        Quit
+      ${VersionCompare} "${VERSION}" "$R9" $R7
+      ${If} $R7 == 0
+        MessageBox MB_YESNO|MB_ICONINFORMATION "LumaMap ${VERSION} ya está instalado en este equipo.$\r$\n$\r$\nNo hace falta volver a instalarlo: a partir de ahora ábrelo desde su icono del escritorio o del menú Inicio.$\r$\n$\r$\n¿Abrir LumaMap ahora?$\r$\n(«No» lo reinstala, por si quieres repararlo.)" IDNO lumaReinstall
+          Exec '"$R8\${APP_EXECUTABLE_FILENAME}"'
+          Quit
+      ${ElseIf} $R7 == 2
+        ; Este instalador es MÁS VIEJO que lo instalado (p. ej. un LumaMap-Setup.exe antiguo en Descargas).
+        MessageBox MB_YESNO|MB_ICONINFORMATION "Ya tienes instalada una versión más nueva de LumaMap ($R9).$\r$\n$\r$\nEste instalador es de una versión anterior (${VERSION}): no hace falta usarlo.$\r$\n$\r$\n¿Abrir tu LumaMap $R9 ahora?$\r$\n(«No» instala igualmente la versión anterior.)" IDNO lumaReinstall
+          Exec '"$R8\${APP_EXECUTABLE_FILENAME}"'
+          Quit
+      ${EndIf}
       lumaReinstall:
     ${EndIf}
   ${EndIf}

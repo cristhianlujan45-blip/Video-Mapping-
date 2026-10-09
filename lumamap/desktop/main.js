@@ -508,6 +508,17 @@ ipcMain.handle("video:release", (_e, url) => {
 
 app.whenReady().then(() => {
   buildMenu();
+  // Windows: accesos directos (escritorio y menú Inicio) garantizados aunque falten.
+  if (process.platform === "win32" && app.isPackaged) setTimeout(async () => {
+    try {
+      const S = require("./shortcuts.js");
+      if (!S.isInstalled(process.execPath)) return;
+      const made = S.ensureShortcuts({ exe: process.execPath, desktopDir: app.getPath("desktop"),
+        startMenuDir: path.join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs"),
+        pref: await S.readPref(), writeLink: (f, op, o) => shell.writeShortcutLink(f, op, o) });
+      if (made.length) log("info", "Accesos directos creados: " + made.join(", "));
+    } catch (e) { log("warn", "Accesos directos: " + (e?.message || e)); }
+  }, 3000);
   protocol.handle("app", (req) => {
     let p = decodeURIComponent(new URL(req.url).pathname);
     // Videos optimizados (carpeta temporal): la app los lee una vez y los guarda en su biblioteca.
