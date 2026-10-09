@@ -68,7 +68,7 @@ if (process.argv[2] === "installer") {
         oneClick: false,
         perMachine: false,
         allowToChangeInstallationDirectory: true,
-        createDesktopShortcut: "always",   // también al actualizar o reparar
+        createDesktopShortcut: false,   // lo crea installer.nsh según la casilla «Crear acceso directo en el escritorio»
         createStartMenuShortcut: true,
         shortcutName: "LumaMap",
         runAfterFinish: true,
