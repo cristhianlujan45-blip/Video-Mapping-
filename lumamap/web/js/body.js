@@ -42,6 +42,8 @@ class BodyTracker {
     this.prev = null; this.acc = null;
     this.lastVideoTime = -1; this.lastTs = 0; this.version = 0;
     this.sens = 0.5;
+    this.keepFrame = false;        // videos (holograma): guardar el fotograma que analiza la IA
+    this.frame = null;
     this.depthOn = false;          // modo sensor (profundidad / infrarrojos): fondo aprendido
     this.dmask = canvas(160, 90); this.bg = null; this.bgLearn = 0; this.dacc = null;
     this.onStatus = () => {};
@@ -138,6 +140,13 @@ class BodyTracker {
     const gap = Math.max(30, (this.aiMs || 0) * 2.5);
     if (video.currentTime === this.lastVideoTime || now - this.lastTs < gap) return false;
     this.lastVideoTime = video.currentTime;
+    // Copia del fotograma que se analiza: así la persona y su silueta coinciden siempre.
+    if (this.keepFrame) {
+      const fw = Math.min(960, video.videoWidth), fh = Math.max(1, Math.round(fw * video.videoHeight / video.videoWidth));
+      if (!this.frame) this.frame = canvas(fw, fh);
+      if (this.frame.width !== fw || this.frame.height !== fh) { this.frame.width = fw; this.frame.height = fh; }
+      this.frame.getContext("2d").drawImage(video, 0, 0, fw, fh);
+    }
     const ts = Math.max(this.lastTs + 1, now);
     this.lastTs = ts;
     if (this.depthOn) { this.updateDepth(video); this.version++; return true; }
@@ -289,6 +298,7 @@ export class BodyFX {
     if (NEW_MODE_IDS.has(mode) || PRO_MODE_IDS.has(mode)) return this.renderInteractive(video, src, cam, mode);
     const T = bodyTracker(cam);
     T.sens = src.bodySens ?? 0.5;
+    T.keepFrame = !!src.media;
     // Un video (src.media): sin la alineación cámara↔proyección ni el modo sensor.
     T.setDepth(src.media ? false : calib()?.depth);
     T.update(video, mode !== "movimiento");
@@ -334,7 +344,9 @@ export class BodyFX {
     if (mode === "persona") {
       tmp.globalCompositeOperation = "source-over";
       tmp.clearRect(0, 0, W, H);
-      place(tmp, video);
+      // Video con IA rápida: el mismo fotograma que analizó la IA (silueta exacta). Con una IA
+      // lenta se usa el video en vivo para que la persona se mueva fluida.
+      place(tmp, src.media && T.frame && T.status === "ai" && (T.aiMs || 0) < 60 ? T.frame : video);
       tmp.globalCompositeOperation = "destination-in";
       tmp.drawImage(this.m, 0, 0);
       tmp.globalCompositeOperation = "source-over";
