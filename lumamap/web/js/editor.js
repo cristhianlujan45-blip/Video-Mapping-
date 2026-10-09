@@ -2709,6 +2709,7 @@ window.__lumaNativeEvent = (ev) => {
  * propio de la app (remote-service.mjs) en este equipo.
  */
 async function connectRemote() {
+  if (native?.udpOpen) return startOscAndroid();
   if (native || location.protocol === "file:") return;
   let url = null;
   if (window.LumaDesktop?.remoteInfo) {
@@ -2724,26 +2725,7 @@ async function connectRemote() {
   }
   const remote = app.remote = new Remote({
     url, role: "display", name: "LumaMap",
-    onControl: (m) => {
-      const a = m.action;
-      if (a === "play" && !S.playing) A.togglePlay();
-      if (a === "pause" && S.playing) A.togglePlay();
-      if (a === "stop") { if (S.playing) A.togglePlay(); A.restart(); }
-      if (a === "next") A.stepScene(1);
-      if (a === "prev") A.stepScene(-1);
-      if (a === "goto" && S.project.scenes[m.value]) A.goScene(S.project.scenes[m.value].id);
-      if (a === "brightness") { S.master = Number(m.value); sendState(true); }
-      if (a === "blackout") A.blackout();
-      // Cualquier parámetro del motor (crossfader, efectos, luces, macros, snapshots…)
-      if (a === "param" && m.id) {
-        const d = describe(app, m.id);
-        if (!d) return;
-        if (d.kind === "trigger") d.set(true);
-        else if (d.kind === "bool") d.set(m.value === undefined ? !d.get() : !!m.value);
-        else d.set(Math.max(d.min, Math.min(d.max, Number(m.value))));
-        app.paramTouched(d.id);
-      }
-    },
+    onControl: remoteControl,
     onOsc: (m) => oscIn(m.address, m.args),
   });
   remote.connect();
@@ -2759,8 +2741,56 @@ async function connectRemote() {
   }, 500);
 }
 
+/** Órdenes del mando remoto (y de las direcciones OSC fijas /lumap/... en Android). */
+function remoteControl(m) {
+  const a = m.action;
+  if (a === "play" && !S.playing) A.togglePlay();
+  if (a === "pause" && S.playing) A.togglePlay();
+  if (a === "stop") { if (S.playing) A.togglePlay(); A.restart(); }
+  if (a === "next") A.stepScene(1);
+  if (a === "prev") A.stepScene(-1);
+  if (a === "goto" && S.project.scenes[m.value]) A.goScene(S.project.scenes[m.value].id);
+  if (a === "brightness") { S.master = Number(m.value); sendState(true); }
+  if (a === "blackout") A.blackout();
+  // Cualquier parámetro del motor (crossfader, efectos, luces, macros, snapshots…)
+  if (a === "param" && m.id) {
+    const d = describe(app, m.id);
+    if (!d) return;
+    if (d.kind === "trigger") d.set(true);
+    else if (d.kind === "bool") d.set(m.value === undefined ? !d.get() : !!m.value);
+    else d.set(Math.max(d.min, Math.min(d.max, Number(m.value))));
+    app.paramTouched(d.id);
+  }
+}
+
+/**
+ * Android: no hay servidor aparte; la app recibe OSC por UDP (puente nativo) en
+ * el mismo puerto que Windows y lo interpreta aquí (osc-web.js).
+ */
+let oscAndroid = null;
+async function startOscAndroid() {
+  const { startAndroidOsc, OSC_PORT } = await import("./osc-web.js");
+  const fixed = { "/lumap/play": "play", "/lumap/pause": "pause", "/lumap/stop": "stop", "/lumap/next": "next", "/lumap/prev": "prev", "/lumap/scene": "goto", "/lumap/brightness": "brightness", "/lumap/blackout": "blackout" };
+  try {
+    oscAndroid = await startAndroidOsc(native, (address, args) => {
+      if (fixed[address]) remoteControl({ action: fixed[address], value: args[0] });
+      oscIn(address, args);
+    });
+  } catch (e) { oscAndroid = { port: OSC_PORT, error: e.message }; }
+}
+
 /** Cómo conectar el mando del teléfono y OSC. */
 A.remoteInfo = async () => {
+  if (native?.udpOpen) {
+    const { localAddresses, OSC_PORT } = await import("./osc-web.js");
+    const ips = localAddresses(native), port = oscAndroid?.port || OSC_PORT;
+    return dialog({ title: "OSC en este teléfono", content: h("div", { class: "remoteinfo" },
+      oscAndroid?.error ? hint(`No se pudo abrir el puerto OSC ${port}: ${oscAndroid.error}`) : null,
+      h("p", {}, "Desde la mesa o la app OSC (misma red Wi-Fi), envía por UDP a:"),
+      ...(ips.length ? ips.map(i => h("p", {}, h("b", { class: "big" }, `${i.address} · puerto ${port}`), h("small", {}, " · " + i.name))) : [hint("El teléfono no tiene red local: conéctalo a Wi-Fi.")]),
+      h("p", { class: "hint" }, "Cualquier dirección se puede asignar con «Aprender»; /lumamap/param/<parámetro> lo fija directamente (p. ej. /lumamap/param/global/master 0.5)."),
+      h("p", { class: "hint" }, "El mando remoto desde el navegador de otro teléfono solo está en la app de Windows: en Android se controla por OSC.")) });
+  }
   if (!window.LumaDesktop?.remoteInfo) {
     return dialog({ title: "Mando remoto", content: h("div", {}, hint(location.protocol.startsWith("http") ? `Abre ${location.origin}/controller.html en el teléfono (misma red Wi-Fi).` : "El mando remoto funciona con la app de Windows o con el servidor de LumaMap (npm start).")) });
   }

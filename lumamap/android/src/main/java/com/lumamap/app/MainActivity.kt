@@ -214,6 +214,10 @@ class MainActivity : ComponentActivity() {
         presentation?.dismiss()
         presentation = null
         udp.closeAll()
+        // Solo lo que se llegó a usar (no se crean al cerrar).
+        if (midiLazy.isInitialized()) midi.closeAll()
+        if (usbDmxLazy.isInitialized()) usbDmx.shutdown()
+        if (localAiLazy.isInitialized()) localAi.shutdown()
         web.destroy()
         super.onDestroy()
     }
@@ -465,6 +469,36 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun netInterfaces(): String = udp.interfaces()
 
+        /* MIDI: controladores USB / Bluetooth (web/js/midi-android.js imita Web MIDI). */
+        @JavascriptInterface
+        fun midiStart(): Boolean = isEditor && midi.start()
+
+        @JavascriptInterface
+        fun midiPorts(): String = if (isEditor) midi.ports() else "[]"
+
+        @JavascriptInterface
+        fun midiSend(id: String, bytes: String): Boolean = isEditor && midi.send(id, bytes)
+
+        /* USB-DMX: interfaces FTDI «DMX USB Pro» con cable OTG (web/js/usbdmx.js). */
+        @JavascriptInterface
+        fun usbDmxOpen(askPermission: Boolean): String =
+            if (isEditor) usbDmx.open(askPermission) else "{\"ok\":false,\"code\":\"error\"}"
+
+        @JavascriptInterface
+        fun usbDmxSend(b64: String): Boolean = isEditor && usbDmx.send(b64)
+
+        @JavascriptInterface
+        fun usbDmxClose() { if (isEditor) usbDmx.close() }
+
+        @JavascriptInterface
+        fun usbDmxWatch() { if (isEditor) usbDmx.watch() }
+
+        /* IA local (Ollama en este teléfono o en un PC de la red): la respuesta llega a window.__lumaAiHttp(id, r). */
+        @JavascriptInterface
+        fun aiHttp(id: Int, url: String, method: String, body: String, timeoutMs: Int) {
+            if (isEditor) localAi.request(id, url, method, body, timeoutMs)
+        }
+
         @JavascriptInterface
         fun haptic() {
             val v = getSystemService(Vibrator::class.java) ?: return
@@ -518,4 +552,19 @@ class MainActivity : ComponentActivity() {
             main.post { web.evaluateJavascript("window.__lumaUdp&&window.__lumaUdp($id,${JSONObject.quote(from)},$port,${JSONObject.quote(b64)})", null) }
         }
     }
+
+    /* ------------------------------------------------------------ MIDI, USB-DMX e IA local */
+
+    private val midiLazy = lazy { MidiHub(this, main) { js -> web.evaluateJavascript(js, null) } }
+    private val midi by midiLazy
+
+    private val usbDmxLazy = lazy {
+        UsbDmx(this) { ev -> main.post { web.evaluateJavascript("window.__lumaUsbDmx&&window.__lumaUsbDmx($ev)", null) } }
+    }
+    private val usbDmx by usbDmxLazy
+
+    private val localAiLazy = lazy {
+        LocalAi { id, r -> main.post { web.evaluateJavascript("window.__lumaAiHttp&&window.__lumaAiHttp($id,$r)", null) } }
+    }
+    private val localAi by localAiLazy
 }

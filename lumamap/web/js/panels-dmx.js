@@ -177,6 +177,7 @@ function simpleLights(app) {
       h("b", {}, U.ready ? "Interfaz USB-DMX conectada" : "Interfaz USB-DMX"),
       h("small", {}, U.ready ? ` · universo ${c.universes.find(u => u.protocol === "usb")?.num ?? "—"} · ${U.frames} fotogramas` : U.error ? " · " + U.error : " · enchúfala y se detecta sola"),
       U.ready ? null : btn({ label: "Conectar", kind: "small", onClick: async () => { await U.request(); app.renderPanel(); } })));
+    if (U?.android && !U.ready) nodes.append(hint("Android: con cable USB-OTG y una interfaz con chip FTDI tipo «DMX USB Pro» (Enttec Pro y compatibles). Aún sin probar con todas las interfaces: si la tuya no responde, usa un nodo Art-Net por Wi-Fi."));
     for (const l of D.lasers || []) nodes.append(h("div", { class: "dev connected" }, h("i"), h("b", {}, l.kind), h("small", {}, ` · ${l.ip} · detectado. Dibujar con el láser por red: EN DESARROLLO (los láseres DMX funcionan como cualquier luz).`)));
     conn.append(nodes,
       row(btn({ label: "Enviar a toda la red (Art-Net)", kind: "small", onClick: () => set(() => { for (const u of c.universes) Object.assign(u, { protocol: "artnet", dest: "broadcast" }); if (!c.universes.length) c.universes.push({ num: 1, name: "", protocol: "artnet", dest: "broadcast", ip: "", enabled: true, delayMs: 0, priority: 100, portAddress: 0, sacnUniverse: 1 }); D.ensureUniverses(); toast("Las luces se enviarán a toda la red"); }) }),

@@ -264,6 +264,7 @@ export async function aiSettings(app) {
     st.local?.available ? null : h("ol", { class: "steps" },
       h("li", {}, "Descarga e instala Ollama desde ollama.com (Windows, macOS o Linux)."),
       h("li", {}, h("span", {}, "Abre una terminal y escribe: "), h("code", {}, `ollama pull ${tier.model || "qwen3:4b"}`)),
+      globalThis.LumaNative ? h("li", {}, "En Android: Ollama va en un PC de tu misma red Wi-Fi. En ese PC permite conexiones de la red (variable OLLAMA_HOST=0.0.0.0) y abajo, en «Dirección de Ollama», escribe http://IP-del-PC:11434.") : null,
       h("li", {}, "Vuelve aquí y pulsa «Comprobar de nuevo». No hace falta reiniciar LumaMap.")),
     row(btn({ label: "Comprobar de nuevo", ic: "restart", kind: "small", onClick: async () => { ai.setSettings({ endpoint: s.endpoint }); closeDialog(); aiSettings(app); } }),
       btn({ label: "Copiar comando", kind: "small", onClick: () => { navigator.clipboard?.writeText(`ollama pull ${tier.model || "qwen3:4b"}`); toast("Comando copiado"); } })),
@@ -282,7 +283,7 @@ export async function aiSettings(app) {
     T("Permitir análisis de imágenes", "allowImages"),
     T("Permitir enviar datos del proyecto a la IA remota", "allowProjectData", "Nombres de superficies, medios y escenas"),
     T("Guardar conversaciones en este equipo", "saveConversations"),
-    globalThis.LumaDesktop?.ai ? btn({ label: "Clave de la IA remota (Claude)…", kind: "small", onClick: () => configureKey(app) }) : hint("La IA remota está en la app de escritorio."));
+    globalThis.LumaDesktop?.ai ? btn({ label: "Clave de la IA remota (Claude)…", kind: "small", onClick: () => configureKey(app) }) : hint(globalThis.LumaNative ? "La IA remota (Claude) solo está en la app de Windows: en Android no se puede usar." : "La IA remota está en la app de escritorio."));
   const ok = await dialog({ title: "Inteligencia / IA", content, wide: true, buttons: [{ label: "Cancelar", value: false }, { label: "Guardar", kind: "primary", value: true }] });
   if (!ok) return;
   ai.setSettings(s);

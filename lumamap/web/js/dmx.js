@@ -21,7 +21,7 @@ import { registerParams } from "./params.js";
 import { uid, defaultPixelMap } from "./model.js";
 import { prepareFx, prepareMove, defaultLightFx } from "./lightfx.js";
 import { channelsOf, kindOf } from "./rdm.js";
-import { UsbDmx } from "./usbdmx.js";
+import { UsbDmx, AndroidUsbDmx } from "./usbdmx.js";
 
 /** Tipos de fixture: canales en orden. */
 export const FIXTURE_TYPES = {
@@ -251,9 +251,10 @@ export class DmxEngine {
     this.lasers = [];            // DAC láser detectados en la red
     this.probe = null;           // detección guiada { universe, address, index, count, known }
     // Interfaz USB-DMX: se abre sola si ya estaba autorizada y al enchufarla.
-    this.usb = new UsbDmx();
+    // Android: la app habla USB con la interfaz (UsbDmx.kt); en Windows, Web Serial.
+    this.usb = globalThis.LumaNative?.usbDmxOpen ? new AndroidUsbDmx(globalThis.LumaNative) : new UsbDmx();
     this.usb.onChange = () => { if (this.usb.ready) this.useUsb(); this.onUpdate?.("usb"); };
-    if (this.usb.supported && globalThis.LumaDesktop) {
+    if (this.usb.supported && (globalThis.LumaDesktop || this.usb.android)) {
       this.usb.auto();
       try { navigator.serial.addEventListener("connect", () => this.usb.auto()); } catch {}
     }

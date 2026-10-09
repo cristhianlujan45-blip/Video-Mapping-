@@ -50,10 +50,25 @@ export const MSG = {
 };
 
 /* ---------------- Transporte HTTP a la IA local ---------------- */
-/** Petición a la API de Ollama: por el proceso principal en escritorio (sin CORS), fetch en el navegador. */
+// Android: la página es https y no puede pedir http://IP:11434; lo hace la app
+// (LocalAi.kt, mismas reglas que en Windows) y responde a __lumaAiHttp(id, r).
+const aiWait = new Map();
+let aiSeq = 0;
+export function androidAiHttp(N = globalThis.LumaNative) {
+  if (!N?.aiHttp) return null;
+  globalThis.__lumaAiHttp = (id, r) => { const f = aiWait.get(id); aiWait.delete(id); f?.(r || { ok: false, error: "network" }); };
+  return (req) => new Promise((resolve) => {
+    const id = ++aiSeq;
+    aiWait.set(id, resolve);
+    try { N.aiHttp(id, req.url, req.method === "POST" ? "POST" : "GET", req.body ? JSON.stringify(req.body) : "", Math.round(req.timeout || 60000)); }
+    catch { aiWait.delete(id); resolve({ ok: false, error: "network" }); }
+  });
+}
+
+/** Petición a la API de Ollama: por el proceso principal en escritorio o la app de Android (sin CORS), fetch en el navegador. */
 export async function localHttp(endpoint, path, { method = "GET", body, timeout = 60000, fetchImpl } = {}) {
   const url = endpoint.replace(/\/+$/, "") + path;
-  const bridge = globalThis.LumaDesktop?.ai?.http;
+  const bridge = globalThis.LumaDesktop?.ai?.http || androidAiHttp();
   if (bridge && !fetchImpl) {
     const r = await bridge({ url, method, body, timeout });
     if (!r.ok && !r.status) throw new AIUnavailable(r.error === "timeout" ? "timeout" : r.error === "not-local" ? "notLocal" : "offline", r.error === "timeout" ? MSG.timeout : r.error === "not-local" ? "Por seguridad, la IA local solo puede estar en este equipo o en tu red local." : MSG.offline);
@@ -247,7 +262,7 @@ export class RemoteAIProvider extends AIProvider {
   contextAllowed() { return !!this.engine.settings.allowProjectData; }
   async status() {
     if (!this.engine.settings.allowRemote) return { available: false, code: "remoteOff", reason: MSG.remoteOff };
-    if (!this.bridge) return { available: false, code: "noDesktop", reason: "La IA remota está en la app de escritorio." };
+    if (!this.bridge) return { available: false, code: "noDesktop", reason: globalThis.LumaNative ? "La IA remota (Claude) solo está en la app de Windows. En Android: IA local (Ollama) o el asistente sin IA." : "La IA remota está en la app de escritorio." };
     try { const s = await this.bridge.status(); return s.hasKey ? { available: true, model: s.model } : { available: false, code: "noKey", reason: MSG.noKey }; }
     catch { return { available: false, code: "noDesktop", reason: MSG.generic }; }
   }

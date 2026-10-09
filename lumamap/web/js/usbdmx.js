@@ -58,3 +58,48 @@ export class UsbDmx {
   }
   async close() { try { await this.writer?.close(); } catch {} try { await this.port?.close(); } catch {} this.writer = null; this.port = null; this.onChange(); }
 }
+
+/**
+ * Android: la WebView no trae Web Serial. La app habla con la interfaz FTDI por
+ * USB (UsbDmx.kt, cable OTG) y aquí se arma el mismo paquete «DMX USB Pro».
+ * Misma forma que UsbDmx, así dmx.js no distingue entre plataformas.
+ * Sin probar todavía con hardware real (ver UsbDmx.kt).
+ */
+const toB64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
+export class AndroidUsbDmx extends UsbDmx {
+  constructor(N = globalThis.LumaNative) {
+    super();
+    this.N = N; this.android = true; this.isOpen = false;
+    // La app avisa al enchufar / quitar la interfaz y con la respuesta al permiso USB.
+    globalThis.__lumaUsbDmx = (ev) => {
+      if (ev.state === "attached") this.open(true);
+      else if (ev.state === "permission") { if (ev.ok) this.open(false); else { this.error = "Permiso USB denegado: vuelve a pulsar «Conectar» y acéptalo."; this.onChange(); } }
+      else if (ev.state === "detached" || ev.state === "lost") { this.isOpen = false; this.error = "La interfaz USB-DMX se desconectó."; this.onChange(); }
+    };
+    try { N.usbDmxWatch?.(); } catch {}
+  }
+  get supported() { return !!this.N?.usbDmxOpen; }
+  get ready() { return this.isOpen; }
+  /** Al arrancar: solo abre si Android ya dio permiso (no muestra ventanas). */
+  async auto() { return this.isOpen ? false : this.open(false); }
+  async request() { return this.open(true); }
+  async open(ask) {
+    let r;
+    try { r = JSON.parse(this.N.usbDmxOpen(!!ask)); } catch (e) { r = { ok: false, code: "error", msg: e.message }; }
+    const was = this.isOpen;
+    this.isOpen = !!r.ok;
+    if (r.ok) { this.info = { name: r.name || "USB-DMX" }; this.error = ""; }
+    else if (r.code === "none") this.error = ask ? "No hay ninguna interfaz USB-DMX conectada (chip FTDI, con cable USB-OTG)." : "";
+    else if (r.code === "asked") this.error = "Acepta el permiso USB en la pantalla de Android.";
+    else if (r.code === "permission") this.error = "";
+    else this.error = "No se pudo abrir la interfaz USB-DMX: " + (r.msg || "error");
+    if (this.isOpen !== was || this.error || ask) this.onChange();
+    return this.isOpen;
+  }
+  /** Si el envío anterior aún no terminó, la app se salta este fotograma. */
+  send(data) {
+    if (!this.isOpen) return;
+    try { if (this.N.usbDmxSend(toB64(proPacket(data)))) this.frames++; } catch { this.isOpen = false; this.onChange(); }
+  }
+  async close() { try { this.N.usbDmxClose(); } catch {} this.isOpen = false; this.onChange(); }
+}

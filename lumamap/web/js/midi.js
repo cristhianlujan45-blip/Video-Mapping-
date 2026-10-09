@@ -1,7 +1,9 @@
 // web/js/midi.js
 // Controladores MIDI reales con Web MIDI (Chromium / Electron en Windows,
-// macOS y Linux; también Android con Chrome). Todo lo que llega se entrega al
-// motor de parámetros (params.js), que decide qué hace cada control.
+// macOS y Linux; también Android con Chrome). En la app de Android la WebView no
+// trae Web MIDI: midi-android.js lo imita con el MIDI nativo (USB y Bluetooth).
+// Todo lo que llega se entrega al motor de parámetros (params.js), que decide
+// qué hace cada control.
 //
 // · Detección automática de entradas y salidas, fabricante y estado, y
 //   conexión en caliente: al desconectar no se bloquea nada; al reconectar los
@@ -12,6 +14,9 @@
 // · MIDI Clock (BPM, start/stop/continue) y MIDI Time Code de entrada; MIDI
 //   Clock de salida programado con marcas de tiempo (sin depender del render).
 // · Feedback: devuelve los valores al controlador (LED, pads, motores).
+
+import { installAndroidMidi } from "./midi-android.js";
+installAndroidMidi();   // solo hace algo dentro de la app de Android
 
 const STATUS = { 0x80: "noteoff", 0x90: "note", 0xa0: "polyat", 0xb0: "cc", 0xc0: "pc", 0xd0: "at", 0xe0: "pb" };
 
@@ -42,7 +47,7 @@ export class MidiDriver {
     try {
       this.access = await navigator.requestMIDIAccess({ sysex: false });
     } catch (e) {
-      this.error = "Permiso MIDI denegado: " + e.message; this.onStatus(); return false;
+      this.error = (e?.name === "NotSupportedError" ? "MIDI no disponible: " : "Permiso MIDI denegado: ") + e.message; this.onStatus(); return false;
     }
     this.error = "";
     this.bind();

@@ -8,9 +8,11 @@ import { DmxNet } from "./dmxnet.js";
 const toB64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
 const fromB64 = (b64) => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
 
+// Compartidos por todos los usuarios del puente (luces y OSC): los id de socket son únicos en la app.
+const socks = new Map();
+let nextId = 1;
+
 export function androidAdapter(N) {
-  const socks = new Map();
-  let nextId = 1;
   // La app llama aquí con cada paquete recibido.
   window.__lumaUdp = (id, from, port, b64) => { const s = socks.get(id); if (s?.onMessage) { try { s.onMessage(fromB64(b64), { address: from, port }); } catch (e) { console.warn(e); } } };
   return {

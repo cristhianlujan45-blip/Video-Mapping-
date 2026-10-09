@@ -178,6 +178,9 @@ añade lo nativo:
   cierra por accidente).
 - **Luces por Wi-Fi o cable de red** (Art-Net, sACN, búsqueda de nodos y detección
   RDM) con los sockets UDP nativos de Android: el mismo motor que en Windows.
+- **MIDI** (controladores USB y los Bluetooth ya conectados al teléfono) con el MIDI
+  de Android, **OSC** en el puerto UDP 9129, **IA local** con Ollama en un PC de tu
+  red e **interfaz USB-DMX** con cable OTG (ver la tabla de abajo).
 - **Rápida en cualquier móvil:** la primera vez mide la velocidad del teléfono y, si
   va justo, baja la calidad de la vista previa (la salida al proyector no cambia).
   ☰ → «Prueba de velocidad» la repite cuando quieras. Las pruebas automáticas
@@ -251,6 +254,32 @@ npm run installer:win   # dist/LumaMap-Setup-<versión>.exe (en Linux necesita W
 npm run dist:win        # alternativa portable: dist/LumaMap-<versión>-Windows-x64.zip
 ```
 
+## Windows y Android: lo mismo en los dos
+
+El editor, el motor de mapping, los efectos, el show, el 3D, el tracking, el
+asistente y las luces son **el mismo código** en las dos apps. Solo cambia lo que
+toca el sistema (lo que en Windows hace `window.LumaDesktop` y en Android
+`window.LumaNative`). Estado real de cada cosa:
+
+| Función | Windows | Android |
+|---|---|---|
+| Salida al proyector (P1) | Ventana a pantalla completa | **Igual** (HDMI / USB-C / inalámbrica con `Presentation`) |
+| Salidas P2-P4 | Ventanas en otros monitores | **No aplica:** un teléfono solo tiene una pantalla externa. P2-P4 se usan desde Windows o el navegador |
+| Detectar proyector al enchufarlo | Sí | **Igual** |
+| Luces Art-Net / sACN / RDM | Servicio en proceso aparte | **Igual** (mismo motor, sockets UDP nativos) |
+| Interfaz USB-DMX (DMX USB Pro, FTDI) | Web Serial | **Adaptado:** USB host con cable OTG (`UsbDmx.kt`). **Sin probar todavía con hardware real**; si no responde, usa Art-Net por Wi-Fi |
+| MIDI (notas, CC, clock, MTC, feedback) | Web MIDI | **Adaptado:** MIDI de Android (`MidiHub.kt`) con la misma interfaz que Web MIDI. Bluetooth: solo aparatos que el sistema ya tenga conectados (LumaMap no los busca) |
+| OSC de entrada (puerto 9129) | Servicio de mando remoto | **Adaptado:** UDP nativo y lector OSC en la página (`osc-web.js`); ☰ → *Mando remoto y OSC* muestra la IP del teléfono |
+| Mando remoto desde el navegador de otro teléfono (PIN) | Sí | **No disponible:** necesita el servidor de la app de Windows. En Android se controla por OSC |
+| IA local (Ollama) | Sí | **Adaptado:** la app hace la petición (`LocalAi.kt`), solo a este teléfono o a la red local. Ollama va en un PC de la red (`OLLAMA_HOST=0.0.0.0`) |
+| IA remota (Claude) | Sí (clave cifrada) | **No disponible:** solo en Windows; la app lo dice en Ajustes de IA |
+| Optimizar videos al importarlos | Sí | **Igual** (transcodificación por hardware de Android) |
+| Actualizar la app | Instalador con copia de seguridad | **Adaptado:** descarga el APK nuevo y abre el instalador de Android |
+| Volver a la versión anterior / Reparar instalación | Sí | **No aplica:** es del instalador de Windows. En Android se instala el APK anterior encima |
+| Menú de la ventana | Sí | **No aplica:** en Android están ☰ y la paleta de comandos |
+| Registros (☰ → Abrir registros) y métricas de CPU/GPU del sistema | Sí | **No disponible:** en Android los mensajes van a `logcat`; el panel de rendimiento muestra lo que mide la página |
+| Diagnóstico de hardware para la IA | Medido por Windows | **Adaptado:** lo que dice la WebView (núcleos, memoria aproximada) |
+
 ## Comandos y atajos
 
 - **Ctrl+K** abre la paleta de comandos: escribe lo que quieres hacer («estrella»,
@@ -283,7 +312,8 @@ npm start            # http://localhost:8080 (y la IP de tu red local)
 ```bash
 cd lumamap
 npm test                 # geometría, modelo, historial, dibujo, motor de parámetros, MIDI,
-                         # Art-Net/sACN, pixel mapping, timecode LTC, show, servidor y OSC
+                         # Art-Net/sACN, pixel mapping, timecode LTC, show, servidor y OSC,
+                         # y las piezas de Android (OSC, MIDI, USB-DMX, IA) con puentes falsos
 npm run test:browser     # extremo a extremo en Chromium (necesita Playwright)
 npm run test:perf        # velocidad como en un móvil (412×915, CPU ×4) con límites:
                          # arranque, pestañas, fotograma, luces, interactivo, memoria
