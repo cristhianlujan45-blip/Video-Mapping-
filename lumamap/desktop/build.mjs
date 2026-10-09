@@ -33,7 +33,7 @@ fs.cpSync(path.join(here, "..", "web"), path.join(stage, "web"), { recursive: tr
 fs.writeFileSync(path.join(stage, "web", "package.json"), JSON.stringify({ type: "module" }));
 // Servidor del mando remoto y OSC (mismo código que la versión web).
 fs.mkdirSync(path.join(stage, "server"), { recursive: true });
-for (const f of ["index.js", "osc.js"]) fs.copyFileSync(path.join(here, "..", "server", f), path.join(stage, "server", f));
+for (const f of ["index.js", "osc.js", "tls.js"]) fs.copyFileSync(path.join(here, "..", "server", f), path.join(stage, "server", f));
 fs.writeFileSync(path.join(stage, "server", "package.json"), JSON.stringify({ type: "module" }));
 fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
   name: pkg.name, productName: pkg.productName, version: pkg.version, description: pkg.description, main: "main.js", license: pkg.license, author: pkg.author,

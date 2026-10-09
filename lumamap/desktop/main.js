@@ -29,7 +29,8 @@ protocol.registerSchemesAsPrivileged([{
 // ahí: el editor no debe dejar de decodificar aunque quede tapado o minimizado.
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
-app.commandLine.appendSwitch("disable-features", "BackgroundVideoTrackOptimization,BackgroundVideoPauseOptimization,MediaSessionService");
+// WebRtcHideLocalIpsWithMdns: la cámara del móvil (WebRTC en la red local) conecta directo por IP.
+app.commandLine.appendSwitch("disable-features", "BackgroundVideoTrackOptimization,BackgroundVideoPauseOptimization,MediaSessionService,WebRtcHideLocalIpsWithMdns");
 
 // Carpeta de datos alternativa (pruebas automáticas: empezar siempre desde cero).
 if (process.env.LUMAMAP_USER_DATA) app.setPath("userData", process.env.LUMAMAP_USER_DATA);
@@ -469,7 +470,7 @@ function startDmx(wc) {
 ipcMain.handle("dmx:start", (e) => startDmx(e.sender));
 
 /* ---------------- Mando remoto (teléfono / tablet / otro PC) y OSC ---------------- */
-let remote = { proc: null, port: 0, oscPort: 0, pin: "", error: "" };
+let remote = { proc: null, port: 0, oscPort: 0, httpsPort: 0, pin: "", error: "" };
 function settingsFile() { return path.join(app.getPath("userData"), "lumamap-settings.json"); }
 function readSettings() { try { return JSON.parse(fs.readFileSync(settingsFile(), "utf8")); } catch { return {}; } }
 function writeSettings(s) { try { fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2)); } catch {} }
@@ -485,7 +486,7 @@ function startRemote() {
   });
   remote.proc = proc;
   proc.on("message", (m) => {
-    if (m.t === "ready") { remote.port = m.port; remote.oscPort = m.oscPort; remote.error = ""; editor?.webContents.send("remote:ready"); }
+    if (m.t === "ready") { remote.port = m.port; remote.oscPort = m.oscPort; remote.httpsPort = m.httpsPort || 0; remote.error = ""; editor?.webContents.send("remote:ready"); }
     if (m.t === "error") remote.error = m.msg;
   });
   proc.on("exit", () => { if (remote.proc === proc && !quitting) { remote.proc = null; remote.port = 0; setTimeout(startRemote, 1500); } });
@@ -493,8 +494,9 @@ function startRemote() {
 ipcMain.handle("remote:info", () => {
   const urls = [];
   for (const [name, addrs] of Object.entries(os.networkInterfaces()))
-    for (const a of addrs || []) if ((a.family === "IPv4" || a.family === 4) && !a.internal) urls.push({ name, url: `http://${a.address}:${remote.port}/controller.html` });
-  return { port: remote.port, oscPort: remote.oscPort, pin: remote.pin, urls, error: remote.error };
+    for (const a of addrs || []) if ((a.family === "IPv4" || a.family === 4) && !a.internal) urls.push({ name, ip: a.address, url: `http://${a.address}:${remote.port}/controller.html`,
+      cam: remote.httpsPort ? `https://${a.address}:${remote.httpsPort}/phonecam.html` : "" });
+  return { port: remote.port, oscPort: remote.oscPort, httpsPort: remote.httpsPort, pin: remote.pin, urls, error: remote.error };
 });
 ipcMain.handle("remote:newPin", () => { const st = readSettings(); st.pin = String(Math.floor(1000 + Math.random() * 9000)); writeSettings(st); try { remote.proc?.kill(); } catch {} return st.pin; });
 app.on("before-quit", () => { const p = remote.proc; remote.proc = null; try { p?.kill(); } catch {} });

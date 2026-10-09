@@ -3,11 +3,13 @@
 // mando remoto por WebSocket (RFC 6455) y OSC por UDP. Sin dependencias.
 // Funciona offline en red local. Sincronización opcional cuando hay conexión.
 import http from "node:http";
+import https from "node:https";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dgram from "node:dgram";
+import os from "node:os";
 import { decodeOSC, encodeOSC } from "./osc.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,17 +85,23 @@ export function sendJSON(sock, obj) {
 
 /* ---------------- Estado de dispositivos conectados ---------------- */
 
-const clients = new Set(); // {sock, role, id, name, ok}
+const clients = new Set(); // {sock, role, id, name, ok, camId}
 let nextClientId = 1;
-let PIN = "";              // código para los mandos (vacío = sin código)
+let PIN = "";              // código para los mandos y cámaras (vacío = sin código)
 let oscOut = null;         // socket UDP para enviar OSC (feedback)
+let HTTPS_PORT = 0;        // puerto https (cámara del móvil), si está activo
+/** Puerto del servidor https (lo fija quien lo arranca). */
+export function setHttpsPort(p) { HTTPS_PORT = Number(p) || 0; }
 
 function broadcastState() {
   const displays = [...clients].filter(c => c.role === "display")
     .map(c => ({ id: c.id, name: c.name }));
+  // Móviles conectados como cámara (con el código correcto).
+  const cameras = [...clients].filter(c => c.role === "camera" && c.ok).map(c => ({ id: c.id, cam: c.camId, name: c.name }));
   for (const c of clients) {
     if (c.role === "controller")
       sendJSON(c.sock, { type: "displays", displays });
+    if (c.role === "display" && c.ok) sendJSON(c.sock, { type: "cameras", cameras });
   }
 }
 
@@ -101,10 +109,12 @@ function handleWsMessage(client, raw) {
   let msg;
   try { msg = JSON.parse(raw.toString()); } catch { return; }
   if (msg.type === "hello") {
-    client.role = msg.role === "controller" ? "controller" : "display";
+    client.role = msg.role === "controller" ? "controller" : msg.role === "camera" ? "camera" : "display";
     client.name = String(msg.name || client.role).slice(0, 60);
-    // Con código: los mandos deben enviarlo; el motor (display) solo puede ser este mismo equipo.
-    if (PIN && client.role === "controller") client.ok = String(msg.pin || "") === PIN;
+    // Cámara (móvil): un identificador estable para que al reconectar siga siendo «la misma cámara».
+    if (client.role === "camera") client.camId = String(msg.camId || "").replace(/[^\w-]/g, "").slice(0, 40) || "movil" + client.id;
+    // Con código: los mandos y las cámaras deben enviarlo; el motor (display) solo puede ser este mismo equipo.
+    if (PIN && (client.role === "controller" || client.role === "camera")) client.ok = String(msg.pin || "") === PIN;
     else if (PIN && client.role === "display") client.ok = client.local;
     else client.ok = true;
     sendJSON(client.sock, { type: "auth", ok: client.ok, needPin: !!PIN });
@@ -120,6 +130,14 @@ function handleWsMessage(client, raw) {
   } else if (msg.type === "state") {
     for (const c of clients)
       if (c.role === "controller" && c.ok) sendJSON(c.sock, { type: "state", state: msg.state });
+  } else if (msg.type === "rtc") {
+    // Señalización WebRTC (oferta/respuesta) entre la cámara del móvil y el motor.
+    // El video va directo de un equipo al otro por la red local; aquí solo pasan los SDP.
+    if (client.role === "camera") {
+      for (const c of clients) if (c.role === "display" && c.ok) sendJSON(c.sock, { type: "rtc", from: client.id, cam: client.camId, name: client.name, data: msg.data });
+    } else if (client.role === "display") {
+      for (const c of clients) if (c.role === "camera" && c.ok && c.id === msg.to) sendJSON(c.sock, { type: "rtc", data: msg.data });
+    }
   } else if (msg.type === "oscSend" && client.role === "display" && oscOut) {
     // Feedback OSC hacia superficies de control (TouchOSC, Lemur, consolas…)
     try {
@@ -153,9 +171,11 @@ function onUpgrade(req, sock) {
       // Nota: frames binarios y fragmentación no usados por el protocolo LumaMap.
     }
   });
-  const drop = () => { clients.delete(client); broadcastState(); };
+  const drop = () => { if (clients.delete(client)) broadcastState(); };
   sock.on("close", drop);
   sock.on("error", drop);
+  // El otro lado cerró (sin trama de cierre): se termina también y se avisa ya.
+  sock.on("end", () => { drop(); try { sock.end(); } catch {} });
 }
 
 /* ---------------- HTTP: estáticos + API proyectos ---------------- */
@@ -167,13 +187,18 @@ function safeJoin(baseDir, urlPath) {
   return p === baseDir || p.startsWith(baseDir + path.sep) ? p : null;
 }
 
-export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPort = 9129, pin = "" } = {}) {
+/**
+ * tls: { cert, key } → servidor https (misma app y mismo WebSocket): lo usa el
+ * móvil como cámara, porque los navegadores solo dan la cámara a páginas seguras.
+ */
+export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPort = 9129, pin = "", tls = null } = {}) {
   PIN = String(pin || "");
-  const srv = http.createServer((req, res) => {
+  const handler = (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (url.pathname === "/api/ping") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, app: "lumamap", displays: [...clients].filter(c => c.role === "display").length }));
+      res.end(JSON.stringify({ ok: true, app: "lumamap", displays: [...clients].filter(c => c.role === "display").length, httpsPort: HTTPS_PORT,
+        ips: Object.values(os.networkInterfaces()).flat().filter(a => a && (a.family === "IPv4" || a.family === 4) && !a.internal).map(a => a.address) }));
       return;
     }
     // API: proyectos en el backend (sincronización opcional)
@@ -222,7 +247,8 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
       res.writeHead(404, { "content-type": "text/plain" });
       res.end("404 - recurso no encontrado");
     }
-  });
+  };
+  const srv = tls ? https.createServer({ cert: tls.cert, key: tls.key }, handler) : http.createServer(handler);
   srv.on("upgrade", (req, sock) => {
     if (new URL(req.url, "http://x").pathname === "/ws") onUpgrade(req, sock);
     else sock.destroy();
@@ -260,17 +286,34 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
   return srv;
 }
 
+/**
+ * Arranca el servidor https de la cámara del móvil en el primer puerto libre desde
+ * «want». Devuelve una promesa con el puerto (0 si no se pudo).
+ */
+export async function startHttps({ want = 8443, pin = "", dataDir = DATA, host = "0.0.0.0" } = {}) {
+  const { loadCertificate } = await import("./tls.js");
+  let tls;
+  try { tls = loadCertificate(dataDir); } catch { return 0; }
+  for (let p = want; p < want + 20; p++) {
+    const srv = createServer({ port: p, osc: false, pin, tls });
+    const ok = await new Promise((resolve) => { srv.once("error", () => resolve(false)); srv.listen(p, host, () => resolve(true)); });
+    if (ok) { setHttpsPort(p); return p; }
+  }
+  return 0;
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const port = Number(process.env.PORT || 8080);
   const srv = createServer({ port });
   srv.listen(port, () => {
     console.log(`[LumaMap] backend en http://0.0.0.0:${port}`);
   });
+  const hp = await startHttps({ want: Number(process.env.HTTPS_PORT || 8443) });
   // Mostrar IPs locales para facilitar conexión de Android
-  import("node:os").then(os => {
-    for (const [name, addrs] of Object.entries(os.networkInterfaces()))
-      for (const a of addrs || [])
-        if (a.family === "IPv4" && !a.internal)
-          console.log(`[LumaMap] red local -> http://${a.address}:${port}  (${name})`);
-  });
+  for (const [name, addrs] of Object.entries(os.networkInterfaces()))
+    for (const a of addrs || [])
+      if (a.family === "IPv4" && !a.internal) {
+        console.log(`[LumaMap] red local -> http://${a.address}:${port}  (${name})`);
+        if (hp) console.log(`[LumaMap] móvil como cámara -> https://${a.address}:${hp}/phonecam.html`);
+      }
 }
