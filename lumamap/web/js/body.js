@@ -129,13 +129,17 @@ class BodyTracker {
   update(video, useAI) {
     if (!video || video.readyState < 2 || !video.videoWidth) return false;
     const now = performance.now();
-    if (video.currentTime === this.lastVideoTime || now - this.lastTs < 30) return false;
+    // La IA nunca se come la app: si tarda mucho (equipo lento, sin GPU) analiza menos
+    // fotogramas por segundo, de modo que no use más de ~40 % del tiempo.
+    const gap = Math.max(30, (this.aiMs || 0) * 2.5);
+    if (video.currentTime === this.lastVideoTime || now - this.lastTs < gap) return false;
     this.lastVideoTime = video.currentTime;
     const ts = Math.max(this.lastTs + 1, now);
     this.lastTs = ts;
     if (this.depthOn) { this.updateDepth(video); this.version++; return true; }
     if (useAI && this.status === "off") this.load();
     if (useAI && this.pose) {
+      const t0 = performance.now();
       try {
         // Cuerpo entero a 320 px de ancho: ve personas lejos sin cargar el equipo.
         const img = this.prepare(video, 320);
@@ -156,17 +160,20 @@ class BodyTracker {
             this.writeMask(out, w, h);
           } else if (++this.missed > 4) this.writeMask(null, this.mask.width, this.mask.height);   // se mantiene ~0,15 s si la IA pierde un fotograma
         });
+        this.aiMs = (this.aiMs || 0) * 0.8 + (performance.now() - t0) * 0.2;
         this.version++;
         return true;
       } catch (e) { console.warn(e); this.pose = null; this.setStatus("motion"); }
     }
     if (useAI && this.seg) {
+      const t0 = performance.now();
       try {
         const img = this.prepare(video, 256);
         this.seg.segmentForVideo(img, ts, (r) => {
           const m = r.confidenceMasks && r.confidenceMasks[0];
           if (m) this.writeMask(m.getAsFloat32Array(), m.width, m.height);
         });
+        this.aiMs = (this.aiMs || 0) * 0.8 + (performance.now() - t0) * 0.2;
         this.version++;
         return true;
       } catch (e) { console.warn(e); this.seg = null; this.setStatus("motion"); }
