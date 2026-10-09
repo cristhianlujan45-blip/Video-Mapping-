@@ -23,6 +23,9 @@ class AppUpdater(private val activity: MainActivity) {
         var u = URL(url)
         // GitHub redirige a su CDN: se siguen las redirecciones a mano (también entre dominios).
         repeat(6) {
+            // Solo HTTPS: la app permite HTTP sin cifrar para la IA local de la red de casa,
+            // pero una actualización nunca se descarga sin cifrar (ni tras una redirección).
+            if (u.protocol != "https") throw IllegalStateException("Las actualizaciones solo se descargan por HTTPS")
             val c = u.openConnection() as HttpURLConnection
             c.instanceFollowRedirects = false
             c.connectTimeout = 15000
