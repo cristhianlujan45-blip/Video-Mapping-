@@ -27,10 +27,14 @@ const BASE = new URL("../vendor/mediapipe/", import.meta.url).href;
 const canvas = (w = 2, h = 2) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
 const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 
+// Si la tarjeta gráfica no deja leer la silueta, se recuerda para todos los detectores
+// (cámara y cada video): los siguientes empiezan directamente en la CPU.
+let gpuMaskBroken = false;
+
 /** Detector compartido (uno por ventana): mantiene la máscara de la persona al día. */
 class BodyTracker {
   constructor() {
-    this.seg = null; this.pose = null; this.people = 0; this.missed = 0; this.emptyMasks = 0; this.forceCPU = false;
+    this.seg = null; this.pose = null; this.people = 0; this.missed = 0; this.emptyMasks = 0; this.forceCPU = gpuMaskBroken;
     this.loading = null;
     this.status = "off";          // off | loading | ai | motion | depth | error
     this.mask = canvas();         // máscara IA: blanco con alfa = persona
@@ -154,7 +158,7 @@ class BodyTracker {
             for (const m of ms) { const a = m.getAsFloat32Array(); for (let i = 0; i < n; i++) if (a[i] > out[i]) { out[i] = a[i]; if (a[i] > mx) mx = a[i]; } }
             // Algunas tarjetas no dejan leer la silueta desde la GPU (llega vacía aunque haya
             // gente): tras unos fotogramas así, la IA pasa sola a la CPU, que siempre funciona.
-            if (mx === 0 && !this.forceCPU && ++this.emptyMasks > 8) { this.forceCPU = true; setTimeout(() => this.switchToCPU(), 0); return; }
+            if (mx === 0 && !this.forceCPU && ++this.emptyMasks > 8) { this.forceCPU = gpuMaskBroken = true; setTimeout(() => this.switchToCPU(), 0); return; }
             if (mx > 0) this.emptyMasks = 0;
             this.missed = 0;
             this.writeMask(out, w, h);
