@@ -191,7 +191,7 @@ await test("asistente: sin clave lo dice claro; una clave falsa no se guarda; la
   assert.match(r.step.error, /Falta la clave/);
   assert.equal(r.bad.ok, false, "clave falsa rechazada: " + r.bad.error);
   assert.equal(r.st1.hasKey, false, "no se guardó");
-  assert.deepEqual(r.keys.sort(), ["cancel", "setKey", "status", "step"], "no hay forma de leer la clave desde la página");
+  assert.deepEqual(r.keys.sort(), ["cancel", "http", "setKey", "status", "step"], "no hay forma de leer la clave desde la página");
 });
 await test("IA local por el proceso principal: habla con Ollama de este equipo; rechaza internet y rutas que no son de Ollama", async () => {
   const http = await import("node:http");
