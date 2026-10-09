@@ -42,6 +42,8 @@ setOnFail(async (name) => {
   const info = await page.evaluate(() => ({ tab: window.__lumamap?.S.tab, dialog: document.querySelector("#modal.show h2")?.textContent || "", toast: document.querySelector(".toast")?.textContent || "" })).catch(() => ({}));
   console.error("    estado:", JSON.stringify(info));
   if (process.env.SHOTS_DIR) { fs.mkdirSync(process.env.SHOTS_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.SHOTS_DIR, `${String(++shotN).padStart(2, "0")}-${name.replace(/[^\w]+/g, "_").slice(0, 60)}.png`) }); }
+  // Que un diálogo que quedó abierto no haga fallar también a las pruebas siguientes.
+  await page.evaluate(() => { const a = window.__lumamap; a?.params?.cancelLearn?.(); for (let i = 0; i < 3; i++) document.getElementById("modal")?._close?.(null); a?.openTab?.(null); }).catch(() => {});
 });
 await page.goto(base);
 await page.waitForTimeout(800);
@@ -543,14 +545,21 @@ await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al 
   await box.locator("select").selectOption("global/blackout");
   await box.getByRole("button", { name: "Asignar un botón" }).click();
   await page.locator(".learn").waitFor();
+  // Se mantiene pulsado hasta que se aprende (en un equipo lento el sondeo del mando tarda más).
   await page.waitForTimeout(100);
-  await press(0, 0, true); await page.waitForTimeout(150); await press(0, 0, false); await page.waitForTimeout(150);
+  await press(0, 0, true);
+  await page.waitForFunction(() => window.__lumamap.S.project.settings.control.mappings.length === 1, null, { timeout: 10000 });
+  await press(0, 0, false);
+  await page.locator(".learn").waitFor({ state: "detached", timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(300);
   const maps = await page.evaluate(() => window.__lumamap.S.project.settings.control.mappings.map(m => [m.src, m.device, m.key, m.target]));
   assert.deepEqual(maps, [["gamepad", "Mando 1", "btn:0", "global/blackout"]]);
   // El botón A del Mando 2 no tiene nada; el del Mando 1 hace el apagón.
-  await press(1, 0, true); await page.waitForTimeout(150); await press(1, 0, false); await page.waitForTimeout(150);
+  await press(1, 0, true); await page.waitForTimeout(400); await press(1, 0, false); await page.waitForTimeout(400);
   assert.equal(await page.evaluate(() => window.__lumamap.S.blackout), false);
-  await press(0, 0, true); await page.waitForTimeout(150); await press(0, 0, false); await page.waitForTimeout(150);
+  await press(0, 0, true);
+  await page.waitForFunction(() => window.__lumamap.S.blackout === true, null, { timeout: 10000 });
+  await press(0, 0, false); await page.waitForTimeout(300);
   assert.equal(await page.evaluate(() => window.__lumamap.S.blackout), true);
   await box.locator(".ctlmaps").getByText("Mando 1 · A").waitFor();
   // A la vez, el teclado: la tecla J → escena siguiente.
@@ -559,7 +568,7 @@ await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al 
   await page.locator("#panelBody .ctlsimple").getByRole("button", { name: "Asignar un botón" }).click();
   await page.locator(".learn").waitFor();
   await page.keyboard.press("j");
-  await page.waitForTimeout(150);
+  await page.waitForFunction(() => window.__lumamap.S.project.settings.control.mappings.some(m => m.src === "key" && m.target === "global/next"), null, { timeout: 10000 });
   assert.equal(await page.evaluate(() => window.__lumamap.S.project.settings.control.mappings.filter(m => m.src === "key" && m.target === "global/next").length), 1);
   await page.evaluate(() => { window.__lumamap.S.project.settings.control.mappings = []; window.__lumamap.paramMappingsChanged(); window.__lumamap.openTab(null); });
 });
