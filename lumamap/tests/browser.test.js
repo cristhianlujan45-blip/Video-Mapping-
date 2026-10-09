@@ -631,7 +631,7 @@ await test("objetos 3D: «hazme un carro» desde la IA sin conexión, vista prev
   const r = await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId), l = sc.looks[P.surfaces.at(-1).id];
     return { type: l.source.type, style: l.source.model.style, color: l.source.model.color, gl: document.querySelector("#gl").getContext("webgl2").getError() }; });
   assert.deepEqual(r, { type: "model3d", style: "camioneta", color: "#1f5fff", gl: 0 });
-  await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; a.actions.remove?.(P.surfaces.at(-1).id); a.openTab(null); });
+  await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; P.surfaces.pop(); a.changed({ panel: true }); a.openTab(null); });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
