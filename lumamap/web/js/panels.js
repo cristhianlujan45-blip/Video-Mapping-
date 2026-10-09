@@ -5,7 +5,7 @@ import {
   GENERATORS, ANIM_LIBRARY, ANIM_CATEGORIES, FX_LIBRARY, FX_CATEGORIES, COLORMAPS, RECORD_QUALITIES, BLEND_MODES, BORDER_ANIMS, AUDIO_TARGETS, AUDIO_BANDS,
   DRAW_TOOLS, DRAW_ANIMS, SHAPES, DEFAULT_FX, lookOf, SCREEN_FX, SENSOR_ACTIONS, sensorThreshold,
 } from "./model.js";
-import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog, lazyThumb } from "./ui.js";
+import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog, lazyThumb, draggable } from "./ui.js";
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
 import { genThumb, animThumb } from "./thumbs.js";
@@ -137,7 +137,7 @@ function applyAnim(app, a) {
 }
 
 /** Catálogo: buscador + categorías + miniaturas reales. */
-function animCatalog(app, onPick) {
+function animCatalog(app, onPick, { drag = false } = {}) {
   const search = h("input", { type: "search", class: "text-in", placeholder: `Buscar entre ${ANIM_LIBRARY.length} animaciones…`, value: animUI.q });
   const cats = h("div", { class: "chips" });
   const grid = h("div", {});
@@ -148,7 +148,8 @@ function animCatalog(app, onPick) {
     const list = ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || a.cat === animUI.cat) && (!q || norm(a.name + " " + a.cat).includes(q)));
     grid.innerHTML = "";
     const on = cur?.type === "gen" ? list.find(a => a.gen === cur.gen && a.color === cur.color && a.color2 === cur.color2)?.id : null;
-    grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: () => animThumb(a) })), { value: on, cols: 4, onPick: (id) => onPick(ANIM_LIBRARY.find(x => x.id === id)) }) : hint("Ninguna animación con ese nombre."));
+    grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: () => animThumb(a) })), { value: on, cols: 4, onPick: (id) => onPick(ANIM_LIBRARY.find(x => x.id === id)),
+      drag: drag ? (it) => { const a = ANIM_LIBRARY.find(x => x.id === it.id); return { label: a.name, apply: (app) => applyAnim(app, a) }; } : null }) : hint("Ninguna animación con ese nombre."));
   };
   for (const c of ["Todas", ...ANIM_CATEGORIES]) {
     const n = c === "Todas" ? ANIM_LIBRARY.length : ANIM_LIBRARY.filter(a => a.cat === c).length;
@@ -169,15 +170,16 @@ const anim = {
     const wrap = h("div", {});
     if (!app.surf()) {
       wrap.append(hint("Toca una animación: se crea una superficie a pantalla completa con ella. Si seleccionas una superficie, la animación se pone en esa."));
+      wrap.append(hint("También puedes arrastrar una animación y soltarla encima de una superficie (en táctil: mantén pulsado y arrastra)."));
       wrap.append(animCatalog(app, (a) => {
         A.addShape("rect");
         A.fillFrame();
         applyAnim(app, a);
-      }));
+      }, { drag: true }));
       return wrap;
     }
     const look = app.lookSel(), src = look.source;
-    wrap.append(animCatalog(app, (a) => applyAnim(app, a)));
+    wrap.append(animCatalog(app, (a) => applyAnim(app, a), { drag: true }));
     if (src.type === "gen") {
       wrap.append(section("Ajustar la animación",
         swatches({ label: "Color principal", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
@@ -397,6 +399,7 @@ const content = {
       for (const m of app.S.project.media) {
         const cell = h("button", { class: `mcell ${src.mediaId === m.id ? "on" : ""}`, onclick: () => A.setSource({ type: "media", mediaId: m.id }) },
           h("img", { src: m.thumb || "", alt: "" }), h("span", {}, m.name), h("b", { class: "kind" }, m.kind === "video" ? "VIDEO" : m.kind === "anim" ? "GIF" : "IMG"));
+        draggable(cell, () => ({ label: m.name, img: m.thumb || "", apply: (app) => app.actions.setSource({ type: "media", mediaId: m.id }) }));
         let pressT = 0;
         cell.addEventListener("pointerdown", () => { pressT = setTimeout(() => A.removeMedia(m.id), 700); });
         cell.addEventListener("pointerup", () => clearTimeout(pressT));
@@ -414,9 +417,9 @@ const content = {
     }
 
     if (src.type === "gen") {
-      wrap.append(animCatalog(app, (a) => applyAnim(app, a)));
+      wrap.append(animCatalog(app, (a) => applyAnim(app, a), { drag: true }));
       wrap.append(fold(`Animaciones base (${GENERATORS.length})`, false,
-        tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: () => genThumb(g.id) })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) })));
+        tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: () => genThumb(g.id) })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }), drag: (it) => ({ label: it.label, apply: (app) => app.actions.setSource({ type: "gen", gen: it.id }) }) })));
       wrap.append(section("Colores",
         swatches({ label: "Color principal", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
         swatches({ label: "Color secundario", value: src.color2, onChange: (c) => app.edit(() => { src.color2 = c; }) }),
@@ -479,7 +482,7 @@ const content = {
         cameraPicker(app, src.camId || "", (v) => app.actions.setSource({ camId: v }))));
       if (src.bodyMode !== "persona") {
         wrap.append(section("Animación dentro del cuerpo",
-          tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: () => genThumb(g.id) })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }) }),
+          tiles(GENERATORS.map(g => ({ id: g.id, label: g.name, img: () => genThumb(g.id) })), { value: src.gen, cols: 4, onPick: (id) => A.setSource({ gen: id }), drag: (it) => ({ label: it.label, apply: (app) => app.actions.setSource({ type: "gen", gen: it.id }) }) }),
           swatches({ label: "Color principal (contorno)", value: src.color, onChange: (c) => app.edit(() => { src.color = c; }) }),
           swatches({ label: "Color secundario", value: src.color2, onChange: (c) => app.edit(() => { src.color2 = c; }) }),
           slider({ label: "Velocidad", min: 0, max: 4, step: 0.05, value: src.speed, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { src.speed = v; }) })));
@@ -529,11 +532,13 @@ const fx = {
       const list = FX_LIBRARY.filter(e => (fxUI.cat === "Todas" || e.cat === fxUI.cat) &&
         (!q || (e.name + " " + e.cat).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(q)));
       for (const e of list) {
-        grid.append(h("button", { class: "chip", title: e.cat, onclick: () => {
+        const chip = h("button", { class: "chip", title: e.cat, onclick: () => {
           app.edit(() => { look.fx = fxUI.combine ? { ...look.fx, ...e.fx } : { ...DEFAULT_FX(), ...e.fx }; });
           app.renderPanel();
           toast(`${e.name}${fxUI.combine ? " (combinado)" : ""}`);
-        } }, e.name));
+        } }, e.name);
+        draggable(chip, () => ({ label: e.name, apply: (app) => app.edit(() => { const l = app.lookSel(); if (l) l.fx = fxUI.combine ? { ...l.fx, ...e.fx } : { ...DEFAULT_FX(), ...e.fx }; }) }));
+        grid.append(chip);
       }
       if (!list.length) grid.append(hint("Ningún efecto con ese nombre."));
     };
@@ -553,7 +558,8 @@ const fx = {
         grid),
       fold("✨ Estilos (ASCII, Matrix, semitonos, dither, Game Boy, térmica…)", (f.style || "none") !== "none",
         hint("Convierten cualquier contenido (video, cámara, animación o interactivo) en arte: letras, puntos, píxeles…"),
-        h("div", { class: "chips stylelib" }, ...STYLES.map(([id, name]) => h("button", { class: `chip ${(f.style || "none") === id ? "on" : ""}`, onclick: () => { app.edit(() => { look.fx.style = id; look.fx.styleColor = ""; }); app.renderPanel(); } }, name))),
+        h("div", { class: "chips stylelib" }, ...STYLES.map(([id, name]) => { const b = h("button", { class: `chip ${(f.style || "none") === id ? "on" : ""}`, onclick: () => { app.edit(() => { look.fx.style = id; look.fx.styleColor = ""; }); app.renderPanel(); } }, name);
+          draggable(b, () => ({ label: name, apply: (app) => app.edit(() => { const l = app.lookSel(); if (l) { l.fx.style = id; l.fx.styleColor = ""; } }) })); return b; })),
         (f.style || "none") !== "none" ? h("div", {},
           sl("styleSize", (v) => v < 0.34 ? "Pequeño" : v < 0.67 ? "Medio" : "Grande"),
           sl("styleGlow", pct),

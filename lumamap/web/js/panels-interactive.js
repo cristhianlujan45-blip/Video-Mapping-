@@ -2,7 +2,7 @@
 // Pestaña «Interactivo» (también en el modo simple): proyecciones que reaccionan
 // a la gente con cualquier cámara o sensor que dé imagen.
 //   1 · Cámara o sensor  →  2 · Alinear con la proyección  →  3 · Efecto  →  4 · Reacciones
-import { h, section, row, btn, toggle, slider, hint, toast } from "./ui.js";
+import { h, section, row, btn, toggle, slider, hint, toast, draggable } from "./ui.js";
 import * as M from "./model.js";
 import { listCameras, getCamera, cameraIfReady, cameraName } from "./sources.js";
 import { bodyTracker } from "./body.js";
@@ -146,8 +146,10 @@ const interactivePanel = {
     const exGrid = h("div", { class: "ifxgrid exgrid" });
     const cat = ui.exCat || "Todas";
     for (const ex of EXPERIENCES.filter(e => cat === "Todas" || e.cat === cat)) {
-      exGrid.append(h("button", { class: `ifx pro ${look?.source.bodyMode === ex.mode ? "on" : ""}`, onclick: () => { toast(applyExperience(app, ex)); } },
-        h("b", {}, `${ex.emoji} ${ex.name}`), h("small", {}, ex.desc)));
+      const b = h("button", { class: `ifx pro ${look?.source.bodyMode === ex.mode ? "on" : ""}`, onclick: () => { toast(applyExperience(app, ex)); } },
+        h("b", {}, `${ex.emoji} ${ex.name}`), h("small", {}, ex.desc));
+      draggable(b, () => ({ label: `${ex.emoji} ${ex.name}`, apply: (app) => applyExperience(app, ex, { surface: app.surf() }) }));
+      exGrid.append(b);
     }
     wrap.append(section("⭐ Experiencias listas (un toque)",
       hint("Cada una monta el efecto, las reacciones (la IA ve a la gente: entra, levanta la mano, salta…), las luces y tus videos. Funciona con cualquier cámara."),
@@ -170,6 +172,7 @@ const interactivePanel = {
         app.changed({ panel: true }); app.commit();
         toast(`${f.name} · proyectando en «${s.name}»`);
       } }, h("b", {}, f.name), h("small", {}, f.desc)));
+      draggable(grid.lastChild, () => ({ label: f.name, apply: (app) => app.edit(() => { const l = app.lookSel(); if (l) Object.assign(l.source, { type: "body", bodyMode: f.mode, gen: f.gen, camId: cal.camId || "" }, f.color ? { color: f.color } : {}, f.color2 ? { color2: f.color2 } : {}); }) }));
     }
     wrap.append(section("3 · Efecto interactivo", grid,
       look ? slider({ label: "Sensibilidad", min: 0, max: 1, value: look.source.bodySens ?? 0.5, def: 0.5, fmt: pct, onInput: (v) => app.edit(() => { look.source.bodySens = v; }) }) : null,

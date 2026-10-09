@@ -13,7 +13,7 @@ import { Link, nativeBridge } from "./link.js";
 import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge, ROT_OFF } from "./overlay.js";
 import { roundPt, newStrokeId, hitStroke } from "./drawing.js";
 import { icon } from "./icons.js";
-import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles, hint } from "./ui.js";
+import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles, hint, setDropTarget } from "./ui.js";
 import { PANELS, TABS, showHelp } from "./panels.js";
 import { buildCommands, keymap, keyOf, openPalette, openContextMenu, closeContextMenu } from "./commands.js";
 import {
@@ -2556,6 +2556,14 @@ function drawOverlay(v, view) {
     });
   }
   const X = (p) => p.x * v.sx + v.tx, Y = (p) => p.y * v.sy + v.ty;
+  // Destino al arrastrar desde un panel: la superficie se resalta (o el hueco donde se creará una).
+  if (S.dropHover && !S.projecting) {
+    ctx.save(); ctx.lineWidth = 4 * d; ctx.strokeStyle = "#ff2d8a"; ctx.fillStyle = "rgba(255,45,138,.18)";
+    const ds = S.dropHover !== "new" && surf(S.dropHover);
+    if (ds) { const o = surfaceOutline(ds); ctx.beginPath(); o.forEach((q, i) => i ? ctx.lineTo(X(q), Y(q)) : ctx.moveTo(X(q), Y(q))); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    else if (S.dropAt) { const w = P.width / 3 * v.sx, hh = P.height / 3 * v.sy; ctx.setLineDash([8 * d, 6 * d]); ctx.strokeRect(X(S.dropAt) - w / 2, Y(S.dropAt) - hh / 2, w, hh); }
+    ctx.restore();
+  }
   // Guías del imán mientras se arrastra.
   if (S.snapLines && !S.projecting) {
     ctx.save(); ctx.strokeStyle = "#ff2d8a"; ctx.lineWidth = 1.5 * d; ctx.setLineDash([6 * d, 4 * d]);
@@ -2883,6 +2891,33 @@ async function init() {
     const c = fresh.find(x => x.sensor) || fresh.find(x => x.is3d) || fresh[0];
     toast(`Conectado: ${cameraName(c)}${c.sensor ? " · úsalo en «Interactivo»" : ""}`);
     if (S.tab === "interactive") renderPanel();
+  });
+  // Arrastrar y soltar desde los paneles: la superficie bajo el dedo/ratón recibe lo soltado;
+  // en un hueco vacío se crea una superficie nueva ahí mismo.
+  const stagePoint = (x, y) => {
+    const r = $("#ov").getBoundingClientRect();
+    if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+    return toProject(x, y);
+  };
+  setDropTarget((payload, x, y) => {
+    S.dropHover = null;
+    const p = stagePoint(x, y);
+    if (!p || !payload?.apply) return;
+    let s = hitSurface(p);
+    if (!s) {
+      const P = S.project, w = P.width / 3, hh = P.height / 3;
+      s = M.createQuad({ name: payload.label || "Superficie", corners: M.rectCorners(Math.max(0, Math.min(P.width - w, p.x - w / 2)), Math.max(0, Math.min(P.height - hh, p.y - hh / 2)), w, hh) });
+      M.addSurface(P, s, { type: "gen", gen: "plasma" });
+    }
+    select(s.id);
+    payload.apply(app);
+    changed({ panel: true }); commit();
+    toast(`${payload.label || "Hecho"} → «${s.name}»`);
+  }, (x, y) => {
+    const p = x === null || x === undefined ? null : stagePoint(x, y);
+    const id = p ? hitSurface(p)?.id || "new" : null;
+    if (id !== S.dropHover) { S.dropHover = id; S.dropAt = p; }
+    else S.dropAt = p;
   });
   buildChrome();
   buildPerfHud();

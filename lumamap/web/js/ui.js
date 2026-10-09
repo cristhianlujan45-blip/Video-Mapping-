@@ -128,14 +128,74 @@ export function lazyThumb(img, fn, target = img) {
   lazyIO.observe(target);
 }
 
-/** Rejilla de opciones con imagen. img puede ser una función: la miniatura se crea al verse. */
-export function tiles(items, { value, onPick, cols } = {}) {
+/* ---------------- Arrastrar y soltar sobre el escenario ---------------- */
+// Animaciones, efectos, estilos, imágenes, videos y experiencias se pueden arrastrar
+// y soltar encima de una superficie. Ratón: arrastrar. Táctil: mantener pulsado un
+// momento y arrastrar (un deslizamiento normal sigue desplazando el panel).
+let dropHandler = null, hoverHandler = null;
+export function setDropTarget(onDrop, onHover) { dropHandler = onDrop; hoverHandler = onHover; }
+export function draggable(el, getPayload) {
+  el.classList.add("dragsrc");
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !dropHandler) return;
+    const sx = e.clientX, sy = e.clientY, touch = e.pointerType !== "mouse";
+    let armed = !touch, dragging = false, ghost = null, payload = null;
+    const timer = touch ? setTimeout(() => { armed = true; navigator.vibrate?.(15); el.classList.add("dragarmed"); }, 280) : 0;
+    const start = () => {
+      payload = getPayload();
+      if (!payload) return cleanup();
+      dragging = true;
+      ghost = h("div", { class: "dragghost" }, payload.img ? h("img", { src: payload.img, alt: "" }) : null, h("span", {}, payload.label || ""));
+      document.body.append(ghost);
+    };
+    const move = (ev) => {
+      const d = Math.hypot(ev.clientX - sx, ev.clientY - sy);
+      if (!dragging) {
+        if (!armed) { if (d > 8) cleanup(); return; }     // táctil sin mantener: es un desplazamiento
+        if (d < 6) return;
+        start();
+        if (!dragging) return;
+      }
+      ev.preventDefault();
+      ghost.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 12}px)`;
+      hoverHandler?.(ev.clientX, ev.clientY, payload);
+    };
+    const stopTouch = (ev) => { if (armed) ev.preventDefault(); };
+    const up = (ev) => {
+      const was = dragging;
+      cleanup();
+      if (!was) return;
+      // El clic que sigue al soltar no debe contar como toque.
+      const eat = (c) => { c.stopPropagation(); c.preventDefault(); };
+      addEventListener("click", eat, { capture: true, once: true });
+      setTimeout(() => removeEventListener("click", eat, true), 350);   // si no llega ningún clic, no se queda esperando
+      dropHandler?.(payload, ev.clientX, ev.clientY);
+    };
+    const cleanup = () => {
+      clearTimeout(timer); el.classList.remove("dragarmed");
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", cleanup);
+      removeEventListener("touchmove", stopTouch);
+      ghost?.remove(); ghost = null;
+      hoverHandler?.(null);
+      dragging = false;
+    };
+    addEventListener("pointermove", move, { passive: false });
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", cleanup);
+    addEventListener("touchmove", stopTouch, { passive: false });
+  });
+}
+
+/** Rejilla de opciones con imagen. img puede ser una función: la miniatura se crea al verse.
+ *  drag(it) → { label, img, apply(app) }: además se puede arrastrar sobre el escenario. */
+export function tiles(items, { value, onPick, cols, drag } = {}) {
   const wrap = h("div", { class: "tiles", style: cols ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : undefined });
   for (const it of items) {
     const b = h("button", { class: `tile ${it.id === value ? "on" : ""}`, title: it.desc || it.label, onclick: () => onPick(it.id, it) });
     const lazy = typeof it.img === "function";
     b.innerHTML = (lazy ? `<img alt="">` : it.img ? `<img src="${it.img}" alt="">` : it.ic ? icon(it.ic) : "") + `<span>${esc(it.label)}</span>`;
     if (lazy) lazyThumb(b.firstChild, it.img, b);
+    if (drag) draggable(b, () => ({ img: b.querySelector("img")?.src || "", ...drag(it) }));
     wrap.append(b);
   }
   return wrap;

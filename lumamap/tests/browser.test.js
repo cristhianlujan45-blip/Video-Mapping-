@@ -489,6 +489,32 @@ await test("interactivo: modo sensor de profundidad (fondo aprendido) y los efec
   for (const [m, err] of modes) assert.equal(err, 0, m);
   await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.interactive.depth = false; a.openTab(null); });
 });
+await test("arrastrar y soltar: una animación y un efecto se sueltan encima de una superficie", async () => {
+  const id = await page.evaluate(() => { const a = window.__lumamap; a.select(null); a.actions.addShape("rect"); return a.S.project.surfaces.at(-1).id; });
+  const center = await page.evaluate((id) => { const s = window.__lumamap.S.project.surfaces.find(x => x.id === id); const xs = s.points.map(p => p.x), ys = s.points.map(p => p.y); return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2]; }, id);
+  const [tx, ty] = await toScreen(center);
+  await page.evaluate(() => { const a = window.__lumamap; a.select(null); a.openTab("anim"); });
+  const tile = page.locator("#panelBody .tile").nth(3);
+  await tile.waitFor();
+  const name = (await tile.textContent()).trim();
+  const b = await tile.boundingBox();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2 - 40, b.y + b.height / 2, { steps: 4 });
+  await page.mouse.move(tx, ty, { steps: 12 }); await page.mouse.up();
+  const r = await page.evaluate((id) => { const a = window.__lumamap; return { sel: a.S.sel, gen: a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id].source.gen }; }, id);
+  const want = await page.evaluate((n) => window.__lumamap.M.ANIM_LIBRARY.find(a => a.name === n)?.gen, name);
+  assert.equal(r.sel, id, "la superficie de destino queda seleccionada");
+  assert.equal(r.gen, want, "la animación arrastrada (" + name + ") está en la superficie");
+  // Un efecto de la biblioteca (estilo Retro Matrix) arrastrado encima.
+  await page.evaluate(() => window.__lumamap.openTab("fx"));
+  const chip = page.locator("#panelBody .fxlib .chip", { hasText: "Retro Matrix" });
+  await chip.scrollIntoViewIfNeeded();
+  const c = await chip.boundingBox();
+  await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2); await page.mouse.down();
+  await page.mouse.move(c.x - 30, c.y, { steps: 4 }); await page.mouse.move(tx, ty, { steps: 12 }); await page.mouse.up();
+  assert.equal(await page.evaluate((id) => window.__lumamap.S.project.scenes.find(s => s.id === window.__lumamap.S.project.sceneId).looks[id].fx.style, id), "matrix");
+  await page.evaluate(() => window.__lumamap.openTab(null));
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();
