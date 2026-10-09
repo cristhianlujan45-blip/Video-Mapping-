@@ -26,12 +26,27 @@ Step "1. Instalación limpia ($Setup, versión $ver)"
 Start-Process -Wait -FilePath $Setup -ArgumentList "/S"
 if (-not (Test-Path $exe)) { Fail "no se instaló $exe" }
 Write-Host "Instalado: $exe ($((Get-Item $exe).VersionInfo.ProductVersion))"
+$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "LumaMap.lnk"
+if (-not (Test-Path $lnk)) { Fail "no se creó el acceso directo en el escritorio ($lnk)" }
+Write-Host "Acceso directo: $lnk"
 
 Step "2. Abrir y cerrar"
 $p = Launch
 if (-not (Test-Path $data)) { Fail "no se creó la carpeta de datos $data" }
 Set-Content -Path (Join-Path $data "ci-marker.txt") -Value "datos del usuario"
 $p.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 4; StopAll
+
+Step "2b. Instalar encima con la app ABIERTA (doble clic en el instalador): debe cerrarla sola"
+$p = Launch
+$kids = @(Get-CimInstance Win32_Process | ? { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($dir) }).Count
+Write-Host "Procesos de LumaMap abiertos: $kids"
+Remove-Item $lnk -Force -ErrorAction SilentlyContinue
+$i = Start-Process -FilePath $Setup -ArgumentList "/S" -PassThru
+if (-not $i.WaitForExit(120000)) { $i.Kill(); Fail "el instalador se quedó esperando con la app abierta" }
+if ($i.ExitCode -ne 0) { Fail "el instalador terminó con código $($i.ExitCode) con la app abierta" }
+if (-not (Test-Path $exe)) { Fail "la app quedó sin ejecutable" }
+if (-not (Test-Path $lnk)) { Fail "al actualizar no se volvió a crear el acceso directo del escritorio" }
+StopAll
 
 Step "3. Actualizar con la app ABIERTA (el actualizador espera a que se cierre)"
 $app = Launch

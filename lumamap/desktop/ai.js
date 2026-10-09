@@ -85,6 +85,38 @@ function setup(log = () => {}) {
   });
 
   ipcMain.handle("ai:cancel", (e) => { running.get(e.sender.id)?.abort(); return true; });
+
+  // IA local (Ollama u otro servidor compatible) desde el proceso principal: sin
+  // problemas de CORS. Solo se permite hablar con este equipo o con la red local
+  // (nunca con internet) y solo con las rutas de la API de Ollama.
+  ipcMain.handle("ai:http", async (_e, req) => {
+    let u;
+    try { u = new URL(String(req?.url || "")); } catch { return { ok: false, error: "bad-url" }; }
+    if (!/^https?:$/.test(u.protocol) || !isLocalHost(u.hostname)) return { ok: false, error: "not-local" };
+    if (!/^\/api\/(tags|version|chat|show|ps|generate)$/.test(u.pathname)) return { ok: false, error: "bad-path" };
+    try {
+      const r = await fetch(u, {
+        method: req.method === "POST" ? "POST" : "GET",
+        headers: { "content-type": "application/json" },
+        body: req.method === "POST" ? JSON.stringify(req.body ?? {}) : undefined,
+        signal: AbortSignal.timeout(Math.max(1000, Math.min(600000, +req.timeout || 60000))),
+      });
+      const text = await r.text();
+      return { ok: r.ok, status: r.status, text: text.slice(0, 4_000_000) };
+    } catch (err) {
+      return { ok: false, error: err?.name === "TimeoutError" ? "timeout" : (err?.cause?.code || err?.code || "network") };
+    }
+  });
 }
 
-module.exports = { setup, MODEL };
+/** ¿Es este equipo o una IP privada de la red local? */
+function isLocalHost(h) {
+  h = h.replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h === "::1" || h.endsWith(".local")) return true;
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
+  if (!m) return false;
+  const [a, b] = [+m[1], +m[2]];
+  return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
+}
+
+module.exports = { setup, MODEL, isLocalHost };

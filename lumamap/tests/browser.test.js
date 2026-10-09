@@ -235,7 +235,7 @@ await test("pantallas: cada superficie sale solo por la suya y se puede apagar",
   assert.ok(r.on2.includes(r.s1) && r.on2.includes(r.s2), "P2 muestra la suya y las de «todas»");
   assert.equal(r.cfg.on, false); assert.equal(r.cfg.fx, "bw");
 });
-await test("cuerpo (Kinect) con la cámara: la IA carga y se dibuja sin errores de GPU", async () => {
+await test("proyección interactiva con la cámara: la IA carga y se dibuja sin errores de GPU", async () => {
   await page.evaluate(() => { const a = window.__lumamap; a.select(a.S.project.surfaces[0].id); a.actions.setSource({ type: "body", gen: "galaxy", bodyGlow: 0.5, bodyTrail: 0.3 }); });
   let st = "";
   for (let i = 0; i < 40 && st !== "ai"; i++) {
@@ -284,7 +284,7 @@ await test("modo profesional: pestañas nuevas y modo simple intacto", async () 
   const simpleTabs = await page.locator("#dock button").count();
   await page.evaluate(() => window.__lumamap.setPro(true));
   const proTabs = await page.locator("#dock button").count();
-  assert.equal(proTabs, simpleTabs + 7, "Show, 3D, Tracking, Asistente, Control, Luces y Rendimiento");
+  assert.equal(proTabs, simpleTabs + 5, "Show, 3D, Tracking, Control y Rendimiento (Interactivo, Luces y Asistente están en el modo simple)");
   await page.locator('#dock [data-tab="control"]').click();
   await page.getByText("Controladores MIDI").waitFor();
   await page.locator('#dock [data-tab="perf"]').click();
@@ -350,62 +350,117 @@ await test("modo actuación: sin paneles ni edición; GO, apagón y emergencia; 
   await page.keyboard.press("Shift+Escape");
   assert.equal(await page.locator("#dock").isVisible(), true);
 });
-await test("asistente sin IA: «cuando levante la mano cambia el color a rojo» crea una regla que funciona", async () => {
-  const r = await page.evaluate(async () => {
-    const a = window.__lumamap, P = a.S.project;
-    const { runLocal } = await import("./js/assistant.js");
-    if (!a.S.sel) a.select(P.surfaces[0].id);
-    const n0 = P.settings.tracking.rules.length, s0 = P.surfaces.length;
-    const r1 = await runLocal(a, "Cuando levante la mano cambia el color a rojo");
-    const rule = P.settings.tracking.rules[n0];
-    a.tracking.evalRules({ hands_up: 1 });   // lo mismo que llega del tracking real al levantar la mano
-    const look = a.lookSel();
-    const r2 = await runLocal(a, "añade un círculo");
-    const r3 = await runLocal(a, "haz un café");
-    P.settings.tracking.rules.length = n0;
-    return { r1, rule, color: look.source.color, type: look.source.type, added: P.surfaces.length - s0, r2, r3 };
-  });
-  assert.ok(r.r1.ok, r.r1.text);
-  assert.equal(r.rule.signal, "hands_up"); assert.equal(r.rule.op, "above");
-  assert.deepEqual([r.rule.then.type, r.rule.then.color], ["color", "#ff0000"]);
-  assert.equal(r.color, "#ff0000", "la regla cambió el color de verdad");
-  assert.equal(r.added, 1, r.r2.text);
-  assert.equal(r.r3.ok, false, "lo que no entiende lo dice, no finge");
-});
-await test("asistente con Claude: el ciclo de herramientas ejecuta acciones reales (API simulada)", async () => {
-  const r = await page.evaluate(async () => {
-    const a = window.__lumamap, P = a.S.project;
-    const { Assistant } = await import("./js/assistant.js");
-    const n0 = P.settings.tracking.rules.length;
-    const asst = new Assistant(a), reqs = [];
-    const replies = [
-      { stop_reason: "tool_use", content: [{ type: "text", text: "Creo la regla." }, { type: "tool_use", id: "tu_1", name: "create_tracking_rule", input: { signal: "hands_up", op: "above", value: 0.5, then: { type: "color", color: "#0000ff", surface: "all" } } }, { type: "tool_use", id: "tu_2", name: "run_action", input: { action: { type: "param", target: "no/existe", value: 1 } } }] },
-      { stop_reason: "end_turn", content: [{ type: "text", text: "Listo: al levantar la mano todo se pone azul." }] },
-    ];
-    Object.defineProperty(asst, "bridge", { value: { status: async () => ({ hasKey: true, model: "claude-opus-5-5" }), step: async (req) => { reqs.push(JSON.parse(JSON.stringify(req))); return replies.shift(); }, cancel() {} } });
-    await asst.send("Cuando levante la mano pon todo azul");
-    const rule = P.settings.tracking.rules[n0];
-    P.settings.tracking.rules.length = n0;
-    return { rule, log: asst.log, msgs: asst.messages, reqs };
-  });
-  assert.equal(r.rule?.then.color, "#0000ff");
-  assert.equal(r.msgs.length, 4, "usuario, asistente, resultados, asistente");
-  const results = r.msgs[2].content;
-  assert.equal(results[0].tool_use_id, "tu_1");
-  assert.equal(results[1].is_error, true, "el error de la herramienta vuelve a Claude");
-  assert.equal(r.reqs[1].messages.length, 3, "la segunda vuelta lleva el historial completo");
-  assert.ok(r.log.some(m => m.who === "act" && /Regla creada/.test(m.text)));
-  assert.ok(r.log.some(m => m.who === "ai" && /azul/.test(m.text)));
-});
-await test("panel Asistente: escribir una orden y verla hecha", async () => {
-  await page.evaluate(() => { window.__lumamap.setPro(true); window.__lumamap.openTab("assistant"); });
-  await page.getByText("Sin IA: órdenes simples").waitFor();
-  const before = await page.evaluate(() => window.__lumamap.S.project.sceneId);
-  await page.locator(".asst-in").fill("siguiente escena");
+await test("asistente sin IA: una orden se PROPONE, se aplica con «Aplicar» y la regla funciona", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.setPro(false); if (!a.S.sel) a.select(a.S.project.surfaces[0].id); a.openTab("assistant"); });
+  await page.getByText("¿Qué quieres hacer?").waitFor();
+  const n0 = await page.evaluate(() => window.__lumamap.S.project.settings.tracking.rules.length);
+  await page.locator(".asst-in").fill("Cuando levante la mano cambia el color a rojo");
   await page.locator(".asst-in").press("Enter");
-  await page.locator(".asst-msg.local").first().waitFor();
-  assert.notEqual(await page.evaluate(() => window.__lumamap.S.project.sceneId), before);
-  await page.evaluate(() => { window.__lumamap.setPro(false); window.__lumamap.openTab(null); });
+  const card = page.locator(".prop", { hasText: "Cuando" }).first();
+  await card.waitFor();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.settings.tracking.rules.length), n0, "proponer no ejecuta nada");
+  await card.getByRole("button", { name: "Aplicar" }).click();
+  await page.waitForFunction((n) => window.__lumamap.S.project.settings.tracking.rules.length === n + 1, n0);
+  const color = await page.evaluate(() => { const a = window.__lumamap; a.tracking.evalRules({ hands_up: 1 }); const c = a.lookSel().source.color; a.S.project.settings.tracking.rules.length = 0; a.tracking.stop(); return c; });
+  assert.equal(color, "#ff0000");
+  await page.locator(".asst-in").fill("borrar la superficie");
+  await page.locator(".asst-in").press("Enter");
+  await page.locator(".prop.crit").first().waitFor();   // las acciones críticas se marcan
+});
+await test("asistente con IA local (Ollama simulado): estado, modelo, contexto del proyecto y acción aplicada", async () => {
+  const http = await import("node:http");
+  let lastChat = null;
+  const fake = http.createServer((req, res) => {
+    res.setHeader("access-control-allow-origin", "*"); res.setHeader("access-control-allow-headers", "content-type"); res.setHeader("access-control-allow-methods", "GET,POST");
+    if (req.method === "OPTIONS") return res.end();
+    let body = ""; req.on("data", d => body += d); req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/api/version") return res.end(JSON.stringify({ version: "0.9.0" }));
+      if (req.url === "/api/tags") return res.end(JSON.stringify({ models: [{ name: "qwen3:8b", size: 5.2e9, details: { parameter_size: "8.2B", family: "qwen3" } }] }));
+      if (req.url === "/api/chat") { lastChat = JSON.parse(body); return res.end(JSON.stringify({ message: { role: "assistant", content: JSON.stringify({ reply: "Creo una superficie para la columna.", actions: [{ action: "create_surface", parameters: { shape: "rect", name: "Columna IA" } }], intent: "none" }) } })); }
+      res.statusCode = 404; res.end("{}");
+    });
+  });
+  await new Promise(r => fake.listen(0, "127.0.0.1", r));
+  await page.evaluate(async (ep) => { const a = window.__lumamap; a.ai.setSettings({ endpoint: ep, enabled: true, allowLocal: true, provider: "auto" }); await a.ai.refresh({ force: true }); a.renderPanel(); }, `http://127.0.0.1:${fake.address().port}`);
+  await page.getByText("Modelo: qwen3:8b").waitFor();
+  await page.locator(".asst-in").fill("Quiero una superficie para la columna");
+  await page.locator(".asst-in").press("Enter");
+  const card = page.locator(".prop", { hasText: "Columna IA" });
+  await card.waitFor();
+  assert.match(lastChat.messages.at(-1).content, /CONTEXTO DEL PROYECTO/);
+  assert.equal(lastChat.model, "qwen3:8b");
+  await card.getByRole("button", { name: "Aplicar" }).click();
+  await page.waitForFunction(() => window.__lumamap.S.project.surfaces.some(s => s.name === "Columna IA"));
+  // Ollama se apaga: la app sigue y el asistente responde sin IA, con un mensaje claro.
+  await new Promise(r => fake.close(r));
+  await page.evaluate(async () => { await window.__lumamap.ai.refresh({ force: true }); window.__lumamap.renderPanel(); });
+  await page.getByText("LumaMap funciona normal").waitFor();
+  await page.evaluate(() => { const a = window.__lumamap; a.ai.setSettings({ endpoint: "http://localhost:11434" }); const s = a.S.project.surfaces.find(x => x.name === "Columna IA"); a.actions.remove(s.id); });
+});
+await test("«¿Qué hago ahora?»: recomienda UN paso y «Hacerlo conmigo» lo hace", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; if (!a.S.blackout) a.actions.blackout(); });
+  await page.locator('#top [data-act="next"]').click();
+  await page.getByText("El apagón está activo").waitFor();
+  await page.getByRole("button", { name: "Hacerlo conmigo" }).click();
+  await page.waitForFunction(() => !window.__lumamap.S.blackout);
+});
+await test("academia: «PASO 1/5» espera la acción del usuario y avanza solo", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.academy.start(1); });
+  await page.locator("#academyCard", { hasText: "PASO 1/5" }).waitFor();
+  await page.waitForTimeout(700);
+  assert.match(await page.locator("#academyCard").textContent(), /PASO 1\/5/, "no avanza sin la acción");
+  await page.evaluate(() => window.__lumamap.openTab("add"));
+  await page.locator("#academyCard", { hasText: "PASO 2/5" }).waitFor();
+  await page.locator("#academyCard").getByRole("button", { name: "Salir" }).click();
+  assert.equal(await page.locator("#academyCard").count(), 0);
+});
+await test("Show Director y diagnóstico: plan de 6 secciones aplicado como escenas; salud del proyecto con puntuación", async () => {
+  await page.evaluate(() => window.__lumamap.openTab("assistant"));
+  await page.locator(".aiquick button", { hasText: "Detectar Problemas" }).click();
+  await page.locator(".score.big").waitFor();
+  assert.match(await page.locator(".score.big").textContent(), /^\d+\/100$/);
+  const n0 = await page.evaluate(() => window.__lumamap.S.project.scenes.length);
+  await page.locator(".aiquick button", { hasText: "Crear Show" }).click();
+  await page.getByRole("button", { name: "Generar plan" }).click();
+  await page.locator(".psec").first().waitFor();
+  assert.equal(await page.locator(".psec").count(), 6);
+  await page.getByRole("button", { name: "Aplicar plan" }).click();
+  await page.locator("#modal").getByRole("button", { name: "Aplicar" }).click();
+  await page.waitForFunction((n) => window.__lumamap.S.project.scenes.length === n + 6, n0);
+  const sc = await page.evaluate(() => { const P = window.__lumamap.S.project; return { name: P.scenes.find(s => s.id === P.sceneId).name, auto: P.settings.autoAdvance }; });
+  assert.equal(sc.name, "INTRO"); assert.equal(sc.auto, true);
+  await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; P.settings.autoAdvance = false; P.scenes.splice(P.scenes.length - 6, 6); P.sceneId = P.scenes[0].id; a.changed({ panel: true }); a.openTab(null); });
+});
+await test("luces en modo simple: añadir una tira LED, elegir «Fuego» y ver los canales DMX encendidos", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.setPro(false); a.openTab("lights"); });
+  await page.getByText("1 · Conectar").waitFor();
+  await page.getByText("Modo práctica").first().waitFor();
+  await page.locator(".lkinds .tile", { hasText: "Tira LED" }).click();
+  await page.getByRole("button", { name: "Aceptar" }).click();
+  await page.waitForFunction(() => window.__lumamap.dmx.cfg.pixelMaps.length >= 1);
+  await page.locator(".chips .chip", { hasText: "Naturaleza" }).click();
+  await page.locator(".lfx", { hasText: /^Fuego$/ }).click();
+  await page.waitForFunction(() => { const D = window.__lumamap.dmx, pm = D.cfg.pixelMaps.at(-1); const u = D.out.get(pm.universe); return pm.source === "effect" && u && u.some(v => v > 0); }, null, { timeout: 10000 });
+  const r = await page.evaluate(() => { const D = window.__lumamap.dmx, pm = D.cfg.pixelMaps.at(-1); return { n: D.patchOf(pm).pos.length, fx: pm.fx.id, prev: document.querySelectorAll("canvas.lfxprev").length }; });
+  assert.equal(r.n, 60); assert.match(r.fx, /fire/); assert.ok(r.prev >= 5, "vistas previas animadas");
+  await page.evaluate(() => { const a = window.__lumamap; a.dmx.cfg.pixelMaps.length = 0; a.openTab(null); });
+});
+await test("interactivo en modo simple: cámara, efecto «Ondas al pisar» y reacción que cambia las luces", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.setPro(false); a.openTab("interactive"); });
+  await page.getByText("1 · Cámara o sensor").waitFor();
+  await page.locator(".icam").waitFor();
+  await page.locator(".ifx", { hasText: "Ondas al pisar" }).click();
+  const src = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces.find(x => x.name === "Interactivo"); return s && a.lookSel().source; });
+  assert.equal(src?.type, "body"); assert.equal(src?.bodyMode, "ondas");
+  await page.waitForTimeout(1500);   // la cámara falsa se mueve: el efecto se calcula en vivo
+  assert.equal(await page.evaluate(() => document.querySelector("#gl").getContext("webgl2").getError()), 0);
+  const fx = await page.evaluate(() => { const a = window.__lumamap; const L = a.dmx.addLight("strip", { count: 8 }); a.changed({ panel: true }); return L.id; });
+  await page.locator(".chip", { hasText: "Al entrar alguien → luces «Fuego»" }).click();
+  await page.locator(".interactive .list .item", { hasText: "luces «Fuego»" }).locator("button").first().click();
+  const r = await page.evaluate((id) => { const a = window.__lumamap; const L = a.dmx.cfg.pixelMaps.find(p => p.id === id); return { src: L.source, fx: L.fx.id, rule: a.S.project.settings.tracking.rules.at(-1).then.type }; }, fx);
+  assert.equal(r.src, "effect"); assert.match(r.fx, /fire/); assert.equal(r.rule, "lightfx");
+  await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.tracking.rules.length = 0; a.dmx.cfg.pixelMaps.length = 0; a.tracking.stop(); a.openTab(null); });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

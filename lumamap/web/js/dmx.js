@@ -19,6 +19,7 @@ import { Compositor, sceneLayers } from "./compose.js";
 import { patchPixels, pixelPositions, writePixel, rgbToRgbw, channelsPerPixel } from "./dmxproto.js";
 import { registerParams } from "./params.js";
 import { uid, defaultPixelMap } from "./model.js";
+import { prepareFx, prepareMove, defaultLightFx } from "./lightfx.js";
 
 /** Tipos de fixture: canales en orden. */
 export const FIXTURE_TYPES = {
@@ -42,6 +43,8 @@ const DEF_VALUE = { dimmer: 255, intensity: 255, pan: 128, tilt: 128 };
 export const TEST_COLORS = { red: [255, 0, 0, 0], green: [0, 255, 0, 0], blue: [0, 0, 255, 0], white: [255, 255, 255, 255], full: [255, 255, 255, 255], off: [0, 0, 0, 0] };
 
 const TW = 256;   // ancho de la textura de LED
+/** Parte fina (16 bits) de un valor 0..1: el byte bajo. */
+const frac256 = (v) => (Math.max(0, Math.min(1, v)) * 65535) & 255;
 
 /* ======================================================================
    Muestreo en la GPU
@@ -229,7 +232,7 @@ export class DmxEngine {
     registerDmxParams(this);
   }
   get cfg() { return this.app.S.project.settings.dmx; }
-  get desktop() { return !!window.LumaDesktop?.dmxStart; }
+  get desktop() { return !!globalThis.LumaDesktop?.dmxStart; }
 
   /* ---------------- Servicio de red ---------------- */
   connect() {
@@ -366,10 +369,19 @@ export class DmxEngine {
     const test = this.test ? TEST_COLORS[this.test.color] : null;
     const rgbw = [0, 0, 0, 0, 0, 0];
 
+    // Efectos de luz (biblioteca): reloj del show, tempo y música.
+    const secs = now / 1000, lv = this.app.S.levels || {}, bpm = this.app.S.project.settings.bpm || 120;
+    const fxOut = [0, 0, 0];
     for (const pm of c.pixelMaps) {
       if (!pm.enabled) continue;
-      const { patch } = this.patchOf(pm);
-      const col = this.ledColors.get(pm.id);
+      const { patch, pos } = this.patchOf(pm);
+      let col = this.ledColors.get(pm.id);
+      if (pm.source === "effect") {
+        // El efecto se calcula para cada LED según su posición; se guarda como si fuera video (vista previa y monitor).
+        const run = prepareFx(pm.fx || defaultLightFx(), secs, lv, bpm), n = pos.length;
+        if (!col || col.length !== n * 4) this.ledColors.set(pm.id, col = new Uint8Array(n * 4));
+        for (let i = 0; i < n; i++) { run(i, n, pos[i][0], pos[i][1], fxOut); col[i * 4] = fxOut[0]; col[i * 4 + 1] = fxOut[1]; col[i * 4 + 2] = fxOut[2]; col[i * 4 + 3] = 255; }
+      }
       const fixed = hexRgb(pm.color);
       const isW = channelsPerPixel(pm.colorOrder) >= 4;
       const k = master * (pm.source === "video" ? 1 : pm.intensity * this.paramValue(`dmx/map/${pm.id}/intensity`, 1));
@@ -378,7 +390,7 @@ export class DmxEngine {
         if (!p) continue;
         let r, g, b;
         if (test && (!this.test.target || this.test.target === pm.id)) { [r, g, b] = test; }
-        else if (pm.source === "video") { if (!col) continue; r = col[i * 4]; g = col[i * 4 + 1]; b = col[i * 4 + 2]; }
+        else if (pm.source === "video" || pm.source === "effect") { if (!col) continue; r = col[i * 4]; g = col[i * 4 + 1]; b = col[i * 4 + 2]; }
         else if (pm.source === "color") [r, g, b] = fixed;
         else continue;
         r *= k; g *= k; b *= k;
@@ -390,15 +402,27 @@ export class DmxEngine {
         writePixel(bufFor, p.universe, p.channel, pm.colorOrder, rgbw);
       }
     }
+    // Focos con efecto: cada foco es un «LED» del efecto (en su orden), y las cabezas móviles se mueven solas.
+    const fxFix = c.fixtures.filter(f => f.enabled !== false && f.source === "effect");
+    const moving = c.fixtures.filter(f => f.enabled !== false && f.move?.kind && f.move.kind !== "none");
     for (const f of c.fixtures) {
       if (f.enabled === false) continue;
-      const col = this.ledColors.get("fx:" + f.id);
+      let col = this.ledColors.get("fx:" + f.id);
+      if (f.source === "effect") {
+        const k = fxFix.indexOf(f);
+        prepareFx(f.fx || defaultLightFx(), secs, lv, bpm)(k, fxFix.length, f.x ?? 0.5, f.y ?? 0.5, fxOut);
+        if (!col) this.ledColors.set("fx:" + f.id, col = new Uint8Array(4));
+        col[0] = fxOut[0]; col[1] = fxOut[1]; col[2] = fxOut[2]; col[3] = 255;
+      }
+      const mv = moving.includes(f) ? prepareMove(f.move, secs, bpm)(moving.indexOf(f), moving.length) : null;
       f.channels.forEach((ch, i) => {
         let v = f.values[i] ?? ch.def ?? DEF_VALUE[ch.type] ?? 0;
+        if (mv && (ch.type === "pan" || ch.type === "tilt")) v = (Math.max(0, Math.min(1, mv[ch.type === "pan" ? 0 : 1])) * 65535) >> 8;
+        if (mv && (ch.type === "panFine" || ch.type === "tiltFine")) v = Math.round(frac256(mv[ch.type === "panFine" ? 0 : 1]));
         v = this.paramValue(`dmx/fix/${f.id}/${i}`, v);
         if (ch.type in COLOR_CH) {
           if (test && (!this.test.target || this.test.target === f.id)) v = test[Math.min(3, COLOR_CH[ch.type])] ?? 0;
-          else if (f.source === "video" && col) {
+          else if ((f.source === "video" || f.source === "effect") && col) {
             const j = COLOR_CH[ch.type];
             v = j < 3 ? col[j] : j === 3 ? Math.min(col[0], col[1], col[2]) : 0;
           }
@@ -478,6 +502,44 @@ export class DmxEngine {
     this.cfg.fixtures.push(f);
     this.ensureUniverses();
     return f;
+  }
+
+  /**
+   * Alta fácil de una luz (modo simple): se coloca sola en el escenario y en el
+   * primer canal libre, y empieza con un efecto para que se vea algo al instante.
+   */
+  addLight(kind, opts = {}) {
+    const c = this.cfg;
+    const lastUsed = () => {
+      let u = 0;
+      for (const pm of c.pixelMaps) u = Math.max(u, this.patchOf(pm).lastUniverse || pm.universe);
+      for (const f of c.fixtures) u = Math.max(u, f.universe + (f.address - 1 + f.channels.length > 512 ? 1 : 0));
+      return u;
+    };
+    const n = c.pixelMaps.length + c.fixtures.length, y = 0.15 + (n % 6) * 0.13;
+    const fx = defaultLightFx(opts.fx);
+    const strip = (o) => this.addPixelMap({ universe: lastUsed() + 1, channel: 1, source: "effect", fx, sampling: "average", ...o });
+    switch (kind) {
+      case "strip": return strip({ name: `Tira LED ${n + 1}`, shape: "line", count: opts.count || 60, cols: opts.count || 60, rows: 1, x: 0.1, y, w: 0.8, h: 0.02 });
+      case "bar": return strip({ name: `Barra LED ${n + 1}`, shape: "line", count: opts.count || 12, cols: opts.count || 12, rows: 1, x: 0.3, y, w: 0.4, h: 0.02 });
+      case "ring": return strip({ name: `Aro LED ${n + 1}`, shape: "circle", count: opts.count || 24, cols: opts.count || 24, rows: 1, x: 0.4, y: 0.35, w: 0.2, h: 0.3 });
+      case "matrix": return strip({ name: `Matriz LED ${n + 1}`, shape: "grid", cols: opts.cols || 16, rows: opts.rows || 16, serpentine: true, x: 0.3, y: 0.25, w: 0.4, h: 0.5, fx: defaultLightFx(opts.fx || "Plasma") });
+      case "par": case "parw": case "moving": {
+        const type = kind === "par" ? "drgb" : kind === "parw" ? "drgbw" : "moving";
+        const fixtures = c.fixtures.filter(f => f.type === type);
+        const u = fixtures.at(-1)?.universe || (lastUsed() + (c.pixelMaps.length ? 1 : 0)) || 1;
+        const f = this.addFixture(type, { universe: u, source: "effect", fx, name: `${kind === "moving" ? "Cabeza móvil" : "Foco PAR"} ${fixtures.length + 1}`,
+          ...(kind === "moving" ? { move: { kind: "circle", speed: 1, size: 0.5 } } : {}) });
+        f.x = 0.1 + ((fixtures.length * 0.17) % 0.8); f.y = y;
+        return f;
+      }
+    }
+    return null;
+  }
+  /** Todas las luces que tienen color (pixel maps y focos con canales de color). */
+  lights() {
+    const c = this.cfg;
+    return [...c.pixelMaps, ...c.fixtures.filter(f => f.channels.some(ch => ch.type in COLOR_CH))];
   }
 
   /** Diagnóstico paso a paso: [{ ok, label, detail }]. */

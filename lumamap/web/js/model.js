@@ -698,10 +698,23 @@ export function normalizeTracking(t) {
   t = { ...D, ...(t || {}) };
   t.zones = Array.isArray(t.zones) ? t.zones.filter(z => z && z.id) : [];
   t.rules = Array.isArray(t.rules) ? t.rules.filter(r => r && r.id && r.then) : [];
+  // Proveedores antiguos (sensores concretos que nunca estuvieron disponibles) → cámara con IA.
+  if (!["webcam", "motion", "ipcam", "depth"].includes(t.provider)) t.provider = "webcam";
   return t;
 }
 
 /** Ajustes del proyecto. react = modo ritmo global (todo late con la música). */
+/** Proyección interactiva: cámara y alineación cámara ↔ proyección (interactive.js). */
+export function defaultInteractive() {
+  return { enabled: false, camId: "", quad: [[0, 0], [1, 0], [1, 1], [0, 1]], mirror: false };
+}
+export function normalizeInteractive(c) {
+  const d = defaultInteractive();
+  c = { ...d, ...(c || {}) };
+  if (!Array.isArray(c.quad) || c.quad.length !== 4 || !c.quad.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite))) c.quad = d.quad;
+  return c;
+}
+
 export function defaultSettings() {
   return {
     transitionMs: 800, autoAdvance: false, loopScenes: true, bpm: 120,
@@ -728,6 +741,8 @@ export function defaultSettings() {
     show: defaultShow(),
     // Tracking de personas: proveedor, calidad, zonas y reglas
     tracking: defaultTracking(),
+    // Proyección interactiva: cámara y alineación con la proyección
+    interactive: defaultInteractive(),
   };
 }
 
@@ -944,6 +959,7 @@ export function normalizeProject(json) {
     dmx: normalizeDmx(st.dmx),
     show: normalizeShow(st.show),
     tracking: normalizeTracking(st.tracking),
+    interactive: normalizeInteractive(st.interactive),
   };
   json.stage3d = normalizeStage3d(json.stage3d);
   if (!json.scenes.length) json.scenes.push(createScene());

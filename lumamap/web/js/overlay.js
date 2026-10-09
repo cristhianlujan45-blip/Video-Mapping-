@@ -13,8 +13,8 @@ export const PATTERNS = [
 
 export function drawPattern(ctx, name, W, H) {
   const c = ctx;
-  if (name === "white" || name === "red" || name === "green" || name === "blue") {
-    c.fillStyle = { white: "#fff", red: "#f00", green: "#0f0", blue: "#00f" }[name];
+  if (name === "white" || name === "black" || name === "red" || name === "green" || name === "blue") {
+    c.fillStyle = { white: "#fff", black: "#000", red: "#f00", green: "#0f0", blue: "#00f" }[name];
     c.fillRect(0, 0, W, H);
     return;
   }

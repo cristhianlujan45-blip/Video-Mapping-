@@ -7,7 +7,7 @@ const { spawn, execFile: execFileCb } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
-const { optimize, usableEncoders } = require("./optimize.js");
+const { optimize, usableEncoders, killAll: killFfmpeg } = require("./optimize.js");
 
 const OPT_DIR = path.join(os.tmpdir(), "lumamap-optimized");
 
@@ -303,7 +303,7 @@ function runUpdater(args) {
   const all = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
     "-AppPid", String(process.pid), "-InstallDir", path.dirname(exe), "-Exe", path.basename(exe), "-ResultFile", RESULT_FILE(), "-BackupRoot", BACKUP_DIR(), ...args];
   log("update", "Actualizador: " + args.join(" "));
-  spawn("powershell.exe", all, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+  spawn("powershell.exe", all, { detached: true, stdio: "ignore", windowsHide: true, cwd: UPD_DIR() }).unref();   // fuera de la carpeta de la app
   setTimeout(() => app.quit(), 300);
 }
 ipcMain.handle("update:install", async (e, url, info = {}) => {
@@ -383,7 +383,7 @@ function perfWatch(on) {
     "$e=(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine | Where-Object { $_.Name -like '*engtype_3D' } | Measure-Object UtilizationPercentage -Sum).Sum; " +
     "$m=(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory | Measure-Object DedicatedUsage -Sum).Sum; " +
     "[Console]::Out.WriteLine(\"$e;$m\"); Start-Sleep -Milliseconds 1500 }";
-  gpuProc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true });
+  gpuProc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, cwd: os.tmpdir() });
   let buf = "";
   gpuProc.stdout.on("data", (d) => {
     buf += d.toString();
@@ -408,7 +408,7 @@ ipcMain.handle("perf:metrics", async () => {
     gpu: await gpuInfo(), gpuUtil: fresh ? gpuStat.util : null, vram: fresh ? gpuStat.vram : null,
   };
 });
-app.on("before-quit", () => { quitting = true; perfWatch(false); });
+app.on("before-quit", () => { quitting = true; perfWatch(false); killFfmpeg(); });
 
 /* ---------------- Perfil de hardware (primer inicio y panel Rendimiento) ---------------- */
 ipcMain.handle("hw:profile", async () => {
@@ -417,11 +417,15 @@ ipcMain.handle("hw:profile", async () => {
   let wmi = [];
   if (process.platform === "win32") {
     wmi = await new Promise((resolve) => {
+      // AdapterRAM (WMI) es de 32 bits y se queda en 4 GB: la VRAM real está en el registro (qwMemorySize).
       const ps = "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion,CurrentRefreshRate | ConvertTo-Json -Compress; '|||'; " +
-        "(Get-CimInstance Win32_SystemEnclosure).ChassisTypes -join ','; '|||'; [bool](Get-CimInstance Win32_Battery)";
-      execFileCb("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 20000 }, (_e, out) => {
-        const [gpus, chassis, battery] = String(out || "").split("|||").map(x => x.trim());
+        "(Get-CimInstance Win32_SystemEnclosure).ChassisTypes -join ','; '|||'; [bool](Get-CimInstance Win32_Battery); '|||'; " +
+        "Get-ItemProperty -Path 'HKLM:\\SYSTEM\\ControlSet001\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' -Name DriverDesc,HardwareInformation.qwMemorySize -ErrorAction SilentlyContinue | Select-Object DriverDesc,@{n='mem';e={$_.'HardwareInformation.qwMemorySize'}} | ConvertTo-Json -Compress";
+      execFileCb("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 20000, cwd: os.tmpdir() }, (_e, out) => {
+        const [gpus, chassis, battery, reg] = String(out || "").split("|||").map(x => x.trim());
         let list = []; try { list = JSON.parse(gpus); if (!Array.isArray(list)) list = [list]; } catch {}
+        let mem = []; try { mem = JSON.parse(reg); if (!Array.isArray(mem)) mem = [mem]; } catch {}
+        for (const g of list) { const r = mem.find(m => m && m.DriverDesc === g.Name && +m.mem > 0); g.vram = r ? +r.mem : +g.AdapterRAM || 0; }
         resolve({ gpus: list, laptop: /(^|,)(8|9|10|14|31|32)(,|$)/.test(chassis || "") || /True/i.test(battery || "") });
       });
     });

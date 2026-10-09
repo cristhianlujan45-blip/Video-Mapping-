@@ -94,9 +94,16 @@ function encoderArgs(enc) {
   }
 }
 
+// ffmpeg en marcha: se cierran al salir de LumaMap (si no, retienen archivos de
+// la carpeta de instalación y el instalador no puede actualizar).
+const running = new Set();
+function killAll() { for (const p of running) { try { p.kill("SIGKILL"); } catch {} } running.clear(); }
+
 function run(args, duration, onProgress) {
   return new Promise((resolve, reject) => {
     const p = spawn(ffmpegPath(), args, { windowsHide: true });
+    running.add(p);
+    p.on("exit", () => running.delete(p));
     let err = "", buf = "";
     p.stdout.on("data", (d) => {
       buf += d;
@@ -144,4 +151,4 @@ async function optimize(input, target, outDir, onProgress) {
   throw lastErr || new Error("No se pudo convertir el video");
 }
 
-module.exports = { optimize, probe, decide, parseProbe, ffmpegPath, usableEncoders };
+module.exports = { optimize, probe, decide, parseProbe, ffmpegPath, usableEncoders, killAll };

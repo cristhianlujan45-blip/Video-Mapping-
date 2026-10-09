@@ -27,6 +27,8 @@ import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
 import { ensure3d, handle3dKey, closeWorkspace } from "./panels-3d.js";
 import { TrackingManager } from "./tracking.js";
+import { runAction } from "./rules.js";
+import { whatNow, aiOf } from "./panels-assistant.js";
 import { Remote } from "./remote.js";
 import * as Updater from "./updater.js";
 
@@ -495,7 +497,7 @@ A.randomNext = (id, goNow = false) => {
   let a;
   do a = list[Math.floor(Math.random() * list.length)]; while (list.length > 1 && a.gen === cur.gen && a.color === cur.color);
   const anim = { gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale };
-  // En una superficie de cuerpo (Kinect) cambia la animación de dentro, no la cámara.
+  // En una superficie interactiva (cuerpo) cambia la animación de dentro, no la cámara.
   if (cur.type === "body" && cur.bodyMode !== "persona") A.setNext(id, { source: { ...cur, ...anim } });
   else A.setNext(id, { source: { type: "gen", ...anim }, fx: a.fx || null });
   if (goNow) A.go(id);
@@ -552,6 +554,8 @@ A.goScene = (id, { instant = false } = {}) => {
   S.tr = dur ? { fromId: S.project.sceneId, start: performance.now(), dur, mode } : null;
   S.project.sceneId = id;
   S.sceneStart = S.clock;
+  // La escena puede llevar su efecto de luces (lo usa el plan de show): se aplica al entrar.
+  if (target.lights) { try { runAction(app, { type: "lightfx", fx: target.lights }); } catch (e) { console.warn(e); } }
   changed({ panel: true });
   link.send({ t: "project", project: outProject(), tr: S.tr ? { fromId: S.tr.fromId, elapsed: 0, dur, mode } : null });
   S.dirty = false;
@@ -660,6 +664,8 @@ function buildPerfHud() {
 }
 
 A.setPattern = (p) => { S.pattern = S.pattern === p ? null : p; sendState(true); renderPanel(); };
+/** Muestra (o quita) un patrón en todas las salidas sin alternar: lo usa la alineación de la cámara. */
+A.showPattern = (p) => { S.pattern = p || null; sendState(true); };
 
 /* ======================================================================
    Medios
@@ -929,14 +935,21 @@ A.setResolution = async () => {
   const pick = await dialog({ title: "Resolución de la composición", content, buttons: [{ label: "Cancelar", value: null }], wide: true });
   if (!pick) return;
   const [w, hh] = pick.split("x").map(Number);
-  if (!(w >= 64 && hh >= 64 && w <= 16384 && hh <= 16384)) return toast("Resolución no válida (64 a 16384 px)", "err");
+  A.applyResolution(w, hh);
+};
+/** Cambia la resolución reescalando las superficies (lo usan el diálogo y el asistente). */
+A.applyResolution = (w, hh) => {
+  const P = S.project;
+  if (!(w >= 64 && hh >= 64 && w <= 16384 && hh <= 16384)) { toast("Resolución no válida (64 a 16384 px)", "err"); return "Resolución no válida"; }
   const kx = w / P.width, ky = hh / P.height;
   for (const s of P.surfaces) s.points = s.points.map(p => ({ x: p.x * kx, y: p.y * ky }));
   P.width = w; P.height = hh;
   renderer.meshCache.clear();
   fitView(); changed({ panel: true }); commit();
   const fit = renderer.fitScale(w, hh, 1);
-  toast(fit < 1 ? `Resolución ${w}×${hh} · tu GPU dibuja a ${Math.round(w * fit)}×${Math.round(hh * fit)} como máximo` : `Resolución ${w}×${hh}`);
+  const msg = fit < 1 ? `Resolución ${w}×${hh} · tu GPU dibuja a ${Math.round(w * fit)}×${Math.round(hh * fit)} como máximo` : `Resolución ${w}×${hh}`;
+  toast(msg);
+  return msg;
 };
 
 A.detectFromPhoto = async () => {
@@ -1933,6 +1946,8 @@ A.nudge = nudge; A.cyclePoint = cyclePoint;
 function buildChrome() {
   const set = (act, ic) => { const b = document.querySelector(`[data-act="${act}"]`); if (b) b.innerHTML = icon(ic); };
   set("menu", "menu"); set("undo", "undo"); set("redo", "redo"); set("play", "pause"); set("palette", "wand");
+  const nb = document.querySelector('[data-act="next"]');
+  if (nb) nb.innerHTML = icon("ai") + "<span>¿Qué hago ahora?</span>";
   document.querySelectorAll("#top [data-act]").forEach(b => b.addEventListener("click", () => {
     const a = b.dataset.act;
     if (a === "menu") openTab("menu");
@@ -1942,6 +1957,7 @@ function buildChrome() {
     else if (a === "play") A.togglePlay();
     else if (a === "project") openTab("output");
     else if (a === "palette") openPalette(app);
+    else if (a === "next") whatNow(app);
     else if (a === "record") A.record();
   }));
   buildDock();
@@ -2361,6 +2377,7 @@ function drawOverlay(v, view) {
   }
   const X = (p) => p.x * v.sx + v.tx, Y = (p) => p.y * v.sy + v.ty;
   if (S.tab === "lights" && !S.projecting) drawDmxOverlay(ctx, v, d);
+  if (S.autoMap?.length && !S.projecting) drawAutoMap(ctx, v, d);
   if (S.mode === "draw") {
     const s = surf();
     if (s) {
@@ -2385,6 +2402,19 @@ function drawOverlay(v, view) {
     ctx.lineWidth = 3 * d; ctx.strokeStyle = "#ffd60a"; ctx.stroke();
     if (S.shapeKind === "points") S.draft.forEach((p, i) => { ctx.beginPath(); ctx.arc(X(p), Y(p), (i ? 7 : 11) * d, 0, Math.PI * 2); ctx.fillStyle = i ? "#ffd60a" : "#34c759"; ctx.fill(); });
   }
+}
+
+/** Superficies propuestas por el Auto Map (punteadas) hasta que se aplican o se cancelan. */
+function drawAutoMap(ctx, v, d) {
+  const P = S.project;
+  ctx.save(); ctx.setLineDash([8 * d, 6 * d]); ctx.lineWidth = 2 * d;
+  S.autoMap.forEach((s, i) => {
+    const pts = s.points.map(([x, y]) => [x * P.width * v.sx + v.tx, y * P.height * v.sy + v.ty]);
+    ctx.beginPath(); pts.forEach(([x, y], k) => k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath();
+    ctx.fillStyle = "rgba(0,229,255,.12)"; ctx.fill(); ctx.strokeStyle = "#00e5ff"; ctx.stroke();
+    ctx.fillStyle = "#00e5ff"; ctx.font = `bold ${12 * d}px system-ui`; ctx.fillText(`${i + 1} · ${s.label || "Superficie"}`, pts[0][0] + 4 * d, pts[0][1] + 14 * d);
+  });
+  ctx.restore();
 }
 
 /** Pixel maps y fixtures sobre el escenario: LED con su color actual; el seleccionado con asas. */
@@ -2665,6 +2695,8 @@ async function init() {
   setTimeout(() => A.checkUpdates(true), 5000);
   if ("serviceWorker" in navigator && !native && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
   window.__lumamap = app; // depuración y pruebas
+  // IA opcional: se mira en segundo plano si hay IA local (nunca bloquea ni se repite sola).
+  setTimeout(() => { try { const ai = aiOf(app); if (ai.settings.enabled) ai.refresh().catch(() => {}); } catch {} }, 4000);
 
   // La GPU se reinició (controlador, memoria): se guarda y se recarga; el autoguardado lo restaura.
   $("#gl").addEventListener("webglcontextlost", (e) => {

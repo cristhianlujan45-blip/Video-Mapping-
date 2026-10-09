@@ -193,6 +193,28 @@ await test("asistente: sin clave lo dice claro; una clave falsa no se guarda; la
   assert.equal(r.st1.hasKey, false, "no se guardó");
   assert.deepEqual(r.keys.sort(), ["cancel", "setKey", "status", "step"], "no hay forma de leer la clave desde la página");
 });
+await test("IA local por el proceso principal: habla con Ollama de este equipo; rechaza internet y rutas que no son de Ollama", async () => {
+  const http = await import("node:http");
+  const fake = http.createServer((req, res) => { res.setHeader("content-type", "application/json"); res.end(req.url === "/api/tags" ? JSON.stringify({ models: [{ name: "qwen3:8b" }] }) : JSON.stringify({ version: "0.9.0" })); });
+  await new Promise(r => fake.listen(0, "127.0.0.1", r));
+  const port = fake.address().port;
+  const r = await win.evaluate(async (port) => {
+    const h = window.LumaDesktop.ai.http;
+    return {
+      tags: await h({ url: `http://127.0.0.1:${port}/api/tags` }),
+      internet: await h({ url: "http://8.8.8.8/api/tags" }),
+      path: await h({ url: `http://127.0.0.1:${port}/etc/passwd` }),
+      off: await h({ url: "http://127.0.0.1:9/api/version", timeout: 2000 }),
+    };
+  }, port);
+  fake.close();
+  assert.equal(r.tags.ok, true); assert.equal(JSON.parse(r.tags.text).models[0].name, "qwen3:8b");
+  assert.equal(r.internet.error, "not-local");
+  assert.equal(r.path.error, "bad-path");
+  assert.equal(r.off.ok, false, "Ollama apagado: error controlado, sin colgarse");
+  const hw = await win.evaluate(() => window.LumaDesktop.hardwareProfile());
+  assert.ok(hw.ram > 0 && hw.cores > 0, "perfil de hardware para recomendar el modelo");
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await app.close();

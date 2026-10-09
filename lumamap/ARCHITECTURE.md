@@ -171,15 +171,47 @@ el canal `Link` de siempre.
 - Modo «Proyección»: proyección de textura desde cada proyector con prueba de
   profundidad (sombras) y cara de espaldas; se suman los solapes (zonas de blending).
 
-### Tracking y asistente (`tracking.js`, `tracking-worker.js`, `rules.js`, `assistant.js`)
+### Tracking e interactivo (`tracking.js`, `tracking-worker.js`, `rules.js`, `body.js`, `interactive.js`)
 - Tracking: MediaPipe Pose/Hands en un Web Worker (GPU con respaldo en CPU) sobre
   fotogramas reducidos; IDs estables por persona; señales al motor de parámetros
-  (fuente «tracking»), zonas y reglas que ejecutan acciones de `rules.js`.
-- Asistente: la página lleva la conversación (historial que solo crece) y ejecuta
-  las herramientas con las mismas acciones del editor; `desktop/ai.js` hace cada
-  llamada a la API de Claude desde el proceso principal con la clave cifrada por
-  `safeStorage` (la página no puede leerla). Sin clave: intérprete local de
-  órdenes simples, marcado «sin IA».
+  (fuente «tracking»), zonas y reglas que ejecutan acciones de `rules.js`
+  (incluida «efecto en las luces»).
+- Interactivo: alineación cámara ↔ proyección por homografía (`interactive.js`):
+  los puntos del cuerpo se transforman y las máscaras se dibujan con una malla
+  de triángulos afines. Calibración automática: diferencia blanco − negro
+  proyectados → contorno de 4 lados (`automap.js`). Efectos nuevos con una
+  rejilla de presencia/movimiento; mismo código de canales R/G/B que body.js.
+
+### Luces (`lightfx.js`)
+- 75 efectos como funciones por LED (posición, tiempo, tempo, audio); CPU pura y
+  barata, probada en Node. `dmx.js` los aplica a pixel maps (source «effect») y a
+  focos; las cabezas móviles tienen movimientos de pan/tilt (16 bits).
+- Una escena puede llevar un efecto de luces (`scene.lights`) que se aplica al entrar.
+
+### AI Mapping Assistant (`web/js/ai/`)
+```
+APLICACIÓN ─ CORE · MAPPING · VJ · 3D · LUCES · INTERACTIVO · SHOW
+     │
+AI ENGINE (providers.js) ─ NoAIProvider (reglas, siempre) · LocalAIProvider (Ollama)
+     │                      · RemoteAIProvider (Claude, opcional) · visión (contornos / modelo VL)
+     ├─ ProjectContext (context.js)   estado real y estructurado del proyecto
+     ├─ Project Analyzer (analyzer.js) problemas, HEALTH SCORE, siguiente paso
+     ├─ AI Action System (actions.js)  lista blanca validada · proponer → Aplicar
+     ├─ Base de conocimiento (knowledge.js) búsqueda ligera, solo lo necesario
+     ├─ Intérprete sin IA (commands.js) · Show Director (showplan.js)
+     ├─ Academia (academy.js) 10 niveles que esperan la acción del usuario
+     └─ Hardware (hardware.js) RAM / VRAM / GPU → Qwen3 4B / 8B / 14B
+```
+- La IA nunca ejecuta código ni comandos: devuelve `{action, parameters}` que se
+  validan contra la lista blanca y el usuario aplica. Acciones críticas con
+  confirmación aparte.
+- Todo asíncrono y fuera del bucle de render; si Ollama no existe, no tiene
+  modelo, se queda sin memoria o no responde, el motor vuelve al modo sin IA con
+  un mensaje comprensible.
+- En escritorio, la IA local va por el proceso principal (`ai:http`), limitada a
+  este equipo o la red local y a las rutas de la API de Ollama.
+- Ajustes y privacidad en `localStorage` (de la app, no del proyecto); IA remota,
+  imágenes y envío de datos del proyecto desactivados por defecto.
 
 ### Escritorio
 - `remote-service.mjs`: el mismo `server/index.js` (mando + OSC) en un proceso

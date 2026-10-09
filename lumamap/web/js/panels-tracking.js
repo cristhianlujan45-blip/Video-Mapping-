@@ -8,6 +8,7 @@ import { ACTION_TYPES, describeAction } from "./rules.js";
 import { listCameras, cameraIfReady } from "./sources.js";
 import { catalog } from "./params.js";
 import { uid, ANIM_LIBRARY } from "./model.js";
+import { LIGHT_FX } from "./lightfx.js";
 
 const ui = { drawZone: false };
 
@@ -46,6 +47,9 @@ function actionEditor(app, a, onChange) {
       a.surface = a.surface || "sel"; a.name = a.name || ANIM_LIBRARY[0].name;
       box.append(field("Superficie", selectEl(surfOpts, a.surface, (v) => { a.surface = v; onChange(); })),
         field("Animación", selectEl(ANIM_LIBRARY.map(x => [x.name, `${x.cat} · ${x.name}`]), a.name, (v) => { a.name = v; onChange(); })));
+    } else if (a.type === "lightfx") {
+      a.fx = a.fx || LIGHT_FX[0].id;
+      box.append(field("Efecto de luces", selectEl(LIGHT_FX.map(x => [x.id, `${x.cat} · ${x.name}`]), a.fx, (v) => { a.fx = v; onChange(); })));
     } else if (a.type === "macro") {
       const ms = P.settings.control.macros;
       a.id = a.id || ms[0]?.id || "";

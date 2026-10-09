@@ -7,8 +7,9 @@ import { h, section, row, btn, slider, segmented, toggle, swatches, hint, toast,
 import { FIXTURE_TYPES, CHANNEL_TYPES, TEST_COLORS } from "./dmx.js";
 import { COLOR_ORDERS, channelsPerPixel, splitPortAddress, portAddress } from "./dmxproto.js";
 import { surfaceOutline, bbox } from "./math.js";
+import { LIGHT_FX, LIGHT_FX_CATEGORIES, MOVES, findFx, defaultLightFx, prepareFx } from "./lightfx.js";
 
-const ui = { monUniverse: 1, monPct: false, open: {} };
+const ui = { monUniverse: 1, monPct: false, open: {}, target: "all", cat: LIGHT_FX_CATEGORIES[0] };
 const pct = (v) => Math.round(v * 100) + "%";
 
 function selectEl(options, value, onChange, cls = "text-in") {
@@ -102,9 +103,181 @@ function monitorCanvas(app) {
   return cv;
 }
 
+/* ======================================================================
+   Modo simple: CONECTAR → MIS LUCES → EFECTO → PLAY
+   ====================================================================== */
+const LIGHT_KINDS = [
+  ["strip", "Tira LED", "60 LED en línea"], ["matrix", "Matriz LED", "Pantalla de 16×16"], ["ring", "Aro LED", "24 LED en círculo"],
+  ["bar", "Barra LED", "12 segmentos"], ["par", "Foco PAR", "RGB con dimmer"], ["moving", "Cabeza móvil", "Se mueve sola"],
+];
+
+/** Vista previa animada de un efecto en un lienzo pequeño (una tira de 24 LED). */
+function fxPreview(fx, w = 132, hgt = 14) {
+  const cv = h("canvas", { width: w, height: hgt, class: "lfxprev" });
+  cv._fx = fx;
+  return cv;
+}
+let prevLoop = 0;
+function animatePreviews(root, app) {
+  cancelAnimationFrame(prevLoop);
+  const out = [0, 0, 0];
+  const tick = (t) => {
+    if (!root.isConnected) return;
+    const lv = app.S.levels || {}, bpm = app.S.project.settings.bpm || 120;
+    for (const cv of root.querySelectorAll("canvas.lfxprev")) {
+      const ctx = cv.getContext("2d"), run = prepareFx(cv._fx, t / 1000, lv, bpm), n = 24, cw = cv.width / n;
+      for (let i = 0; i < n; i++) {
+        run(i, n, i / (n - 1), 0.5 + 0.4 * Math.sin(i / n * Math.PI * 2), out);
+        ctx.fillStyle = `rgb(${out[0] | 0},${out[1] | 0},${out[2] | 0})`;
+        ctx.fillRect(i * cw + 0.5, 1, cw - 1, cv.height - 2);
+      }
+    }
+    prevLoop = requestAnimationFrame(tick);
+  };
+  prevLoop = requestAnimationFrame(tick);
+}
+
+function simpleLights(app) {
+  const S = app.S, D = app.dmx, c = D.cfg;
+  const set = (fn, panel = true) => { fn(); app.changed({ panel }); app.commitSoon(); };
+  D.monitoring = true;
+  const wrap = h("div", { class: "lights simple" });
+  const net = c.universes.filter(u => u.protocol !== "virtual" && u.enabled !== false);
+  const online = D.service.nodes.filter(n => n.online);
+
+  // ---- PLAY ----
+  wrap.append(h("div", { class: "lightbar" },
+    btn({ label: c.enabled ? "■ DETENER LUCES" : "▶ PLAY LUCES", kind: c.enabled ? "danger wide" : "primary wide", onClick: () => set(() => { c.enabled = !c.enabled; if (c.enabled) D.connect(); }) }),
+    btn({ label: "Apagón", ic: "blackout", kind: D.blackout ? "on" : "", onClick: () => { D.blackout = !D.blackout; app.renderPanel(); } })),
+    slider({ label: "Brillo de todas las luces", min: 0, max: 1, value: c.master, def: 1, fmt: pct, onInput: (v) => { c.master = v; app.paramTouched?.("dmx/master"); }, param: "dmx/master" }));
+  // Estado claro: nunca se aparenta una conexión que no existe.
+  const state = !D.desktop ? ["warn", "Modo práctica: las luces se ven en el escenario. Para encender luces reales usa la app de Windows."]
+    : !net.length ? ["warn", "Modo práctica: aún no hay ninguna red de luces conectada (paso 1)."]
+    : !c.enabled ? ["", `Listo para enviar a ${net.length} universo(s). Pulsa PLAY.`]
+    : D.port && D.service.ready ? ["ok", `Enviando luces · ${net.map(u => u.dest === "unicast" ? u.ip : "toda la red").filter((v, i, a) => a.indexOf(v) === i).join(", ")}`]
+    : ["warn", "Arrancando el servicio de luces…"];
+  wrap.append(h("p", { class: `lstate ${state[0]}` }, h("i"), state[1]));
+
+  // ---- 1 · Conectar ----
+  const conn = section("1 · Conectar");
+  if (!D.desktop) conn.append(hint("En el navegador se prepara todo en modo práctica. En la app de Windows: conecta el nodo Art-Net (o el controlador LED) por cable de red y pulsa «Buscar mis luces»."));
+  else {
+    const ifs = D.service.interfaces.filter(i => !i.internal);
+    if (!c.iface && ifs.length === 1) c.iface = ifs[0].address;   // una sola red: se elige sola
+    conn.append(
+      row(btn({ label: "Buscar mis luces", ic: "target", kind: "primary", onClick: () => { D.connect(); D.refreshInterfaces?.(); D.discover(); toast("Buscando nodos de luces en la red…"); setTimeout(() => app.renderPanel(), 1600); } }),
+        ifs.length > 1 ? selectEl([["", "Red: elegir…"], ...ifs.map(i => [i.address, `${i.name} · ${i.address}`])], c.iface, (v) => set(() => { c.iface = v; }), "text-in small") : null));
+    const nodes = h("div", { class: "devlist" });
+    for (const n of online) nodes.append(h("div", { class: "dev connected" }, h("i"), h("b", {}, n.shortName || n.longName || "Nodo"), h("small", {}, ` · ${n.ip} · ${n.outputs.length || 1} salida(s)`),
+      btn({ label: net.some(u => u.ip === n.ip) ? "Conectado ✓" : "Conectar", kind: "small primary", onClick: () => set(() => { useNode(c, n); D.ensureUniverses(); toast(`Luces conectadas a ${n.shortName || n.ip}`); }) })));
+    if (!online.length) nodes.append(hint("Si tu nodo no aparece (algunos solo usan sACN o no responden a la búsqueda), usa «Enviar a toda la red»."));
+    conn.append(nodes,
+      row(btn({ label: "Enviar a toda la red (Art-Net)", kind: "small", onClick: () => set(() => { for (const u of c.universes) Object.assign(u, { protocol: "artnet", dest: "broadcast" }); if (!c.universes.length) c.universes.push({ num: 1, name: "", protocol: "artnet", dest: "broadcast", ip: "", enabled: true, delayMs: 0, priority: 100, portAddress: 0, sacnUniverse: 1 }); D.ensureUniverses(); toast("Las luces se enviarán a toda la red"); }) }),
+        btn({ label: "sACN", kind: "small", onClick: () => set(() => { for (const u of c.universes) Object.assign(u, { protocol: "sacn", dest: "broadcast" }); toast("Universos en sACN (multicast)"); }) }),
+        net.length ? btn({ label: "Volver a modo práctica", kind: "small", onClick: () => set(() => { for (const u of c.universes) u.protocol = "virtual"; }) }) : null));
+  }
+  wrap.append(conn);
+
+  // ---- 2 · Mis luces ----
+  const mine = section("2 · Mis luces");
+  mine.append(h("div", { class: "tiles lkinds" }, ...LIGHT_KINDS.map(([k, label, sub]) => h("button", { class: "tile", onclick: async () => {
+    let opts = {};
+    if (k === "strip" || k === "ring" || k === "bar") {
+      const v = await promptNum(`¿Cuántos LED tiene? (${label})`, k === "strip" ? 60 : k === "ring" ? 24 : 12);
+      if (!v) return; opts = { count: v };
+    }
+    const L = D.addLight(k, opts);
+    ui.target = L.id; S.dmxSel = L.id;
+    app.changed({ panel: true }); app.commit();
+    toast(`${L.name} añadida · arrástrala en el escenario para elegir dónde está`);
+  } }, h("b", {}, "+ " + label), h("small", {}, sub)))));
+  const lights = D.lights();
+  const list = h("div", { class: "list" });
+  for (const L of lights) {
+    const isPm = c.pixelMaps.includes(L);
+    const what = L.source === "effect" ? (findFx(L.fx?.id)?.name || "efecto") : L.source === "video" ? "video de la proyección" : L.source === "color" ? "color fijo" : "manual";
+    list.append(h("div", { class: `item ${ui.target === L.id ? "on" : ""}`, onclick: (e) => { if (e.target.closest("button")) return; ui.target = ui.target === L.id ? "all" : L.id; S.dmxSel = isPm ? L.id : S.dmxSel; app.renderPanel(); } },
+      h("span", {}, L.name, h("small", {}, ` · ${isPm ? D.patchOf(L).pos.length + " LED" : "foco"} · ${what}`)),
+      btn({ ic: L.enabled === false ? "eyeoff" : "eye", kind: "icon", title: "Encender / apagar esta luz", onClick: () => set(() => { L.enabled = L.enabled === false; }) }),
+      btn({ ic: "trash", kind: "icon", title: "Quitar", onClick: () => set(() => { const arr = isPm ? c.pixelMaps : c.fixtures; arr.splice(arr.indexOf(L), 1); if (ui.target === L.id) ui.target = "all"; }) })));
+  }
+  if (!lights.length) list.append(hint("Añade tus luces con los botones de arriba. Cada una ocupa sus canales DMX sola (sin calcular direcciones)."));
+  mine.append(list);
+  wrap.append(mine);
+
+  // ---- 3 · Efectos ----
+  const targets = ui.target === "all" ? lights : lights.filter(L => L.id === ui.target);
+  if (ui.target !== "all" && !targets.length) ui.target = "all";
+  const cur = targets.find(L => L.source === "effect")?.fx || defaultLightFx();
+  const apply = (patch) => set(() => {
+    for (const L of (ui.target === "all" ? D.lights() : targets)) {
+      if (patch.source === "video") { L.source = "video"; continue; }
+      L.source = "effect";
+      L.fx = { ...(L.fx || defaultLightFx()), ...patch };
+    }
+  });
+  const eff = section("3 · Efectos de luz");
+  eff.append(field("Aplicar a", segmented({ small: true, value: ui.target === "all" ? "all" : "one", options: [["all", "Todas las luces"], ["one", ui.target === "all" ? "Toca una luz en la lista" : (targets[0]?.name || "Luz")]],
+    onChange: (v) => { if (v === "all") { ui.target = "all"; app.renderPanel(); } } })));
+  eff.append(h("div", { class: "chips" },
+    h("button", { class: `chip ${targets.length && targets.every(L => L.source === "video") ? "on" : ""}`, onclick: () => apply({ source: "video" }) }, "🎬 Video de la proyección"),
+    ...LIGHT_FX_CATEGORIES.map(k => h("button", { class: `chip ${ui.cat === k ? "on" : ""}`, onclick: () => { ui.cat = k; app.renderPanel(); } }, k))));
+  const grid = h("div", { class: "lfxgrid" });
+  for (const f of LIGHT_FX.filter(x => x.cat === ui.cat)) {
+    const on = targets.length && targets.every(L => L.source === "effect" && L.fx?.id === f.id);
+    grid.append(h("button", { class: `lfx ${on ? "on" : ""}`, title: f.name, onclick: () => apply({ id: f.id, color: f.color, color2: f.color2, speed: f.speed, size: f.size, music: f.music }) },
+      fxPreview({ id: f.id, color: f.color, color2: f.color2, speed: f.speed, size: f.size }), h("span", {}, f.name)));
+  }
+  eff.append(grid);
+  if (targets.some(L => L.source === "effect")) {
+    eff.append(
+      row(swatches({ label: "Color 1", value: cur.color, onChange: (v) => apply({ color: v }) })),
+      row(swatches({ label: "Color 2", value: cur.color2, onChange: (v) => apply({ color2: v }) })),
+      slider({ label: "Velocidad", min: 0.05, max: 5, value: cur.speed ?? 1, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => { for (const L of (ui.target === "all" ? D.lights() : targets)) if (L.fx) L.fx.speed = v; app.commitSoon(); } }),
+      slider({ label: "Tamaño", min: 0.1, max: 4, value: cur.size ?? 1, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => { for (const L of (ui.target === "all" ? D.lights() : targets)) if (L.fx) L.fx.size = v; app.commitSoon(); } }),
+      toggle({ label: "Al ritmo de la música", hint: "Usa el micrófono o el audio (pestaña Audio)", value: !!cur.music, onChange: (v) => apply({ music: v }) }));
+  }
+  // Movimiento de las cabezas móviles.
+  const heads = c.fixtures.filter(f => f.channels.some(ch => ch.type === "pan" || ch.type === "tilt"));
+  if (heads.length) {
+    const mv = heads[0].move || { kind: "none", speed: 1, size: 0.5 };
+    eff.append(h("h4", { class: "res-group" }, "Movimiento de las cabezas móviles"),
+      h("div", { class: "chips" }, ...MOVES.map(([k, label]) => h("button", { class: `chip ${mv.kind === k ? "on" : ""}`, onclick: () => set(() => { for (const f of heads) f.move = { ...(f.move || { speed: 1, size: 0.5 }), kind: k }; }) }, label))),
+      slider({ label: "Velocidad del movimiento", min: 0.05, max: 4, value: mv.speed ?? 1, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => { for (const f of heads) f.move = { ...(f.move || { kind: "circle" }), speed: v }; app.commitSoon(); } }),
+      slider({ label: "Amplitud", min: 0, max: 1, value: mv.size ?? 0.5, def: 0.5, fmt: pct, onInput: (v) => { for (const f of heads) f.move = { ...(f.move || { kind: "circle" }), size: v }; app.commitSoon(); } }));
+  }
+  wrap.append(eff);
+
+  wrap.append(section("", btn({ label: "Opciones avanzadas (universos, fixtures, monitor, diagnóstico…)", ic: "knob", kind: "block", onClick: () => { app.setPro(true); app.renderPanel(); } })));
+  animatePreviews(wrap, app);
+  D.onUpdate = (t) => { if (S.tab === "lights" && (t === "nodes" || t === "ready") && !document.activeElement?.closest?.("#panelBody")) app.renderPanel(); };
+  return wrap;
+}
+
+/** Usar un nodo detectado: un universo por cada salida del nodo, enviado solo a su IP. */
+function useNode(c, n) {
+  let next = Math.max(0, ...c.universes.map(u => u.num)) + 1;
+  const outs = n.outputs.length ? n.outputs : [0];
+  outs.forEach((pa, k) => {
+    const ex = c.universes.find(u => u.portAddress === pa && u.protocol !== "sacn") || (k === 0 ? c.universes.find(u => u.protocol === "virtual") : null);
+    if (ex) Object.assign(ex, { protocol: "artnet", dest: "unicast", ip: n.ip, portAddress: pa });
+    else c.universes.push({ num: next++, name: n.shortName, protocol: "artnet", portAddress: pa, sacnUniverse: pa + 1, dest: "unicast", ip: n.ip, enabled: true, delayMs: 0, priority: 100 });
+  });
+  // Los universos que siguen virtuales (luces añadidas antes) también van a este nodo.
+  for (const u of c.universes) if (u.protocol === "virtual") Object.assign(u, { protocol: "artnet", dest: "unicast", ip: n.ip });
+  c.universes.sort((a, b) => a.num - b.num);
+}
+
+async function promptNum(title, def) {
+  const v = await prompt(title, String(def));
+  const n = Math.round(+v);
+  return n > 0 && n <= 20000 ? n : null;
+}
+
 const lights = {
-  title: () => "Luces · DMX, Art-Net, sACN",
+  title: (app) => app?.S?.pro ? "Luces · DMX, Art-Net, sACN" : "Luces",
   render(app) {
+    if (!app.S.pro) return simpleLights(app);
     const S = app.S, D = app.dmx, c = D.cfg;
     const set = (fn, panel = true) => { fn(); app.changed({ panel }); app.commitSoon(); };
     D.monitoring = true;
@@ -166,7 +339,8 @@ const lights = {
       maps.append(h("div", { class: "pmedit" },
         field("Nombre", Object.assign(h("input", { class: "text-in", value: pm.name }), { onchange: (e) => set(() => { pm.name = e.target.value; }) })),
         // 3 · Video → luces
-        field("3 · Contenido de las luces", segmented({ options: [["video", "Video → luces"], ["color", "Color fijo"], ["off", "Apagado"]], value: pm.source, onChange: (v) => set(() => { pm.source = v; }) })),
+        field("3 · Contenido de las luces", segmented({ options: [["video", "Video → luces"], ["effect", "Efecto"], ["color", "Color fijo"], ["off", "Apagado"]], value: pm.source, onChange: (v) => set(() => { pm.source = v; if (v === "effect" && !pm.fx) pm.fx = defaultLightFx(); }) })),
+        pm.source === "effect" ? field("Efecto", selectEl(LIGHT_FX.map(f => [f.id, `${f.cat} · ${f.name}`]), pm.fx?.id, (v) => set(() => { const f = findFx(v); pm.fx = { ...(pm.fx || {}), id: v, color: f.color, color2: f.color2, speed: f.speed, size: f.size }; }))) : null,
         pm.source === "color" ? swatches({ value: pm.color, onChange: upd("color") }) : null,
         pm.source === "video" ? h("div", {},
           field("Muestreo", segmented({ options: [["average", "Área de cada LED"], ["point", "Centro"], ["avg", "Color medio"]], small: true, value: pm.average ? "avg" : pm.sampling,
@@ -209,7 +383,9 @@ const lights = {
           btn({ ic: "trash", kind: "icon", title: "Eliminar", onClick: () => set(() => { c.fixtures.splice(c.fixtures.indexOf(f), 1); }) })),
         row(field("Universo", num(f.universe, (v) => set(() => { f.universe = v; D.ensureUniverses(); }), { min: 1, max: 32768 })),
           field("Dirección", num(f.address, (v) => set(() => { f.address = v; D.ensureUniverses(); }), { min: 1, max: 512 })),
-          field("Color", selectEl([["video", "Del video (posición)"], ["manual", "Manual / MIDI"]], f.source, (v) => set(() => { f.source = v; })))),
+          field("Color", selectEl([["video", "Del video (posición)"], ["effect", "Efecto"], ["manual", "Manual / MIDI"]], f.source, (v) => set(() => { f.source = v; if (v === "effect" && !f.fx) f.fx = defaultLightFx(); })))),
+        f.source === "effect" ? field("Efecto", selectEl(LIGHT_FX.map(x => [x.id, `${x.cat} · ${x.name}`]), f.fx?.id, (v) => set(() => { const x = findFx(v); f.fx = { ...(f.fx || {}), id: v, color: x.color, color2: x.color2, speed: x.speed, size: x.size }; }))) : null,
+        f.channels.some(ch => ch.type === "pan" || ch.type === "tilt") ? field("Movimiento", selectEl(MOVES, f.move?.kind || "none", (v) => set(() => { f.move = { speed: 1, size: 0.5, ...(f.move || {}), kind: v }; }))) : null,
         ...f.channels.map((ch, i) => h("div", { class: "fixch" },
           selectEl(CHANNEL_TYPES, ch.type, (v) => set(() => { ch.type = v; ch.name = CHANNEL_TYPES.find(x => x[0] === v)[1]; }), "text-in small"),
           slider({ label: `${f.address + i} · ${ch.name || ch.type}`, min: 0, max: 255, step: 1, value: f.values[i] ?? (ch.type === "dimmer" ? 255 : ch.type === "pan" || ch.type === "tilt" ? 128 : 0), fmt: (v) => String(Math.round(v)),
@@ -323,4 +499,5 @@ function saveUserFixtures() {
 try { Object.assign(FIXTURE_TYPES, JSON.parse(localStorage.getItem("lumamap:fixtures") || "{}")); } catch {}
 
 export const DMX_PANELS = { lights };
-export const DMX_TABS = [{ id: "lights", label: "Luces", ic: "light", pro: true }];
+// Visible también en el modo simple (con su vista fácil); el modo profesional muestra todo.
+export const DMX_TABS = [{ id: "lights", label: "Luces", ic: "light" }];

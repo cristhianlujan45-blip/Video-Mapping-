@@ -4,10 +4,11 @@
 // ejecutar una macro. Todas pasan por el editor (con guardado y deshacer).
 import { describe } from "./params.js";
 import { lookOf, currentScene, ANIM_LIBRARY, GENERATORS } from "./model.js";
+import { findFx, defaultLightFx } from "./lightfx.js";
 
 export const ACTION_TYPES = [
   ["param", "Mover un parámetro"], ["color", "Cambiar el color"], ["scene", "Ir a una escena"],
-  ["anim", "Poner una animación"], ["macro", "Ejecutar una macro"], ["go", "GO (siguiente cue)"], ["blackout", "Apagón"],
+  ["anim", "Poner una animación"], ["lightfx", "Efecto en las luces"], ["macro", "Ejecutar una macro"], ["go", "GO (siguiente cue)"], ["blackout", "Apagón"],
 ];
 
 /** Superficies a las que afecta una acción: "all", "sel" o un id. */
@@ -65,6 +66,15 @@ export function runAction(app, a) {
       app.changed({ panel: true }); app.commitSoon();
       return "Animación: " + (item?.name || gen);
     }
+    case "lightfx": {
+      // Todas las luces (tiras, matrices, focos) pasan a ese efecto de la biblioteca.
+      const f = findFx(a.fx);
+      if (!f) throw new Error("No existe el efecto de luces: " + a.fx);
+      const lights = app.dmx?.lights() || [];
+      for (const L of lights) { L.source = "effect"; L.fx = defaultLightFx(f.id); }
+      app.changed({ panel: true }); app.commitSoon();
+      return `Luces: ${f.name} (${lights.length})`;
+    }
     case "macro": {
       const m = P.settings.control.macros.find(x => x.id === a.id || x.name === a.id);
       if (!m) throw new Error("No existe la macro: " + a.id);
@@ -85,6 +95,7 @@ export function describeAction(app, a) {
     case "color": return `Color ${a.color} (${a.surface === "all" ? "todas" : a.surface === "sel" ? "seleccionada" : app.surf?.(a.surface)?.name || "superficie"})`;
     case "scene": return a.index === "next" ? "Escena siguiente" : `Escena ${Number(a.index) + 1}`;
     case "anim": return "Animación " + (a.name || a.gen);
+    case "lightfx": return "Luces: " + (findFx(a.fx)?.name || a.fx);
     case "macro": return "Macro " + (app.S.project.settings.control.macros.find(m => m.id === a.id)?.name || a.id);
     case "go": return "GO";
     case "blackout": return a.value ? "Apagón" : "Quitar apagón";

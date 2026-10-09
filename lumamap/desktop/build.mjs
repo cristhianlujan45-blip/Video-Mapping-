@@ -68,7 +68,7 @@ if (process.argv[2] === "installer") {
         oneClick: false,
         perMachine: false,
         allowToChangeInstallationDirectory: true,
-        createDesktopShortcut: true,
+        createDesktopShortcut: "always",   // también al actualizar o reparar
         createStartMenuShortcut: true,
         shortcutName: "LumaMap",
         runAfterFinish: true,

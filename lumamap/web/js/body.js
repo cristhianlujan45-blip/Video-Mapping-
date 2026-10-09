@@ -1,5 +1,5 @@
 // web/js/body.js
-// Cuerpo en animación (como un Kinect, con la cámara del móvil o del PC):
+// Cuerpo en animación / proyección interactiva (con cualquier cámara o sensor):
 // detecta la silueta de las personas con IA (MediaPipe «Selfie Segmenter»,
 // incluido en la app: funciona sin internet) y la convierte en una máscara
 // animada: silueta rellena con una animación, contorno de neón, estela de
@@ -7,12 +7,16 @@
 // fondo. Si la IA no puede cargar, se usa la detección de movimiento
 // (diferencia entre fotogramas), que funciona en cualquier equipo.
 
+import { NEW_MODES, NEW_MODE_IDS, InteractiveFX, drawAligned, camToProj, calibOf } from "./interactive.js";
+
 export const BODY_MODES = [
   ["silueta", "Silueta animada"], ["contorno", "Contorno neón"], ["estela", "Estela de movimiento"],
   ["sombra", "Sombra (animación alrededor)"], ["persona", "Persona sin fondo"], ["movimiento", "Solo movimiento"],
   ["esqueleto", "Esqueleto"], ["particulas", "Partículas (brazos y pies)"], ["fuego", "Fuego"], ["humo", "Humo"],
-  ["lineas", "Líneas entre personas"], ["geometria", "Geometría"],
+  ["lineas", "Líneas entre personas"], ["geometria", "Geometría"], ...NEW_MODES,
 ];
+/** Alineación cámara ↔ proyección del proyecto abierto (o null). */
+const calib = () => { const P = globalThis.__lumaApp?.S.project; return P ? calibOf(P) : null; };
 /** Modos que usan el tracking de pose (cuerpo y articulaciones) en lugar de la silueta. */
 export const POSE_MODES = new Set(["esqueleto", "particulas", "fuego", "humo", "lineas", "geometria"]);
 const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28], [27, 31], [28, 32], [0, 11], [0, 12]];
@@ -148,6 +152,7 @@ export class BodyFX {
   render(video, src, cam = "default") {
     const mode = src.bodyMode || "silueta";
     if (POSE_MODES.has(mode)) return this.renderPose(video, src, cam, mode);
+    if (NEW_MODE_IDS.has(mode)) return this.renderInteractive(video, src, cam, mode);
     const T = bodyTracker(cam);
     T.sens = src.bodySens ?? 0.5;
     T.update(video, mode !== "movimiento");
@@ -156,13 +161,9 @@ export class BodyFX {
 
     const W = 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
     for (const c of [this.out, this.trail, this.tmp, this.m]) if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-    const mirror = !!src.bodyMirror;
-    const place = (ctx, img) => {
-      ctx.save();
-      if (mirror) { ctx.translate(W, 0); ctx.scale(-1, 1); }
-      ctx.drawImage(img, 0, 0, W, H);
-      ctx.restore();
-    };
+    const mirror = !!src.bodyMirror, cal = calib();
+    // Con la alineación activa la cámara se lleva al lugar exacto de la proyección.
+    const place = (ctx, img) => drawAligned(ctx, img, cal, W, H, mirror);
     // Máscara suavizada a la medida de salida.
     const mk = this.m.getContext("2d");
     mk.clearRect(0, 0, W, H);
@@ -257,8 +258,12 @@ BodyFX.prototype.renderPose = function (video, src, cam, mode) {
   this.lastPose = now;
   const people = TR.people(cam).filter(p => p.lm && !p.ghost);
   const trackMirror = !!globalThis.__lumaApp?.S.project.settings.tracking.mirror;
+  const toProj = camToProj(calib());
   const flip = (x) => { const raw = trackMirror ? 1 - x : x; return (src.bodyMirror ? 1 - raw : raw) * W; };
-  const P = (p, i) => [flip(p.lm[i][0]), p.lm[i][1] * H, p.lm[i][3] ?? 1];
+  // Con alineación: coordenadas de la cámara (sin espejo) → lugar exacto de la proyección.
+  const P = toProj
+    ? (p, i) => { const [x, y] = toProj(trackMirror ? 1 - p.lm[i][0] : p.lm[i][0], p.lm[i][1]); return [x * W, y * H, p.lm[i][3] ?? 1]; }
+    : (p, i) => [flip(p.lm[i][0]), p.lm[i][1] * H, p.lm[i][3] ?? 1];
   const out = this.out.getContext("2d");
   out.globalCompositeOperation = "source-over";
   out.fillStyle = "#000"; out.fillRect(0, 0, W, H);
@@ -345,6 +350,24 @@ BodyFX.prototype.renderPose = function (video, src, cam, mode) {
     out.globalCompositeOperation = "lighter"; out.drawImage(this.trail, 0, 0);
   }
   out.globalCompositeOperation = "source-over";
+  this.version++;
+  return this;
+};
+
+/** Efectos interactivos nuevos (ondas, pintar, burbujas…): máscara alineada → simulación. */
+BodyFX.prototype.renderInteractive = function (video, src, cam, mode) {
+  const T = bodyTracker(cam);
+  T.sens = src.bodySens ?? 0.5;
+  T.update(video, true);
+  const W = 480, H = Math.max(120, Math.round(W * (video.videoHeight || 9) / (video.videoWidth || 16)));
+  for (const c of [this.out, this.m]) if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  const mk = this.m.getContext("2d");
+  mk.clearRect(0, 0, W, H);
+  drawAligned(mk, T.source(false), calib(), W, H, !!src.bodyMirror);
+  const now = performance.now(), dt = Math.min(0.1, (now - (this.lastI || now)) / 1000);
+  this.lastI = now;
+  if (!this.ifx) this.ifx = new InteractiveFX();
+  this.ifx.render(this.out, this.m, mode, W, H, dt, src.bodySens ?? 0.5);
   this.version++;
   return this;
 };

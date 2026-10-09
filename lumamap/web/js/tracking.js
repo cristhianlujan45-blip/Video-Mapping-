@@ -1,8 +1,8 @@
 // web/js/tracking.js
-// Tracking de personas con proveedores intercambiables (Kinect no es obligatorio):
+// Tracking de personas con proveedores intercambiables (cualquier cámara sirve):
 //   · «webcam»: cualquier cámara + IA (MediaPipe Pose y Hands) en un hilo aparte.
 //   · «motion»: solo movimiento (sin IA), funciona en cualquier equipo.
-//   · Kinect, Azure Kinect, cámaras de profundidad e IP: se muestran como
+//   · Sensores de profundidad 3D y cámaras IP: se muestran como
 //     «EN DESARROLLO» (no se simulan).
 // Cada persona tiene un id estable, 33 puntos del cuerpo, manos, cabeza, pies,
 // posición, velocidad y confianza. Las señales (personas, mano levantada,
@@ -16,9 +16,7 @@ export const PROVIDERS = [
   { id: "webcam", name: "Cámara + IA (cuerpo y manos)", available: true },
   { id: "motion", name: "Cámara: solo movimiento (sin IA)", available: true },
   { id: "ipcam", name: "Cámara IP / RTSP / NDI", available: false, note: "EN DESARROLLO: llegará con el video por red" },
-  { id: "kinect", name: "Kinect v2", available: false, note: "EN DESARROLLO: necesita el SDK de Kinect para Windows" },
-  { id: "azure", name: "Azure Kinect", available: false, note: "EN DESARROLLO: necesita el SDK de Azure Kinect" },
-  { id: "depth", name: "Cámara de profundidad (RealSense, Orbbec…)", available: false, note: "EN DESARROLLO: hoy funciona como cámara de color con «Cámara + IA»" },
+  { id: "depth", name: "Sensor de profundidad 3D (infrarrojos)", available: false, note: "EN DESARROLLO: hoy cualquier sensor que dé imagen de color funciona como cámara con «Cámara + IA»" },
 ];
 export const QUALITIES = { low: 256, medium: 384, high: 512, ultra: 640 };
 export const J = { nose: 0, lShoulder: 11, rShoulder: 12, lElbow: 13, rElbow: 14, lWrist: 15, rWrist: 16, lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnkle: 27, rAnkle: 28, lFoot: 31, rFoot: 32 };

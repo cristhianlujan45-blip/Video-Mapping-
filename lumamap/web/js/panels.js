@@ -17,6 +17,7 @@ import { SHOW_PANELS, SHOW_TABS } from "./panels-show.js";
 import { PANELS_3D, TABS_3D } from "./panels-3d.js";
 import { TRACKING_PANELS, TRACKING_TABS } from "./panels-tracking.js";
 import { ASSISTANT_PANELS, ASSISTANT_TABS } from "./panels-assistant.js";
+import { INTERACTIVE_PANELS, INTERACTIVE_TABS } from "./panels-interactive.js";
 import { FX_RANGE } from "./params.js";
 import { TRANSITIONS } from "./compose.js";
 
@@ -33,7 +34,8 @@ export const TABS = [
   { id: "layers", label: "Capas", ic: "layers" },
   { id: "scenes", label: "Escenas", ic: "scenes" },
   { id: "audio", label: "Audio", ic: "audio" },
-  ...SHOW_TABS, ...TABS_3D, ...TRACKING_TABS, ...ASSISTANT_TABS, PRO_TABS[0], ...DMX_TABS, ...PRO_TABS.slice(1),
+  ...INTERACTIVE_TABS, ...DMX_TABS,
+  ...SHOW_TABS, ...TABS_3D, ...TRACKING_TABS, ...ASSISTANT_TABS, ...PRO_TABS,
 ];
 
 const pct = (v) => Math.round(v * 100) + "%";
@@ -67,7 +69,7 @@ const add = {
           { id: "draw", label: "Dibujar", ic: "pen" },
           { id: "text", label: "Texto", ic: "text" },
           { id: "camera", label: "Cámara", ic: "camera" },
-          { id: "body", label: "Cuerpo (Kinect)", ic: "body" },
+          { id: "body", label: "Interactivo (cámara)", ic: "body" },
         ], { onPick: async (id) => {
           if (id === "media") return A.importMedia("new");
           if (id === "draw") return app.openTab("draw");
@@ -225,7 +227,7 @@ function sourceThumb(app, src, fx) {
     const m = app.S.project.media.find(x => x.id === src.mediaId);
     return { img: m?.thumb || "", label: m?.name || "Video / foto" };
   }
-  const names = { text: "Texto: " + (src.text || "").slice(0, 16), camera: "Cámara en vivo", body: "Cuerpo (cámara)", drawing: "Dibujo", color: "Color", none: "Solo borde" };
+  const names = { text: "Texto: " + (src.text || "").slice(0, 16), camera: "Cámara en vivo", body: "Interactivo (cámara)", drawing: "Dibujo", color: "Color", none: "Solo borde" };
   return { img: "", label: names[src.type] || src.type };
 }
 
@@ -239,7 +241,7 @@ function pickNext(app, id) {
     media.length ? section("Tus videos, fotos y GIF",
       tiles(media.map(m => ({ id: m.id, label: m.name, img: m.thumb })), { cols: 4, onPick: (mid) => done({ source: { type: "media", mediaId: mid }, fit: "cover" }) })) : null,
     section("En vivo",
-      tiles([{ id: "camera", label: "Cámara", ic: "camera" }, { id: "body", label: "Cuerpo en animación", ic: "body" }], { cols: 4, onPick: (t) => done({ source: { type: t } }) })),
+      tiles([{ id: "camera", label: "Cámara", ic: "camera" }, { id: "body", label: "Interactivo", ic: "body" }], { cols: 4, onPick: (t) => done({ source: { type: t } }) })),
     animCatalog(app, (a) => done({ source: { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale }, fx: a.fx || null })));
   dialog({ title: "Siguiente para «" + (app.S.project.surfaces.find(x => x.id === id)?.name || "") + "»", content, wide: true, buttons: [] });
 }
@@ -354,7 +356,7 @@ const SOURCE_TYPES = [
   { id: "text", label: "Texto", ic: "text" },
   { id: "drawing", label: "Dibujo", ic: "pen" },
   { id: "camera", label: "Cámara", ic: "camera" },
-  { id: "body", label: "Cuerpo (Kinect)", ic: "body" },
+  { id: "body", label: "Interactivo (cámara)", ic: "body" },
   { id: "none", label: "Solo borde", ic: "shape" },
 ];
 
@@ -459,8 +461,9 @@ const content = {
       const st = tracker.status;
       tracker.onStatus = () => { if (app.S.tab === "content") app.renderPanel(); };
       const stTxt = { off: "Esperando la cámara…", loading: "Cargando la IA de detección de personas…", ai: "IA activa: detecta la silueta de las personas.", motion: "Sin IA en este equipo: detecta lo que se mueve.", error: "No se pudo iniciar la detección." }[st] || "";
-      wrap.append(section("Cuerpo en animación (como Kinect)",
-        hint("Apunta una cámara a la persona o al artista: su silueta se convierte en animación en tiempo real. " + stTxt),
+      wrap.append(section("Proyección interactiva (cámara o sensor)",
+        hint("Apunta una cámara a la zona proyectada: las personas que estén delante hacen reaccionar la proyección. " + stTxt),
+        btn({ label: "Alinear la cámara con la proyección", ic: "target", kind: "block", onClick: () => app.openTab("interactive") }),
         segmented({ options: BODY_MODES, value: src.bodyMode || "silueta", cols: 2, onChange: (v) => app.edit(() => { src.bodyMode = v; }) }),
         slider({ label: "Contorno de neón", min: 0, max: 1, value: src.bodyGlow ?? 0, def: 0, fmt: pct, onInput: (v) => app.edit(() => { src.bodyGlow = v; }) }),
         slider({ label: "Estela de movimiento", min: 0, max: 1, value: src.bodyTrail ?? 0, def: 0, fmt: pct, onInput: (v) => app.edit(() => { src.bodyTrail = v; }) }),
@@ -971,4 +974,4 @@ export function showHelp(app) {
   return dialog({ title: "Ayuda", content: c, wide: true });
 }
 
-export const PANELS = { add, anim, live, draw, content, fx, shape, layers, scenes, audio, output, menu, ...PRO_PANELS, ...DMX_PANELS, ...SHOW_PANELS, ...PANELS_3D, ...TRACKING_PANELS, ...ASSISTANT_PANELS };
+export const PANELS = { add, anim, live, draw, content, fx, shape, layers, scenes, audio, output, menu, ...PRO_PANELS, ...DMX_PANELS, ...SHOW_PANELS, ...PANELS_3D, ...TRACKING_PANELS, ...ASSISTANT_PANELS, ...INTERACTIVE_PANELS };

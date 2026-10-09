@@ -48,5 +48,7 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
     setKey: (key) => ipcRenderer.invoke("ai:setKey", key),
     step: (req) => ipcRenderer.invoke("ai:step", req),
     cancel: () => ipcRenderer.invoke("ai:cancel"),
+    /** IA local (Ollama): solo este equipo o la red local. */
+    http: (req) => ipcRenderer.invoke("ai:http", req),
   },
 });
