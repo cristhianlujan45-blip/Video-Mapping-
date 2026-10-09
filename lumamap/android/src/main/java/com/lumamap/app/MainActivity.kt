@@ -14,6 +14,8 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.Display
+import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.ConsoleMessage
@@ -193,6 +195,20 @@ class MainActivity : ComponentActivity() {
         root.addView(w, 0, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         web = w
         w.loadUrl("https://appassets.androidplatform.net/index.html")
+    }
+
+    /**
+     * Mandos de juego (Xbox, PlayStation…): Android convierte el botón B (o ○) en «Atrás»
+     * y cerraría paneles o la app. Los botones del mando van siempre a la página, que los
+     * lee con la Gamepad API y los usa según lo asignado.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val fromPad = event.isFromSource(InputDevice.SOURCE_GAMEPAD) || event.isFromSource(InputDevice.SOURCE_JOYSTICK)
+        if (fromPad && (KeyEvent.isGamepadButton(event.keyCode) || event.keyCode == KeyEvent.KEYCODE_BACK) && ::web.isInitialized) {
+            web.dispatchKeyEvent(event)
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onResume() {

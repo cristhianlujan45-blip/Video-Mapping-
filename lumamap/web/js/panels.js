@@ -10,6 +10,7 @@ import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
 import { genThumb, animThumb } from "./thumbs.js";
 import { timersSection } from "./panels-timers.js";
+import { controllersSection } from "./panels-controllers.js";
 import { STYLES } from "./renderer.js";
 import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./sources.js";
 import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
@@ -294,6 +295,10 @@ const live = {
     wrap.append(fold("⏱ Encender y apagar por tiempos", true,
       hint("Sincroniza pantallas y superficies o pon tú los tiempos: «a los 0:05 se enciende la Pantalla 2»."),
       timersSection(app)));
+    const nCtl = P.settings.control.mappings.filter(m => ["key", "gamepad", "midi"].includes(m.src)).length;
+    wrap.append(fold(`🎮 Mandos, teclado y MIDI${nCtl ? " · " + nCtl : ""}`, nCtl > 0 || (app.pads?.list() || []).length > 0,
+      hint("Controla el show con un mando de Xbox o PlayStation, el teclado o un controlador MIDI. Puedes usar varios a la vez: cada uno hace lo suyo."),
+      controllersSection(app)));
 
     // Sensores: una cámara vigila una zona; si alguien se mueve, cambia la proyección.
     const sens = P.settings.sensors;

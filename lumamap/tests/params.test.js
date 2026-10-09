@@ -218,4 +218,88 @@ await test("MIDI Clock: 24 pulsos por negra → BPM; start/stop; MTC completo", 
   assert.deepEqual([tc.h, tc.m, tc.s, tc.f, tc.fps], [1, 2, 3, 4, 25]);
 });
 
+console.log("== Mandos de juego y varios dispositivos a la vez ==");
+const { GamepadHub, basicPadMap, padKind, padControlName } = await import("../web/js/gamepad.js");
+
+/** Mandos falsos (como los devuelve navigator.getGamepads()). */
+function fakePads() {
+  const mk = (index, id) => ({ index, id, connected: true, buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0] });
+  const pads = [mk(0, "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e)"), mk(1, "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c)")];
+  Object.defineProperty(globalThis, "navigator", { value: { getGamepads: () => pads }, configurable: true, writable: true });
+  const press = (p, b, on = true) => { pads[p].buttons[b] = { pressed: on, value: on ? 1 : 0 }; };
+  return { pads, press };
+}
+
+await test("mandos: tipo por nombre y nombres de botones (Xbox y PlayStation)", () => {
+  assert.equal(padKind("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), "xbox");
+  assert.equal(padKind("DualSense Wireless Controller"), "playstation");
+  assert.equal(padKind("USB Gamepad"), "generic");
+  assert.equal(padControlName("btn:0", "xbox"), "A");
+  assert.equal(padControlName("btn:0", "playstation"), "✕");
+  assert.equal(padControlName("btn:7", "playstation"), "R2");
+  assert.equal(padControlName("axis:2"), "Stick der. ↔");
+});
+
+await test("dos mandos y el teclado a la vez, cada uno con su función (aprender por dispositivo)", async () => {
+  const { app, calls } = makeApp();
+  const P = app.params, { press } = fakePads();
+  const hub = new GamepadHub((ev) => P.input(ev), { learning: () => !!P.learning });
+  assert.equal(hub.list().length, 2);
+  assert.deepEqual(hub.list().map(p => p.device + " " + p.kindName), ["Mando 1 Xbox", "Mando 2 PlayStation"]);
+  hub.poll();   // primer estado: no dispara
+  // Mando 1 · A → apagón
+  let w = P.learn("global/blackout"); press(0, 0); hub.poll(); let m = await w;
+  assert.equal(m.src, "gamepad"); assert.equal(m.device, "Mando 1"); assert.equal(m.key, "btn:0"); assert.equal(m.mode, "toggle");
+  press(0, 0, false); hub.poll();
+  // Mando 2 · A (el mismo botón, otro mando) → siguiente escena
+  w = P.learn("global/next"); press(1, 0); hub.poll(); m = await w;
+  assert.equal(m.device, "Mando 2");
+  press(1, 0, false); hub.poll();
+  // Teclado · B → reproducir / pausa
+  w = P.learn("global/play"); P.input({ src: "key", key: "B", on: true, label: "B" }); m = await w;
+  assert.equal(m.src, "key");
+  assert.equal(app.S.project.settings.control.mappings.length, 3);
+  // Ahora se usan a la vez: cada uno hace solo lo suyo.
+  calls.length = 0;
+  press(1, 0); hub.poll(); press(1, 0, false); hub.poll();
+  assert.deepEqual(calls, ["step1"]); assert.equal(app.S.blackout, false);
+  press(0, 0); hub.poll(); press(0, 0, false); hub.poll();
+  assert.equal(app.S.blackout, true); assert.deepEqual(calls, ["step1", "blackout"]);
+  P.input({ src: "key", key: "B", on: true }); assert.equal(app.S.playing, false);
+});
+
+await test("mandos: el stick con zona muerta; al aprender, la deriva no cuenta y un movimiento claro sí", async () => {
+  const { app } = makeApp();
+  const P = app.params, { pads } = fakePads();
+  const hub = new GamepadHub((ev) => P.input(ev), { learning: () => !!P.learning });
+  hub.poll();
+  let got = null;
+  const w = P.learn("global/master").then(m => { got = m; });
+  pads[0].axes[2] = 0.08; hub.poll(); await Promise.resolve();
+  assert.equal(got, null, "la deriva del stick no se aprende");
+  pads[0].axes[2] = 0.9; hub.poll(); await w;
+  assert.equal(got.key, "axis:2"); assert.equal(got.mode, "absolute");
+  pads[0].axes[2] = -1; hub.poll();
+  assert.ok(Math.abs(app.S.master - 0) < 1e-6);
+  pads[0].axes[2] = 0.05; hub.poll();   // dentro de la zona muerta = centro
+  assert.ok(Math.abs(app.S.master - 0.5) < 1e-6);
+});
+
+await test("mandos: mapa listo (A = GO, Y = apagón, RT = bajar brillo) solo para ese mando", () => {
+  const { app, calls } = makeApp();
+  const P = app.params, { pads, press } = fakePads();
+  for (const m of basicPadMap("Mando 2")) app.S.project.settings.control.mappings.push(M.normalizeMapping(m));
+  const hub = new GamepadHub((ev) => P.input(ev));
+  hub.poll();
+  press(0, 0); hub.poll();   // Mando 1: no tiene mapa
+  assert.deepEqual(calls, []);
+  press(1, 0); hub.poll();
+  assert.deepEqual(calls, ["step1"]);
+  press(1, 3); hub.poll(); assert.equal(app.S.blackout, true);
+  pads[1].buttons[7] = { pressed: true, value: 0.75 }; hub.poll();
+  assert.ok(Math.abs(app.S.master - 0.25) < 1e-6, "RT a 3/4 → brillo 25 %");
+  pads[1].buttons[7] = { pressed: false, value: 0 }; hub.poll();
+  assert.equal(app.S.master, 1);
+});
+
 report();

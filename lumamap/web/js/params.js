@@ -60,7 +60,7 @@ export const FX_RANGE = {
   lumaSoft: ["Suavidad de luma", 0, 0.5, 0.01, 0.05],
   strobe: ["Destellos por segundo", 0, 15, 0.5, 0],};
 
-export const SOURCE_NAMES = { midi: "MIDI", osc: "OSC", dmx: "DMX", key: "Teclado", audio: "Audio", tracking: "Tracking", remote: "Mando" };
+export const SOURCE_NAMES = { midi: "MIDI", osc: "OSC", dmx: "DMX", key: "Teclado", gamepad: "Mando de juego", audio: "Audio", tracking: "Tracking", remote: "Mando web (móvil)" };
 export const MODES = [["absolute", "Absoluto"], ["relative", "Relativo (encoder)"], ["toggle", "Alternar"], ["momentary", "Momentáneo"], ["trigger", "Disparo"]];
 export const MERGES = [["override", "Sustituir"], ["add", "Sumar"], ["multiply", "Multiplicar"], ["max", "Máximo"], ["min", "Mínimo"]];
 export const REL_KINDS = [["twos", "Complemento a 2 (1…63 / 127…65)"], ["offset", "Desplazado (65+ / 63-)"], ["sign", "Signo y magnitud (bit 64)"]];

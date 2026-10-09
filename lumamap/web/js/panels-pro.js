@@ -5,6 +5,7 @@
 import { h, section, row, btn, slider, segmented, toggle, hint, dialog, prompt } from "./ui.js";
 import { catalog, describe, MODES, MERGES, REL_KINDS, MODIFIERS, SOURCE_NAMES, normalizeMapping } from "./params.js";
 import { uid } from "./model.js";
+import { padControlName } from "./gamepad.js";
 
 const ctlUI = { monitorFilter: "", showMonitor: true };
 
@@ -44,6 +45,7 @@ function controlName(m) {
     const [t, n] = k.split(":");
     return { cc: `CC ${n}`, note: `Nota ${n}`, pb: "Pitch bend", pc: `Program ${n}`, at: "Aftertouch", pat: `Aftertouch ${n}` }[t] || k;
   }
+  if (m.src === "gamepad") return padControlName(k);
   if (m.src === "audio") return { bass: "Graves", mid: "Medios", high: "Agudos", level: "Volumen", beat: "Golpe" }[k] || k;
   return k;
 }
@@ -52,17 +54,17 @@ function controlName(m) {
 async function editMapping(app, m) {
   const P = app.params, C = app.S.project.settings.control;
   const w = { ...m };
-  const devices = ["*", ...new Set([...(app.midiDriver?.ports().inputs || []).map(p => p.name), m.device].filter(Boolean))];
+  const devices = ["*", ...new Set([...(app.midiDriver?.active ? app.midiDriver.ports().inputs : []).map(p => p.name), ...(app.pads?.list() || []).map(p => p.device), m.device].filter(Boolean))];
   const content = h("div", { class: "mapedit" },
     field("Nombre", Object.assign(h("input", { class: "text-in", value: w.name || "", placeholder: "(automático)" }), { oninput: (e) => { w.name = e.target.value; } })),
     field("Destino", targetSelect(app, w.target, (v) => { w.target = v; })),
     row(
-      field("Fuente", selectEl(Object.entries(SOURCE_NAMES).filter(([k]) => ["midi", "osc", "dmx", "key", "audio", "tracking"].includes(k)), w.src, (v) => { w.src = v; })),
+      field("Fuente", selectEl(Object.entries(SOURCE_NAMES).filter(([k]) => ["midi", "osc", "dmx", "key", "gamepad", "audio", "tracking"].includes(k)), w.src, (v) => { w.src = v; })),
       field("Dispositivo", selectEl(devices.map(d => [d, d === "*" ? "Cualquiera" : d]), w.device, (v) => { w.device = v; })),
     ),
     row(
       field("Canal", selectEl([[0, "Omni (todos)"], ...Array.from({ length: 16 }, (_, i) => [i + 1, String(i + 1)])], w.channel || 0, (v) => { w.channel = +v; })),
-      field("Control", Object.assign(h("input", { class: "text-in", value: w.key, placeholder: "cc:7 · note:36 · pb · /osc/ruta · u1:c5 · bass" }), { oninput: (e) => { w.key = e.target.value.trim(); } })),
+      field("Control", Object.assign(h("input", { class: "text-in", value: w.key, placeholder: "cc:7 · note:36 · pb · /osc/ruta · u1:c5 · bass · btn:0 · axis:2" }), { oninput: (e) => { w.key = e.target.value.trim(); } })),
     ),
     row(
       field("Modo", selectEl(MODES, w.mode, (v) => { w.mode = v; })),
@@ -149,6 +151,14 @@ const control = {
       dev.append(tbl);
     }
     wrap.append(dev);
+    // ---- Mandos de juego ----
+    const padsBox = section("Mandos de juego (Xbox, PlayStation…)");
+    const pl = app.pads?.list() || [];
+    if (!app.pads?.supported) padsBox.append(hint("Este navegador no lee mandos de juego."));
+    else if (!pl.length) padsBox.append(hint("Conecta el mando por USB o Bluetooth y pulsa cualquier botón: aparece aquí."));
+    else for (const p of pl) padsBox.append(h("div", { class: "dev connected" }, h("i"), h("b", {}, `${p.device} · ${p.kindName}`), h("small", {}, `${C.mappings.filter(m => m.src === "gamepad" && (m.device === p.device || m.device === "*")).length} asignaciones`),
+      btn({ label: "Mapa listo", ic: "plus", onClick: () => A.loadBasicPadMap(p.device), title: "A = GO · B = anterior · X = play · Y = apagón · LB/RB = escenas · RT = bajar brillo" })));
+    wrap.append(padsBox);
 
     // ---- Aprender ----
     wrap.append(section("Asignar controles",

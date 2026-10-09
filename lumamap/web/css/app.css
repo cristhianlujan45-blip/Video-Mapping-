@@ -515,3 +515,11 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .dragghost{position:fixed;left:0;top:0;z-index:9999;pointer-events:none;display:flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border-radius:12px;background:rgba(12,14,20,.92);border:1px solid #ff2d8a;color:#fff;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.5);max-width:240px;}
 .dragghost img{width:56px;height:32px;object-fit:cover;border-radius:6px;}
 .dragghost span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* Mandos, teclado y MIDI (En vivo) */
+.ctlsimple .devchips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px;}
+.ctlsimple .devchip{font-size:12px;padding:4px 9px;border-radius:999px;border:1px solid var(--line);color:var(--dim);}
+.ctlsimple .devchip.on{color:var(--text);border-color:var(--accent);}
+.ctlsimple .lastin{font-size:12px;color:var(--dim);margin:2px 0 8px;min-height:1.3em;}
+.ctlsimple .ctlmaps .item{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:13px;padding:3px 0;}
+.ctlsimple .ctlmaps .item.off{opacity:.5;}

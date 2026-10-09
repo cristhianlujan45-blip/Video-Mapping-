@@ -22,6 +22,7 @@ import {
 } from "./math.js";
 import { detectFromImageFile } from "./automap.js";
 import { MidiDriver } from "./midi.js";
+import { GamepadHub, basicPadMap, padControlName } from "./gamepad.js";
 import { ParamEngine, describe, applyModList } from "./params.js";
 import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
@@ -76,7 +77,7 @@ const S = {
 };
 
 const history = new History();
-let renderer, pool, comp, link, audio, params, midi, dmx, show;
+let renderer, pool, comp, link, audio, params, midi, dmx, show, pads;
 const app = { S, M, history }; // API para los paneles
 let KEYS = new Map();
 
@@ -167,7 +168,7 @@ function syncParamsToUI() {
 }
 app.paramMappingsChanged = () => {
   changed(); commitSoon();
-  if (S.tab === "control") renderPanel(); else markMappedControls();
+  if (S.tab === "control" || S.tab === "live") renderPanel(); else markMappedControls();
 };
 /** Marca en el panel los controles que tienen un control físico asignado. */
 function markMappedControls() {
@@ -180,6 +181,7 @@ function markMappedControls() {
   }
 }
 function mappingLabel(m) {
+  if (m.src === "gamepad") return `${m.device && m.device !== "*" ? m.device : "Cualquier mando"} · ${padControlName(m.key, pads?.kindOf(m.device))}`;
   const src = { midi: "MIDI", osc: "OSC", dmx: "DMX", key: "Tecla", audio: "Audio", tracking: "Tracking" }[m.src] || m.src;
   return `${src} ${m.device && m.device !== "*" ? m.device + " " : ""}${m.key}`;
 }
@@ -192,7 +194,8 @@ A.learn = async (id) => {
   if (midi.supported && !midi.active) await A.midi({ quiet: true });
   const content = h("div", { class: "learn" },
     h("div", { class: "learn-pulse" }),
-    h("p", {}, "Mueve ahora el control (knob, fader, pad, botón), envía un mensaje OSC o DMX, o pulsa una tecla."),
+    h("p", {}, "Pulsa ahora el botón que quieras usar: una tecla, un botón o stick del mando (Xbox, PlayStation…), o mueve un knob/fader MIDI. También vale OSC o DMX."),
+    h("p", { class: "hint" }, "Cada dispositivo es distinto: el botón A del Mando 1 y el del Mando 2 pueden hacer cosas diferentes."),
     h("p", { class: "hint" }, `Destino: ${d.name}`));
   const waiting = params.learn(id);
   const dlg = dialog({ title: "Aprender control", content, buttons: [{ label: "Cancelar", value: null }] });
@@ -1089,6 +1092,14 @@ A.loadBasicMidiMap = () => {
   add("cc:1", "global/master", "absolute"); add("cc:21", "surf/sel/opacity", "absolute");
   app.paramMappingsChanged();
   toast("Mapa MIDI básico cargado (puedes editarlo en Control)");
+};
+/** Mapa listo para un mando: A = GO, B = anterior, X = play, Y = apagón, LB/RB = escenas, RT = bajar brillo… */
+A.loadBasicPadMap = (device = "*") => {
+  const C = S.project.settings.control;
+  C.mappings = C.mappings.filter(m => !(m.src === "gamepad" && m.device === device && m.name === "Mapa de mando"));
+  for (const m of basicPadMap(device)) C.mappings.push(M.normalizeMapping(m));
+  app.paramMappingsChanged();
+  toast(`${device === "*" ? "Todos los mandos" : device}: A = GO · B = anterior · X = play · Y = apagón · LB/RB = escenas · RT = bajar brillo`);
 };
 app.audio = () => audio;
 
@@ -2484,6 +2495,7 @@ function tick(now) {
     const id = S.songShow.ids[i];
     if (id && S.project.sceneId !== id && !S.tr) A.goScene(id);
   }
+  pads?.poll();
   // Modulaciones del motor de parámetros (audio, tracking, mezclas): solo en el render.
   S.mods = params.modList(now);
   const RP = applyModList(S.project, S.master, S.mods);
@@ -2869,6 +2881,11 @@ async function init() {
   link = new Link("editor", onLinkMsg);
   audio = new AudioEngine();
   params = app.params = new ParamEngine(app);
+  // Mandos de juego: cada uno es un dispositivo propio (Mando 1, Mando 2…).
+  pads = app.pads = new GamepadHub((ev) => params.input(ev), { learning: () => !!params.learning });
+  pads.onChange = () => { if (S.tab === "control" || S.tab === "live") renderPanel(); };
+  // Con la ventana del editor oculta (minimizada) no hay fotogramas: se siguen leyendo los mandos.
+  setInterval(() => { if (document.hidden) pads.poll(); }, 50);
   midi = app.midiDriver = new MidiDriver({
     onInput: (ev) => params.input(ev),
     onStatus: () => { if (S.tab === "control") renderPanel(); },
