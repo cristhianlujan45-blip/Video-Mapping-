@@ -212,7 +212,7 @@ await test("Modelo que no admite «think»: se repite sin ese campo", async () =
 await test("Si el modelo falla a mitad (memoria): aviso comprensible y respuesta sin IA", async () => {
   const e = engineWith(fakeOllama({ status: 500, error: "model requires more system memory (12 GiB) than is available" }));
   await e.refresh({ force: true });
-  const r = await e.chat("crear una superficie");
+  const r = await e.chat("diseña algo bonito para la boda de mi hermana");
   assert.equal(r.source, "Sin IA");
   assert.equal(e.notice, MSG.memory);
   assert.ok(!/ECONNREFUSED|500|GiB/.test(e.notice), "sin errores técnicos");
@@ -260,6 +260,57 @@ await test("show con canción: la IA escucha el tempo y las partes de la canció
   assert.ok(plan.sections.every(s => M.ANIM_LIBRARY.some(a => a.name === s.animation)), "animaciones reales de la biblioteca");
   assert.ok(plan.sections.find(s => s.name === "DROP").audio, "el drop reacciona al ritmo");
   assert.equal(parseCommand(makeApp(), "hazme un show automático con mi canción").intent, "songshow");
+});
+
+await test("IA arreglada: las órdenes claras se resuelven al instante (sin esperar al modelo) y nunca queda en blanco", async () => {
+  const fake = fakeOllama({ reply: JSON.stringify({ reply: "", actions: [{ action: "borrar_disco", parameters: {} }] }) });
+  const e = engineWith(fake);
+  await e.refresh({ force: true });
+  const n0 = fake.calls.filter(c => c.url.endsWith("/api/chat")).length;
+  let r = await e.chat("busca un gif de confeti");
+  assert.equal(r.source, "Al instante");
+  assert.equal(r.proposals[0].action, "search_gif"); assert.equal(r.proposals[0].params.query, "confeti");
+  assert.equal(fake.calls.filter(c => c.url.endsWith("/api/chat")).length, n0, "no se esperó al modelo");
+  // El modelo propone algo no permitido y no hay orden clara: responde la ayuda, no un hueco.
+  r = await e.chat("haz magia");
+  assert.ok(r.reply.length > 20);
+  assert.ok(r.proposals.every(v => !v.ok));
+});
+
+await test("IA arreglada: entiende las frases de todos los días (y las aplica)", async () => {
+  const app = withSurfaces(2);
+  app.S.master = 1;
+  const cases = [
+    ["sube el brillo", "set_brightness"], ["brillo al 40%", "set_brightness"], ["pausa", "transport"], ["reproduce", "transport"],
+    ["siguiente", "go_scene"], ["vuelve a la escena anterior", "go_scene"], ["pon una animación al azar", "random_animation"],
+    ["más lento", "set_speed"], ["escribe Feliz Cumpleaños", "set_text"], ["pon la webcam", "set_camera"], ["estilo ascii", "set_style"],
+    ["pon el efecto glitch", "set_fx"], ["quita los efectos", "reset_fx"], ["luces rojas", "light_color"], ["apaga las luces", "lights_play"],
+    ["pon un gif de fuego", "search_gif"], ["asigna el botón A del mando al apagón", "assign_control"], ["quiero usar el mando de xbox", "gamepad_map"],
+    ["graba un video", "record_video"], ["pon la cuadrícula", "test_pattern"], ["pon el tempo a 128", "set_bpm"], ["fundido a negro", "blackout"],
+    ["haz un holograma", "open_panel"], ["duplica la superficie", "duplicate_surface"], ["pon un lago interactivo", "interactive_experience"],
+    ["haz que cambie de color con la música", "enable_audio_reactive"],
+  ];
+  app.S.sel = app.S.project.surfaces[0].id;
+  for (const [text, action] of cases) {
+    const c = parseCommand(app, text);
+    const v = c.actions.map(a => validateAction(app, a));
+    assert.ok(v.some(x => x.ok && x.action === action), `${text} → ${JSON.stringify(c.actions)} ${JSON.stringify(v.filter(x => !x.ok))}`);
+  }
+  assert.equal(parseCommand(app, "brillo al 40%").actions[0].parameters.value, 0.4);
+  assert.equal(parseCommand(app, "escribe Feliz Cumpleaños").actions[0].parameters.text, "Feliz Cumpleaños", "respeta las mayúsculas");
+  assert.equal(parseCommand(app, "asigna el botón A del mando al apagón").actions[0].parameters.target, "global/blackout");
+  assert.equal(parseCommand(app, "asigna una tecla a la escena 2").actions[0].parameters.target, "scene/1");
+  // Antes «lago» se leía como «lag» (lento) y «más lento» como un diagnóstico.
+  assert.notEqual(parseCommand(app, "pon un lago interactivo").intent, "diagnose");
+  assert.equal(parseCommand(app, "¿por qué va lento?").intent, "diagnose");
+  for (const t of ["hola", "ayuda", "qué puedes hacer"]) { const c = parseCommand(app, t); assert.ok(c.reply.length > 30 && !c.actions.length, t); }
+  const P = app.S.project, look = () => M.lookOf(M.currentScene(P), P.surfaces[0].id);
+  await applyAction(app, validateAction(app, { action: "set_style", parameters: { surface: P.surfaces[0].id, style: "ascii" } }));
+  assert.equal(look().fx.style, "ascii");
+  await applyAction(app, validateAction(app, { action: "set_text", parameters: { surface: P.surfaces[0].id, text: "HOLA" } }));
+  assert.deepEqual([look().source.type, look().source.text], ["text", "HOLA"]);
+  await applyAction(app, validateAction(app, { action: "reset_fx", parameters: { surface: "all" } }));
+  assert.equal(look().fx.style, M.DEFAULT_FX().style);
 });
 
 report();

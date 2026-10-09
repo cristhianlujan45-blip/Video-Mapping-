@@ -360,6 +360,7 @@ ipcMain.on("log", (_e, kind, msg) => log(kind || "renderer", String(msg).slice(0
 
 // Asistente (Claude): la clave queda cifrada aquí, la página nunca la ve.
 require("./ai.js").setup(log);
+require("./net.js").setup();
 ipcMain.handle("logs:open", () => shell.openPath(logDir()));
 process.on("uncaughtException", (e) => log("main", "uncaughtException: " + (e.stack || e.message)));
 process.on("unhandledRejection", (e) => log("main", "unhandledRejection: " + (e?.stack || e)));

@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
   remoteInfo: () => ipcRenderer.invoke("remote:info"),
   remoteNewPin: () => ipcRenderer.invoke("remote:newPin"),
   onRemoteReady: (cb) => ipcRenderer.on("remote:ready", () => cb()),
+  /** Descargas de internet (buscar GIF): solo https y solo internet. Devuelve { ok, status, type, data }. */
+  net: { get: (url, opts) => ipcRenderer.invoke("net:get", url, opts) },
   /** Asistente (Claude): la clave se guarda cifrada en el proceso principal. */
   ai: {
     status: () => ipcRenderer.invoke("ai:status"),

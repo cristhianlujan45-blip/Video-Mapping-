@@ -23,6 +23,7 @@ import {
 import { detectFromImageFile } from "./automap.js";
 import { MidiDriver } from "./midi.js";
 import { GamepadHub, basicPadMap, padControlName } from "./gamepad.js";
+import { openGifSearch } from "./panels-gif.js";
 import { ParamEngine, describe, applyModList } from "./params.js";
 import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
@@ -806,6 +807,33 @@ A.importMedia = async (target = "auto") => {
   changed({ panel: true }); commit();
   toast(added.length > 1 ? `${added.length} archivos importados` : "Listo · ajusta las esquinas a la pared");
 };
+
+/**
+ * Añade un GIF descargado (Buscar GIF animado). mode: "go" = entra ya con fundido en la
+ * superficie · "next" = queda preparado · "layer" = capa nueva encima · "library".
+ */
+A.addGif = async (file, { mode = "layer", surfaceId = S.sel, credit = "" } = {}) => {
+  const [rec] = await importMediaFiles([file]);
+  if (!rec) return null;
+  const med = S.project.media.find(m => m.id === rec.id);
+  if (med && credit) med.credit = credit;
+  const target = S.project.surfaces.find(s => s.id === surfaceId);
+  if ((mode === "go" || mode === "next") && target) {
+    A.setNext(target.id, { source: { type: "media", mediaId: rec.id }, fit: "cover" });
+    if (mode === "go") { if (!S.playing) A.togglePlay(); A.go(target.id); }
+    return mode === "go" ? `GIF en «${target.name}»` : `GIF preparado: pulsa GO en «${target.name}»`;
+  }
+  if (mode === "library") { changed({ panel: true }); commit(); return "GIF en la biblioteca"; }
+  // Capa nueva encima, a un tercio de la proyección, centrada y con la proporción del GIF.
+  const c = viewCenter(), hgt = S.project.height / 3, ar = (rec.width || 1) / (rec.height || 1);
+  const s = M.createQuad({ name: uniqueName("GIF " + rec.name.replace(/\.[^.]+$/, "").slice(0, 18)), corners: M.rectCorners(c.x - hgt * ar / 2, c.y - hgt / 2, hgt * ar, hgt) });
+  M.addSurface(S.project, s, { type: "media", mediaId: rec.id });
+  if (!S.playing) A.togglePlay();
+  select(s.id);
+  changed({ panel: true }); commit();
+  return "GIF añadido encima · arrástralo o mueve sus esquinas";
+};
+A.searchGifs = (opts = {}) => openGifSearch(app, opts);
 
 A.removeMedia = async (id) => {
   const m = S.project.media.find(x => x.id === id);

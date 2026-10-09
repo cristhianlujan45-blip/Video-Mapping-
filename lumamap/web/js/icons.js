@@ -75,6 +75,8 @@ const P = {
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
   live: '<path d="M6 3v18M12 3v18M18 3v18"/><rect x="4" y="13" width="4" height="3" rx="1" fill="currentColor"/><rect x="10" y="6" width="4" height="3" rx="1" fill="currentColor"/><rect x="16" y="10" width="4" height="3" rx="1" fill="currentColor"/>',
   body: '<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7M7 9.5l5 1.5 5-1.5M9 21l3-7 3 7"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4.5-4.5"/>',
+  gif: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10H6.5v4H8v-1.5M11 10v4M14 14v-4h2.5M14 12h2"/>',
   shuffle: '<path d="M3 7h3.5c4 0 6 10 10 10H21M3 17h3.5c1.6 0 2.8-1.6 3.9-3.6M14 8.5c.8-.9 1.6-1.5 2.5-1.5H21"/><path d="m18 4 3 3-3 3M18 14l3 3-3 3"/>',
 };
 

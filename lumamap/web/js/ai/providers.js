@@ -13,7 +13,7 @@ import { buildProjectContext, contextForPrompt } from "./context.js";
 import { analyzeProject, nextStep } from "./analyzer.js";
 import { validateAction, actionCatalogText } from "./actions.js";
 import { searchKnowledge } from "./knowledge.js";
-import { parseCommand } from "./commands.js";
+import { parseCommand, HELP } from "./commands.js";
 import { planFromRules, normalizePlan, PLAN_SCHEMA } from "./showplan.js";
 import { detectHardware, recommendTier, pickModel, isVisionModel } from "./hardware.js";
 import { detectQuads } from "../automap.js";
@@ -183,7 +183,7 @@ export class NoAIProvider extends AIProvider {
     let reply = c.reply;
     if (c.intent === "explain" && !c.actions.length) {
       const arts = searchKnowledge(text, 2);
-      reply = arts.length ? `${arts[0].title}: ${arts[0].text}` : "No entendí la petición. Prueba con: «crear una superficie», «¿por qué va lento?», «crear un show de 3 minutos», «luces Fuego», «cuando levante la mano cambia el color a rojo».";
+      reply = arts.length ? `${arts[0].title}: ${arts[0].text}` : "No lo entendí del todo. " + HELP;
     }
     return { reply, proposals: c.actions.map(a => validateAction(this.app, a)), intent: c.intent && c.intent !== "explain" ? c.intent : null, source: this.label };
   }
@@ -346,7 +346,27 @@ export class AIEngine {
     }
     return this.none[method](...args);
   }
-  chat(text, history) { return this.run("chat", { text, ctx: this.context(), history }); }
+  /**
+   * Conversación. Las órdenes claras («sube el brillo», «busca un gif de fuego», «pausa»)
+   * se resuelven al instante con las reglas, sin esperar al modelo; el modelo se usa para
+   * lo demás. Si el modelo no aporta nada útil (o propone acciones no válidas), las reglas
+   * y la guía responden igualmente: el asistente nunca se queda en blanco.
+   */
+  async chat(text, history) {
+    if (!this.state.checkedAt) await this.refresh();
+    const quick = parseCommand(this.app, text);
+    const qp = quick.actions.map(a => validateAction(this.app, a));
+    const clear = (qp.length && qp.every(v => v.ok)) || (quick.intent && quick.intent !== "explain");
+    if (this.active !== this.none && clear) {
+      this.notice = "";
+      return { reply: quick.reply, proposals: qp, intent: quick.intent && quick.intent !== "explain" ? quick.intent : null, source: "Al instante" };
+    }
+    const r = await this.run("chat", { text, ctx: this.context(), history });
+    const useful = (r.proposals || []).some(v => v.ok) || r.intent;
+    if (!useful && clear) return { ...r, reply: [r.reply, quick.reply].filter(Boolean).join(" "), proposals: qp, intent: quick.intent && quick.intent !== "explain" ? quick.intent : null };
+    if (!r.reply && !useful) return { ...r, reply: HELP };
+    return r;
+  }
   analyze() { return this.run("analyzeProject", this.context()); }
   next() { return nextStep(this.context()); }
   showPlan(text) { return this.run("generateShowPlan", text, this.context()); }

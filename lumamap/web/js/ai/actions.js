@@ -13,6 +13,8 @@ import { LIGHT_FX, findFx, defaultLightFx } from "../lightfx.js";
 import { SIGNALS } from "../tracking.js";
 import { TIMER_TEMPLATES, templateSteps, targetName } from "../timers.js";
 import { EXPERIENCES, applyExperience } from "../experiences.js";
+import { STYLES } from "../renderer.js";
+import { PATTERNS } from "../overlay.js";
 
 const SHAPES = [...Object.keys(M.SHAPES), "mesh"];
 const LIGHT_KINDS = ["strip", "matrix", "ring", "bar", "par", "moving"];
@@ -20,6 +22,12 @@ const TRANSITIONS = ["cut", "fade", "dissolve", "wipe", "wipeV", "iris", "flash"
 const TABS = ["add", "anim", "live", "draw", "content", "fx", "shape", "layers", "scenes", "audio", "interactive", "lights", "show", "3d", "tracking", "assistant", "control", "perf", "output"];
 const BANDS = ["bass", "mid", "high", "level"];
 const TARGETS = M.AUDIO_TARGETS.map(t => t[0]);
+const TRANSPORT = { play: "Reproducir", pause: "Pausar", restart: "Reiniciar los videos desde el principio", random_all: "Animación al azar en todas", go_all: "GO en todas (fundir a lo siguiente)", tap: "Marcar el tempo (TAP)", automix_on: "Mezcla automática al ritmo (cada 8 golpes)", automix_off: "Quitar la mezcla automática" };
+const FX_KEYS = { glitch: [0, 1], strobe: [0, 12], kaleido: [0, 12], blur: [0, 1], rgbShift: [0, 1], pixelate: [0, 1], hueCycle: [0, 2], wave: [0, 1], noise: [0, 1], spin: [-2, 2], zoom: [0.2, 4] };
+const FX_NAMES = { glitch: "Glitch", strobe: "Estrobo", kaleido: "Caleidoscopio", blur: "Desenfoque", rgbShift: "Separación RGB", pixelate: "Pixelado", hueCycle: "Ciclo de color", wave: "Ondas", noise: "Ruido", spin: "Giro", zoom: "Zoom" };
+const looksOf = (app, surface) => { const sc = M.currentScene(app.S.project); return (surface === "all" ? app.S.project.surfaces.map(s => s.id) : [surface]).map(id => M.lookOf(sc, id)); };
+const where = (app, s) => s === "all" ? "todas las superficies" : "«" + surfName(app, s) + "»";
+const surfOrAll = (app, v) => v === "all" ? "all" : surfaceRef(app, v, { req: false }) || (app.S.project.surfaces.length ? "all" : fail("Primero crea una superficie"));
 
 class ActionError extends Error {}
 const fail = (m) => { throw new ActionError(m); };
@@ -296,6 +304,123 @@ export const ACTIONS = {
       if (app.S.tab !== "live") app.openTab("live");
       return `Tiempos en marcha (${r.steps.length} pasos)`;
     },
+  },
+  duplicate_surface: {
+    label: "Duplicar una superficie", params: { surface: "id o nombre (por defecto la seleccionada)" },
+    check: (app, p) => ({ surface: surfaceRef(app, p.surface) }),
+    text: (app, p) => `Duplicar «${surfName(app, p.surface)}»`,
+    run: (app, p) => { app.select(p.surface); app.actions.duplicate(); return "Superficie duplicada"; },
+  },
+  transport: {
+    label: "Reproducción y mezcla", params: { do: Object.keys(TRANSPORT).join("|") },
+    check: (app, p) => ({ do: oneOf(p.do, "do", Object.keys(TRANSPORT)) }),
+    text: (app, p) => TRANSPORT[p.do],
+    run: (app, p) => {
+      const A = app.actions, S = app.S;
+      if (p.do === "play" && !S.playing) A.togglePlay();
+      if (p.do === "pause" && S.playing) A.togglePlay();
+      if (p.do === "restart") A.restart();
+      if (p.do === "random_all") A.randomAll();
+      if (p.do === "go_all") A.goAll();
+      if (p.do === "tap") return `${A.tap()} BPM`;
+      if (p.do === "automix_on") A.setAutoMix(8);
+      if (p.do === "automix_off") A.setAutoMix(0);
+      return TRANSPORT[p.do];
+    },
+  },
+  set_brightness: {
+    label: "Brillo general", params: { value: "0-1 (1 = 100 %)" },
+    check: (app, p) => ({ value: num(p.value, "value", 0, 1) }),
+    text: (app, p) => `Brillo general al ${Math.round(p.value * 100)} %`,
+    run: (app, p) => runAction(app, { type: "param", target: "global/master", value: p.value }),
+  },
+  random_animation: {
+    label: "Animación al azar", params: { surface: "id, nombre o all" },
+    check: (app, p) => ({ surface: surfOrAll(app, p.surface) }),
+    text: (app, p) => `Animación al azar en ${where(app, p.surface)} (con fundido)`,
+    run: (app, p) => { for (const s of p.surface === "all" ? app.S.project.surfaces : [{ id: p.surface }]) app.actions.randomNext(s.id, true); return "Animación nueva"; },
+  },
+  set_style: {
+    label: "Estilo visual (ASCII, Matrix, semitonos, dither, Game Boy, térmica…)", params: { surface: "id, nombre o all", style: STYLES.map(s => s[0]).join("|") },
+    check: (app, p) => ({ surface: surfOrAll(app, p.surface), style: oneOf(p.style, "style", STYLES.map(s => s[0])) }),
+    text: (app, p) => p.style === "none" ? `Quitar el estilo en ${where(app, p.surface)}` : `Estilo «${STYLES.find(s => s[0] === p.style)[1]}» en ${where(app, p.surface)}`,
+    run: (app, p) => { for (const l of looksOf(app, p.surface)) l.fx.style = p.style; app.changed({ panel: true }); app.commit(); return "Estilo aplicado"; },
+  },
+  set_fx: {
+    label: "Efecto visual", params: { surface: "id, nombre o all", key: Object.keys(FX_KEYS).join("|"), value: "número (rango del efecto)" },
+    check: (app, p) => { const key = oneOf(p.key, "key", Object.keys(FX_KEYS)); const [lo, hi] = FX_KEYS[key]; return { surface: surfOrAll(app, p.surface), key, value: num(p.value, "value", lo, hi) }; },
+    text: (app, p) => `${FX_NAMES[p.key]} ${p.value ? "a " + p.value : "quitado"} en ${where(app, p.surface)}`,
+    run: (app, p) => { for (const l of looksOf(app, p.surface)) l.fx[p.key] = p.value; app.changed({ panel: true }); app.commit(); return "Efecto aplicado"; },
+  },
+  reset_fx: {
+    label: "Quitar los efectos", params: { surface: "id, nombre o all" },
+    check: (app, p) => ({ surface: surfOrAll(app, p.surface) }),
+    text: (app, p) => `Quitar todos los efectos de ${where(app, p.surface)}`,
+    run: (app, p) => { for (const l of looksOf(app, p.surface)) l.fx = M.DEFAULT_FX(); app.changed({ panel: true }); app.commit(); return "Efectos quitados"; },
+  },
+  set_speed: {
+    label: "Velocidad de animaciones y videos", params: { surface: "id, nombre o all", factor: "0.25-4 (multiplica la velocidad actual)" },
+    check: (app, p) => ({ surface: surfOrAll(app, p.surface), factor: num(p.factor, "factor", 0.25, 4) }),
+    text: (app, p) => `${p.factor > 1 ? "Más rápido" : "Más lento"} (×${p.factor}) en ${where(app, p.surface)}`,
+    run: (app, p) => {
+      for (const l of looksOf(app, p.surface)) {
+        if (l.source.type === "gen") l.source.speed = Math.max(0.05, Math.min(5, (l.source.speed ?? 1) * p.factor));
+        else l.rate = Math.max(0.25, Math.min(4, (l.rate ?? 1) * p.factor));
+      }
+      app.changed({ panel: true }); app.commit(); return "Velocidad cambiada";
+    },
+  },
+  set_text: {
+    label: "Poner un texto", params: { surface: "id, nombre o all", text: "texto" },
+    check: (app, p) => ({ surface: surfOrAll(app, p.surface), text: str(p.text, "text", { max: 200 }) }),
+    text: (app, p) => `Texto «${p.text}» en ${where(app, p.surface)}`,
+    run: (app, p) => { for (const l of looksOf(app, p.surface)) Object.assign(l.source, { type: "text", text: p.text }); app.changed({ panel: true }); app.commit(); return "Texto puesto"; },
+  },
+  set_camera: {
+    label: "Cámara en vivo o proyección interactiva", params: { surface: "id, nombre o all", kind: "camera|body" },
+    check: (app, p) => ({ surface: surfOrAll(app, p.surface), kind: oneOf(p.kind, "kind", ["camera", "body"], "camera") }),
+    text: (app, p) => `${p.kind === "body" ? "Proyección interactiva (la cámara ve a la gente)" : "Cámara en vivo"} en ${where(app, p.surface)}`,
+    run: (app, p) => { for (const l of looksOf(app, p.surface)) l.source.type = p.kind; app.changed({ panel: true }); app.commit(); return "Cámara puesta"; },
+  },
+  light_color: {
+    label: "Todas las luces de un color", params: { color: "#rrggbb" },
+    check: (app, p) => ({ color: color(p.color, "color") }),
+    text: (app, p) => `Todas las luces en color ${p.color}`,
+    run: (app, p) => {
+      const L = app.dmx?.lights?.() || [];
+      for (const l of L) { l.source = "effect"; l.fx = { ...defaultLightFx(findFx("Color fijo").id), color: p.color }; }
+      app.changed({ panel: true }); app.commitSoon?.(); return L.length ? `Luces en ${p.color} (${L.length})` : "No hay luces todavía (Luces → Añadir)";
+    },
+  },
+  search_gif: {
+    label: "Buscar GIF animados en internet", params: { query: "qué buscar" },
+    check: (app, p) => ({ query: str(p.query, "query", { req: false, max: 60 }) || "" }),
+    text: (app, p) => p.query ? `Buscar GIF animados de «${p.query}» (eliges tú cuál entra)` : "Buscar GIF animados (eliges tú cuál entra)",
+    run: (app, p) => { app.actions.searchGifs({ query: p.query }); return "Buscador de GIF abierto"; },
+  },
+  assign_control: {
+    label: "Asignar un botón (mando de Xbox/PlayStation, tecla o MIDI) a una función", params: { target: "id del parámetro (global/blackout, global/go, global/next, global/play, global/master, scene/0…)" },
+    check: (app, p) => { const d = describe(app, p.target); if (!d) fail(`No existe la función «${p.target}»`); return { target: d.id }; },
+    text: (app, p) => `Asignar un botón a «${describe(app, p.target)?.name}» (después pulsas el botón que quieras)`,
+    run: (app, p) => { app.actions.learn(p.target); return "Pulsa ahora el botón"; },
+  },
+  gamepad_map: {
+    label: "Mapa listo para mando de juego", params: {},
+    check: () => ({}),
+    text: () => "Mando listo: A = GO · B = anterior · X = play · Y = apagón · LB/RB = escenas · RT = bajar brillo",
+    run: (app) => { app.actions.loadBasicPadMap("*"); return "Mando listo"; },
+  },
+  record_video: {
+    label: "Grabar video de la proyección", params: {},
+    check: () => ({}),
+    text: (app) => app.S.rec ? "Detener la grabación" : "Empezar a grabar un video de la proyección",
+    run: (app) => { app.actions.record(); return "Grabación"; },
+  },
+  test_pattern: {
+    label: "Patrón de calibración en el proyector", params: { pattern: PATTERNS.map(p => p[0]).join("|") + "|none" },
+    check: (app, p) => ({ pattern: oneOf(p.pattern, "pattern", [...PATTERNS.map(x => x[0]), "none"], "grid") }),
+    text: (app, p) => p.pattern === "none" ? "Quitar el patrón de calibración" : `Patrón «${PATTERNS.find(x => x[0] === p.pattern)[1]}» en el proyector`,
+    run: (app, p) => { if (p.pattern === "none") { if (app.S.pattern) app.actions.setPattern(app.S.pattern); } else if (app.S.pattern !== p.pattern) app.actions.setPattern(p.pattern); return "Patrón"; },
   },
   open_panel: {
     label: "Abrir un panel", params: { tab: TABS.join("|") },

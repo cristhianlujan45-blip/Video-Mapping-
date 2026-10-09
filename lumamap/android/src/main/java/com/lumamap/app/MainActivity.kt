@@ -234,6 +234,7 @@ class MainActivity : ComponentActivity() {
         if (midiLazy.isInitialized()) midi.closeAll()
         if (usbDmxLazy.isInitialized()) usbDmx.shutdown()
         if (localAiLazy.isInitialized()) localAi.shutdown()
+        if (netGetLazy.isInitialized()) netGet.shutdown()
         web.destroy()
         super.onDestroy()
     }
@@ -515,6 +516,12 @@ class MainActivity : ComponentActivity() {
             if (isEditor) localAi.request(id, url, method, body, timeoutMs)
         }
 
+        /* Descargas de internet (buscar GIF animados): solo https y solo internet; responde a window.__lumaNetGet(id, r). */
+        @JavascriptInterface
+        fun netGet(id: Int, url: String, maxBytes: Int) {
+            if (isEditor) netGet.get(id, url, maxBytes)
+        }
+
         @JavascriptInterface
         fun haptic() {
             val v = getSystemService(Vibrator::class.java) ?: return
@@ -583,4 +590,9 @@ class MainActivity : ComponentActivity() {
         LocalAi { id, r -> main.post { web.evaluateJavascript("window.__lumaAiHttp&&window.__lumaAiHttp($id,$r)", null) } }
     }
     private val localAi by localAiLazy
+
+    private val netGetLazy = lazy {
+        NetGet { id, r -> main.post { web.evaluateJavascript("window.__lumaNetGet&&window.__lumaNetGet($id,$r)", null) } }
+    }
+    private val netGet by netGetLazy
 }

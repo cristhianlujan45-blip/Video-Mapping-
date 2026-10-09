@@ -246,7 +246,8 @@ function pickNext(app, id) {
     media.length ? section("Tus videos, fotos y GIF",
       tiles(media.map(m => ({ id: m.id, label: m.name, img: m.thumb })), { cols: 4, onPick: (mid) => done({ source: { type: "media", mediaId: mid }, fit: "cover" }) })) : null,
     section("En vivo",
-      tiles([{ id: "camera", label: "Cámara", ic: "camera" }, { id: "body", label: "Interactivo", ic: "body" }], { cols: 4, onPick: (t) => done({ source: { type: t } }) })),
+      tiles([{ id: "camera", label: "Cámara", ic: "camera" }, { id: "body", label: "Interactivo", ic: "body" }], { cols: 4, onPick: (t) => done({ source: { type: t } }) }),
+      btn({ label: "Buscar GIF animado en internet", ic: "gif", kind: "block", onClick: () => { closeDialog(); A.searchGifs({ surfaceId: id, mode: "next" }); } })),
     animCatalog(app, (a) => done({ source: { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale }, fx: a.fx || null })));
   dialog({ title: "Siguiente para «" + (app.S.project.surfaces.find(x => x.id === id)?.name || "") + "»", content, wide: true, buttons: [] });
 }
@@ -265,6 +266,7 @@ const live = {
       segmented({ options: [[0, "Corte"], [0.5, "½ s"], [1, "1 s"], [2, "2 s"], [4, "4 s"], [8, "8 s"]], value: S.liveFade, small: true, onChange: (v) => { S.liveFade = v; } }),
       row(btn({ label: "GO todas", ic: "play", kind: "wide primary", onClick: () => A.goAll() }),
         btn({ label: "Todas al azar", ic: "shuffle", kind: "wide", onClick: () => A.randomAll() })),
+      btn({ label: "Buscar GIF animado y ponerlo en vivo", ic: "gif", kind: "block", onClick: () => A.searchGifs() }),
       h("div", { class: "lbl" }, "Mezcla automática al ritmo (cambia sola cada N golpes)"),
       segmented({ options: [[0, "No"], [4, "4"], [8, "8"], [16, "16"], [32, "32"]], value: S.autoMix || 0, small: true, onChange: (v) => A.setAutoMix(v) }),
       P.surfaces.some(x => x.screen) ? h("div", {}, h("div", { class: "lbl" }, "Ver en el editor"),
@@ -413,6 +415,7 @@ const content = {
       }
       wrap.append(section("Biblioteca", grid,
         btn({ label: "Importar video, imagen o GIF", ic: "upload", kind: "block primary", onClick: () => A.importMedia("selected") }),
+        btn({ label: "Buscar GIF animado en internet", ic: "gif", kind: "block", onClick: () => A.searchGifs({ mode: "go" }) }),
         hint("Mantén pulsado un archivo para quitarlo. Formatos: MP4, WebM, MOV, JPG, PNG, WebP, GIF animado.")));
       wrap.append(section("Video",
         app.S.project.media.find(m => m.id === src.mediaId)?.kind === "video" ? h("div", {},

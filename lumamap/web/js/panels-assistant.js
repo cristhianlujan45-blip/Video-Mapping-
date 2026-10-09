@@ -14,6 +14,7 @@ import { planChanges, applyPlan, planFromSong } from "./ai/showplan.js";
 import { analyzeFile } from "./ai/songanalysis.js";
 import { MODEL_TIERS, ADVANCED_MODELS } from "./ai/hardware.js";
 import { searchKnowledge } from "./ai/knowledge.js";
+import { HELP } from "./ai/commands.js";
 
 const ui = { log: [], busy: false, card: null, brief: "" };
 const LOG_KEY = "lumamap:ai-log";
@@ -78,7 +79,7 @@ async function send(app, text, redraw) {
     if (r.proposals?.length) ui.log.push({ who: "props", props: r.proposals });
     if (ai.notice) ui.log.push({ who: "notice", text: ai.notice });
     if (r.intent) await runIntent(app, r.intent, text);
-    if (!r.reply && !r.proposals?.length && !r.intent) ui.log.push({ who: "ai", text: "No sé hacer eso todavía. Prueba con los botones de arriba." });
+    if (!r.reply && !r.proposals?.length && !r.intent) ui.log.push({ who: "ai", text: HELP });
   } catch (e) { ui.log.push({ who: "notice", text: MSG.generic }); console.warn(e); }
   finally { ui.busy = false; if (ui.log.length > 80) ui.log.splice(0, ui.log.length - 80); remember(app); redraw(); }
 }

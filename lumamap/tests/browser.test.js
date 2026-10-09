@@ -515,6 +515,68 @@ await test("arrastrar y soltar: una animación y un efecto se sueltan encima de 
   assert.equal(await page.evaluate((id) => window.__lumamap.S.project.scenes.find(s => s.id === window.__lumamap.S.project.sceneId).looks[id].fx.style, id), "matrix");
   await page.evaluate(() => window.__lumamap.openTab(null));
 });
+await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al apagón y funciona junto al teclado", async () => {
+  await page.evaluate(() => {
+    const mk = (i, id) => ({ index: i, id, connected: true, buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0] });
+    window.__pads = [mk(0, "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e)"), mk(1, "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c)")];
+    Object.defineProperty(navigator, "getGamepads", { value: () => window.__pads, configurable: true });
+    const a = window.__lumamap; a.S.project.settings.control.mappings = []; if (a.S.blackout) a.actions.blackout();
+    a.openTab("live"); dispatchEvent(new Event("gamepadconnected"));
+  });
+  const press = (p, b, on) => page.evaluate(([p, b, on]) => { window.__pads[p].buttons[b] = { pressed: on, value: on ? 1 : 0 }; }, [p, b, on]);
+  const box = page.locator("#panelBody .ctlsimple");
+  await box.locator(".devchip", { hasText: "Mando 1 · Xbox" }).waitFor();
+  await box.locator(".devchip", { hasText: "Mando 2 · PlayStation" }).waitFor();
+  await box.locator("select").selectOption("global/blackout");
+  await box.getByRole("button", { name: "Asignar un botón" }).click();
+  await page.locator(".learn").waitFor();
+  await page.waitForTimeout(100);
+  await press(0, 0, true); await page.waitForTimeout(150); await press(0, 0, false); await page.waitForTimeout(150);
+  const maps = await page.evaluate(() => window.__lumamap.S.project.settings.control.mappings.map(m => [m.src, m.device, m.key, m.target]));
+  assert.deepEqual(maps, [["gamepad", "Mando 1", "btn:0", "global/blackout"]]);
+  // El botón A del Mando 2 no tiene nada; el del Mando 1 hace el apagón.
+  await press(1, 0, true); await page.waitForTimeout(150); await press(1, 0, false); await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => window.__lumamap.S.blackout), false);
+  await press(0, 0, true); await page.waitForTimeout(150); await press(0, 0, false); await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => window.__lumamap.S.blackout), true);
+  await box.locator(".ctlmaps").getByText("Mando 1 · A").waitFor();
+  // A la vez, el teclado: la tecla J → escena siguiente.
+  await page.evaluate(() => { window.__lumamap.actions.blackout(); });
+  await page.locator("#panelBody .ctlsimple select").selectOption("global/next");
+  await page.locator("#panelBody .ctlsimple").getByRole("button", { name: "Asignar un botón" }).click();
+  await page.locator(".learn").waitFor();
+  await page.keyboard.press("j");
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.settings.control.mappings.filter(m => m.src === "key" && m.target === "global/next").length), 1);
+  await page.evaluate(() => { window.__lumamap.S.project.settings.control.mappings = []; window.__lumamap.paramMappingsChanged(); window.__lumamap.openTab(null); });
+});
+
+await test("buscar GIF animado: buscar, tocar uno y entra en vivo (con fundido) o como capa encima", async () => {
+  const gif = fs.readFileSync(new URL("./fixtures/anim.gif", import.meta.url));
+  await page.route("https://api.openverse.org/**", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify({ page_count: 1, results: [{ id: "g1", title: "Fuego animado", url: "https://upload.example.org/fuego.gif", thumbnail: "https://upload.example.org/fuego.gif", creator: "Ana", license: "by", license_version: "4.0" }] }) }));
+  await page.route("https://upload.example.org/**", (r) => r.fulfill({ status: 200, contentType: "image/gif", headers: { "access-control-allow-origin": "*" }, body: gif }));
+  const id = await page.evaluate(() => { const a = window.__lumamap; a.S.liveFade = 0.3; return a.S.project.surfaces[0].id; });
+  await page.evaluate((id) => { window.__lumamap.select(id); window.__lumamap.openTab("live"); }, id);
+  await page.getByRole("button", { name: "Buscar GIF animado y ponerlo en vivo" }).click();
+  await page.locator(".gifsearch input[type=search]").fill("fuego");
+  await page.locator(".gifsearch").getByRole("button", { name: "Buscar" }).click();
+  await page.locator(".gifcell").first().waitFor();
+  assert.match(await page.locator(".gifcell small").first().textContent(), /Ana · CC BY 4.0/);
+  await page.locator(".gifcell").first().click();
+  await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 15000 });
+  const m = await page.evaluate((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; const med = a.S.project.media.find(x => x.id === l.source.mediaId); return { kind: med.kind, name: med.name, credit: med.credit }; }, id);
+  assert.deepEqual(m, { kind: "anim", name: "Fuego animado.gif", credit: "© Ana · CC BY 4.0" });
+  // Como capa nueva encima.
+  const n0 = await page.evaluate(() => window.__lumamap.S.project.surfaces.length);
+  await page.evaluate(() => window.__lumamap.actions.searchGifs({ query: "fuego" }));
+  await page.locator(".gifsearch .seg button", { hasText: "Capa nueva encima" }).click();
+  await page.locator(".gifcell").first().click();
+  await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0, { timeout: 15000 });
+  assert.match(await page.evaluate(() => window.__lumamap.S.project.surfaces.at(-1).name), /^GIF /);
+  await page.unroute("https://api.openverse.org/**"); await page.unroute("https://upload.example.org/**");
+  await page.evaluate(() => window.__lumamap.openTab(null));
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();
