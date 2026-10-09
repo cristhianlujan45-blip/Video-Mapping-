@@ -11,6 +11,7 @@ import { runAction } from "../rules.js";
 import { describe } from "../params.js";
 import { LIGHT_FX, findFx, defaultLightFx } from "../lightfx.js";
 import { SIGNALS } from "../tracking.js";
+import { TIMER_TEMPLATES, templateSteps, targetName } from "../timers.js";
 
 const SHAPES = [...Object.keys(M.SHAPES), "mesh"];
 const LIGHT_KINDS = ["strip", "matrix", "ring", "bar", "par", "moving"];
@@ -225,11 +226,13 @@ export const ACTIONS = {
     run: (app) => { const t = app.tracking?.ensure(app.S.project.settings.tracking.camId || "default"); return t ? "Detección en marcha" : "La detección no está disponible con el proveedor elegido"; },
   },
   create_tracking_rule: {
-    label: "Regla interactiva", params: { signal: SIGNALS.map(s => s[0]).join("|"), op: "above|below", value: "0-1", then: "acción: {type: scene|color|anim|lightfx|blackout, …}" },
+    label: "Regla interactiva", params: { signal: SIGNALS.map(s => s[0]).join("|"), op: "above|below", value: "0-1", then: "acción: {type: scene|color|anim|lightfx|blackout|screen|video, …}" },
     check: (app, p) => {
       const signal = oneOf(p.signal, "signal", SIGNALS.map(s => s[0]));
       const then = p.then || {};
-      if (!["scene", "color", "anim", "lightfx", "blackout"].includes(then.type)) fail("La acción de la regla debe ser scene, color, anim, lightfx o blackout");
+      if (!["scene", "color", "anim", "lightfx", "blackout", "screen", "video"].includes(then.type)) fail("La acción de la regla debe ser scene, color, anim, lightfx, blackout, screen o video");
+      if (then.type === "screen" && !/^(screens|screen:[1-4]|surface:.+)$/.test(then.target || "")) fail("Pantalla no válida (screens, screen:1-4 o surface:<id>)");
+      if (then.type === "video" && !app.S.project.media.some(m => m.id === then.mediaId || m.name === then.mediaId)) fail("Ese video no está en el proyecto");
       if (then.type === "color") color(then.color, "color");
       if (then.type === "lightfx" && !findFx(then.fx)) fail(`No existe el efecto de luces «${then.fx}»`);
       if (then.type === "lightfx") then.fx = findFx(then.fx).id;
@@ -249,6 +252,38 @@ export const ACTIONS = {
     check: (app, p) => ({ kind: oneOf(p.kind, "kind", ["cube", "plane", "sphere", "cylinder", "cone", "pyramid", "prism"]) }),
     text: (app, p) => `Añadir un objeto 3D (${p.kind})`,
     run: async (app, p) => { const { ensure3d } = await import("../panels-3d.js"); const st = await ensure3d(app); const o = st.addObject(p.kind); app.changed({ panel: true }); app.commit(); return `${o.name} añadido`; },
+  },
+  screen_power: {
+    label: "Encender / apagar pantalla", params: { screen: "1-4 | all | nombre de superficie", on: "true|false" },
+    check: (app, p) => {
+      const on = p.on !== false && p.on !== "false";
+      if (["all", "todas", "screens"].includes(String(p.screen).toLowerCase())) return { target: "screens", on };
+      const n = Number(p.screen);
+      if (Number.isInteger(n) && n >= 1 && n <= 4) return { target: `screen:${n}`, on };
+      return { target: "surface:" + surfaceRef(app, p.screen), on };
+    },
+    text: (app, p) => `${targetName(app.S.project, p.target)}: ${p.on ? "encender" : "apagar"}`,
+    run: (app, p) => runAction(app, { type: "screen", target: p.target, on: p.on }),
+  },
+  screen_timer: {
+    label: "Pantallas por tiempos", params: { template: TIMER_TEMPLATES.map(t => t[0]).join("|"), every: "segundos entre pasos (1-3600)", who: "screens|surfaces" },
+    check: (app, p) => {
+      const who = oneOf(p.who, "who", ["screens", "surfaces"], "screens");
+      if (who === "surfaces" && !app.S.project.surfaces.length) fail("No hay superficies");
+      return { template: oneOf(p.template, "template", TIMER_TEMPLATES.map(t => t[0])), every: Math.round(num(p.every, "every", 1, 3600, 5)), who };
+    },
+    text: (app, p) => `${TIMER_TEMPLATES.find(t => t[0] === p.template)[1]}: ${p.who === "surfaces" ? "superficies" : "pantallas"} cada ${p.every} s (se puede cambiar en En vivo → tiempos)`,
+    run: (app, p) => {
+      const P = app.S.project, c = P.settings.timers;
+      const used = [1, 2, 3, 4].filter(n => n === 1 || P.surfaces.some(s => (s.screen || 0) === n)).map(n => `screen:${n}`);
+      const targets = p.who === "surfaces" ? P.surfaces.map(s => `surface:${s.id}`) : used.length > 1 ? used : ["screen:1", "screen:2"];
+      const r = templateSteps(p.template, targets, p.every);
+      c.steps = r.steps; c.length = r.length;
+      app.timers?.start();
+      app.changed({ panel: true }); app.commit();
+      if (app.S.tab !== "live") app.openTab("live");
+      return `Tiempos en marcha (${r.steps.length} pasos)`;
+    },
   },
   open_panel: {
     label: "Abrir un panel", params: { tab: TABS.join("|") },

@@ -9,6 +9,7 @@ import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, til
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
 import { genThumb, animThumb } from "./thumbs.js";
+import { timersSection } from "./panels-timers.js";
 import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./sources.js";
 import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
 import { PRO_PANELS, PRO_TABS } from "./panels-pro.js";
@@ -287,6 +288,9 @@ const live = {
       hint("Cada salida (P1 = proyector principal / HDMI del móvil; P2-P4 = otras ventanas o monitores) se controla por separado."),
       row(btn({ label: "Encender todas", kind: "wide", onClick: () => A.allScreens(true) }), btn({ label: "Apagar todas", kind: "wide danger", onClick: () => A.allScreens(false) })),
       scr));
+    wrap.append(fold("⏱ Encender y apagar por tiempos", true,
+      hint("Sincroniza pantallas y superficies o pon tú los tiempos: «a los 0:05 se enciende la Pantalla 2»."),
+      timersSection(app)));
 
     // Sensores: una cámara vigila una zona; si alguien se mueve, cambia la proyección.
     const sens = P.settings.sensors;

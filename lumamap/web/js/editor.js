@@ -32,6 +32,7 @@ import { whatNow, aiOf } from "./panels-assistant.js";
 import { LIGHT_FX, prepareFx } from "./lightfx.js";
 import { InteractiveFX } from "./interactive.js";
 import { analyzeProject } from "./ai/analyzer.js";
+import { TimerEngine } from "./timers.js";
 import { buildProjectContext } from "./ai/context.js";
 import { Remote } from "./remote.js";
 import * as Updater from "./updater.js";
@@ -118,6 +119,8 @@ function setProject(p, { keepHistory = false } = {}) {
   renderer.meshCache.clear();
   fitView();
   changed({ panel: true });
+  // Tiempos de pantallas: se paran los del proyecto anterior; arrancan solos si este lo pide.
+  if (app.timers) { app.timers.stop(); const tm = S.project.settings.timers; if (tm.autoStart && tm.steps.length) app.timers.start(); }
   // Tracking: se para el del proyecto anterior; se arranca solo si este lo pide.
   if (app.tracking) { app.tracking.stop(); const tc = S.project.settings.tracking; if (tc.autoStart) app.tracking.ensure(tc.camId || "default"); }
   const st3 = S.project.stage3d;
@@ -240,6 +243,13 @@ A.togglePlay = () => {
   updateChrome();
 };
 A.restart = () => { pool.restart(); S.clock = 0; S.sceneStart = 0; link.send({ t: "restart" }); };
+/** Un video concreto desde el principio (reglas interactivas: «al entrar alguien, empieza el video»). */
+A.restartMedia = (id) => {
+  const rt = pool.items.get(id);
+  if (rt?.el && rt.kind === "video") { try { rt.el.currentTime = 0; } catch {} if (S.playing) rt.el.play().catch(() => {}); }
+  else pool.ensure(id);
+  link.send({ t: "restartMedia", id });
+};
 
 /** Centro del encuadre visible en coordenadas de proyecto. */
 function viewCenter() {
@@ -2367,6 +2377,7 @@ function tick(now) {
   S.previewSkip = !S.projecting && S.previewFps === 30 ? !S.previewSkip : false;
   // Show: timecode, cues por timecode y líneas de automatización.
   show.tick();
+  app.timers?.tick(now);
   // Modulaciones del motor de parámetros (audio, tracking, mezclas): solo en el render.
   S.mods = params.modList(now);
   const RP = applyModList(S.project, S.master, S.mods);
@@ -2718,6 +2729,9 @@ async function init() {
   app.describeParam = (id) => describe(app, id);
   dmx = app.dmx = new DmxEngine(app);
   show = app.show = new ShowEngine(app);
+  app.timers = new TimerEngine(app);
+  app.timers.onChange = () => { if (S.tab === "live") renderPanel(); };
+  if (S.project.settings.timers.autoStart && S.project.settings.timers.steps.length) app.timers.start();
   app.tracking = new TrackingManager(app);
   window.__lumaApp = app;
   app.commands = buildCommands(app);

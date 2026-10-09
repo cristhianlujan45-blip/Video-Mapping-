@@ -9,6 +9,7 @@ import { listCameras, cameraIfReady } from "./sources.js";
 import { catalog } from "./params.js";
 import { uid, ANIM_LIBRARY } from "./model.js";
 import { LIGHT_FX } from "./lightfx.js";
+import { timerTargets } from "./timers.js";
 
 const ui = { drawZone: false };
 
@@ -54,6 +55,16 @@ function actionEditor(app, a, onChange) {
       const ms = P.settings.control.macros;
       a.id = a.id || ms[0]?.id || "";
       box.append(ms.length ? field("Macro", selectEl(ms.map(m => [m.id, m.name]), a.id, (v) => { a.id = v; onChange(); })) : hint("Crea primero una macro en el panel Control."));
+    } else if (a.type === "screen") {
+      a.target = a.target || "screen:1"; if (a.on === undefined) a.on = true;
+      box.append(field("Qué", selectEl(timerTargets(P), a.target, (v) => { a.target = v; onChange(); })),
+        field("Hacer", selectEl([["on", "Encender"], ["off", "Apagar"], ["toggle", "Cambiar (si está encendida, apagar)"]], a.on === "toggle" ? "toggle" : a.on === false ? "off" : "on",
+          (v) => { a.on = v === "toggle" ? "toggle" : v === "on"; onChange(); })));
+    } else if (a.type === "video") {
+      const vids = P.media.filter(m => m.kind === "video" || m.kind === "image");
+      a.surface = a.surface || "sel"; a.mediaId = a.mediaId || vids[0]?.id || "";
+      box.append(vids.length ? field("Video", selectEl(vids.map(m => [m.id, m.name]), a.mediaId, (v) => { a.mediaId = v; onChange(); })) : hint("Importa primero un video (Contenido → Video o foto)."),
+        field("Superficie", selectEl(surfOpts, a.surface, (v) => { a.surface = v; onChange(); })));
     } else if (a.type === "blackout") {
       box.append(toggle({ label: "Encender el apagón (apagado = quitarlo)", value: a.value !== false, onChange: (v) => { a.value = v; onChange(); } }));
     }

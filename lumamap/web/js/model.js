@@ -705,6 +705,20 @@ export function normalizeTracking(t) {
 
 /** Ajustes del proyecto. react = modo ritmo global (todo late con la música). */
 /** Proyección interactiva: cámara y alineación cámara ↔ proyección (interactive.js). */
+/** Pantallas y superficies por tiempos (timers.js): pasos { at (s), target, on }. */
+export const defaultTimers = () => ({ steps: [], loop: true, length: 0, autoStart: false, startAt: "" });
+export function normalizeTimers(t) {
+  const d = defaultTimers();
+  t = { ...d, ...(t && typeof t === "object" ? t : {}) };
+  t.steps = (Array.isArray(t.steps) ? t.steps : [])
+    .filter(s => s && Number.isFinite(+s.at) && typeof s.target === "string")
+    .map(s => ({ id: s.id || uid("tm"), at: Math.max(0, +s.at), target: s.target, on: s.on !== false }));
+  t.length = Math.max(0, +t.length || 0);
+  t.startAt = /^\d{1,2}:\d{2}$/.test(t.startAt || "") ? t.startAt : "";
+  t.loop = t.loop !== false; t.autoStart = !!t.autoStart;
+  return t;
+}
+
 export function defaultInteractive() {
   // depth: modo sensor (cámaras de profundidad o infrarrojas: fondo aprendido).
   return { enabled: false, camId: "", quad: [[0, 0], [1, 0], [1, 1], [0, 1]], mirror: false, depth: false };
@@ -734,6 +748,8 @@ export function defaultSettings() {
     screens: Object.fromEntries([1, 2, 3, 4].map(n => [n, defaultScreen()])),
     // Sensores de cámara (interacción): [{ id, camId, zone, sens, action, target, cooldown }]
     sensors: [],
+    // Encender / apagar pantallas y superficies por tiempos
+    timers: defaultTimers(),
     // Mapeos MIDI / OSC / DMX / teclado / audio, macros y bancos (params.js)
     control: defaultControl(),
     // Iluminación (DMX, Art-Net, sACN, pixel mapping, fixtures)
@@ -956,6 +972,7 @@ export function normalizeProject(json) {
     record: { ...D.record, ...(st.record || {}) },
     screens: Object.fromEntries([1, 2, 3, 4].map(n => [n, { ...defaultScreen(), ...(st.screens?.[n] || {}) }])),
     sensors: Array.isArray(st.sensors) ? st.sensors : [],
+    timers: normalizeTimers(st.timers),
     control: normalizeControl(st.control),
     dmx: normalizeDmx(st.dmx),
     show: normalizeShow(st.show),

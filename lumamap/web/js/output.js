@@ -92,6 +92,9 @@ const link = new Link("output", async (m) => {
     }
   } else if (m.t === "restart") {
     pool.restart();
+  } else if (m.t === "restartMedia") {
+    const rt = pool.items.get(m.id);
+    if (rt?.el && rt.kind === "video") { try { rt.el.currentTime = 0; } catch {} }
   }
 });
 if (!host) { link.send({ t: "hello" }); pool.setPlaying(true); }

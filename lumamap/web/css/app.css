@@ -482,3 +482,17 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .aiset .steps{margin:4px 0 4px 18px;font-size:13px;line-height:1.5;}
 .aiset code{background:var(--bg4);padding:2px 6px;border-radius:5px;}
 .asst .list .item{gap:8px;} .asst .list .item > span{flex:1;min-width:0;} .asst .list .item .btn{flex:none;white-space:nowrap;}
+
+/* Encender y apagar por tiempos */
+.timers .tstate{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);margin:4px 0 8px;}
+.timers .tstate i{width:10px;height:10px;border-radius:50%;background:var(--line);flex:none;}
+.timers .tstate.on{color:var(--text);}
+.timers .tstate.on i{background:var(--ok);box-shadow:0 0 8px var(--ok);}
+.timers .tsteps{display:flex;flex-direction:column;gap:6px;margin:4px 0 8px;}
+.timers .tstep{display:grid;grid-template-columns:70px 1fr auto auto;gap:6px;align-items:center;}
+.timers .tstep.done{opacity:.6;}
+.timers .tstep .sel{min-width:0;}
+.timers .ttime{width:100%;text-align:center;font-variant-numeric:tabular-nums;}
+.timers .tclock{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0;}
+.timers .tclock span{flex:1;}
+.timers .tclock input{width:120px;}

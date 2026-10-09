@@ -5,10 +5,12 @@
 import { describe } from "./params.js";
 import { lookOf, currentScene, ANIM_LIBRARY, GENERATORS } from "./model.js";
 import { findFx, defaultLightFx } from "./lightfx.js";
+import { applyStep, targetName } from "./timers.js";
 
 export const ACTION_TYPES = [
   ["param", "Mover un parámetro"], ["color", "Cambiar el color"], ["scene", "Ir a una escena"],
   ["anim", "Poner una animación"], ["lightfx", "Efecto en las luces"], ["macro", "Ejecutar una macro"], ["go", "GO (siguiente cue)"], ["blackout", "Apagón"],
+  ["screen", "Encender / apagar pantalla o superficie"], ["video", "Poner un video (desde el principio)"],
 ];
 
 /** Superficies a las que afecta una acción: "all", "sel" o un id. */
@@ -83,6 +85,29 @@ export function runAction(app, a) {
     }
     case "go": A.stepScene(1); return "GO";
     case "blackout": if (!!a.value !== S.blackout) A.blackout(); return a.value ? "Apagón" : "Fin del apagón";
+    case "screen": {
+      const target = a.target || "screen:1";
+      // on: true / false / "toggle" (cambia al contrario de como esté).
+      let on = a.on;
+      if (on === "toggle") {
+        const [k, id] = target.split(":");
+        on = k === "surface" ? !!lookOf(currentScene(P), id).hidden : k === "screen" ? P.settings.screens[id]?.on === false : !Object.values(P.settings.screens).some(x => x.on);
+      }
+      return applyStep(app, { target, on: on !== false }) || "Destino no encontrado";
+    }
+    case "video": {
+      const m = P.media.find(x => x.id === a.mediaId || x.name === a.mediaId);
+      if (!m) throw new Error("No existe el video: " + (a.mediaId || "(ninguno)"));
+      const sc = currentScene(P);
+      for (const id of surfacesOf(app, a.surface)) {
+        const look = lookOf(sc, id);
+        look.source = { ...look.source, type: "media", mediaId: m.id };
+        look.hidden = false;
+      }
+      A.restartMedia?.(m.id);
+      app.changed({ panel: true }); app.commitSoon();
+      return "Video: " + m.name;
+    }
     default: throw new Error("Acción desconocida: " + a.type);
   }
 }
@@ -99,6 +124,8 @@ export function describeAction(app, a) {
     case "macro": return "Macro " + (app.S.project.settings.control.macros.find(m => m.id === a.id)?.name || a.id);
     case "go": return "GO";
     case "blackout": return a.value ? "Apagón" : "Quitar apagón";
+    case "screen": return `${targetName(app.S.project, a.target || "screen:1")} ${a.on === "toggle" ? "cambiar" : a.on === false ? "OFF" : "ON"}`;
+    case "video": return "Video: " + (app.S.project.media.find(x => x.id === a.mediaId)?.name || "(ninguno)");
   }
   return a.type;
 }

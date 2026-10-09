@@ -27,7 +27,21 @@ function condition(t) {
   if (/(alguien|una persona|entre|aparezca)/.test(t)) return { signal: "presence", op: "above", value: 0.5 };
   return null;
 }
+/** «pantalla 2», «todas las pantallas» → destino de tiempos. */
+function screenTarget(t) {
+  if (/todas las pantallas|las pantallas/.test(t)) return "screens";
+  const m = t.match(/pantalla\s+(\w+)/);
+  const n = m && num(m[1]);
+  return n >= 1 && n <= 4 ? `screen:${n}` : null;
+}
 function ruleAction(t) {
+  const st = screenTarget(t);
+  if (st && /(enciend|prend|activa|muestra)/.test(t)) return { type: "screen", target: st, on: true };
+  if (st && /(apag|desactiva|oculta)/.test(t)) return { type: "screen", target: st, on: false };
+  if (/(video|v[ií]deo)/.test(t) && /(pon|empie|reproduc|arranc|lanza|sale)/.test(t)) {
+    const v = (globalThis.__lumaApp?.S.project.media || []).find(m => m.kind === "video" && t.includes(m.name.toLowerCase().replace(/\.[a-z0-9]+$/, ""))) || (globalThis.__lumaApp?.S.project.media || []).find(m => m.kind === "video");
+    if (v) return { type: "video", mediaId: v.id, surface: "all" };
+  }
   const lf = LIGHT_FX.slice().sort((a, b) => b.name.length - a.name.length).find(f => t.includes(f.name.toLowerCase()));
   if (/luz|luces/.test(t) && lf) return { type: "lightfx", fx: lf.id };
   if (/(siguiente|pr[oó]xima) escena/.test(t)) return { type: "scene", index: "next" };
@@ -62,12 +76,23 @@ export function parseCommand(app, text) {
 
   // Reglas interactivas: «cuando … entonces …»
   if (/^(cuando|si)\b/.test(t)) {
-    const [condPart, ...rest] = t.split(/,|\s+(?=cambia|pon|ve |pasa|haz|apaga|quita|ejecuta|lanza|siguiente|las luces|luces)/);
+    const [condPart, ...rest] = t.split(/,|\s+(?=cambia|pon|ve |pasa|haz|apaga|quita|ejecuta|lanza|siguiente|las luces|luces|enciende|prende|empieza|reproduce|arranca)/);
     const cond = condition(condPart), then = ruleAction(rest.join(" ") || t);
     if (cond && then) return { reply: "Creo esta regla interactiva:", actions: [A("create_tracking_rule", { ...cond, then })] };
     return { reply: !cond ? "No reconozco la condición. Ejemplos: «cuando levante la mano…», «cuando haya dos personas…», «cuando alguien entre…»." : "No reconozco qué hacer. Ejemplos: «…cambia el color a rojo», «…ve a la escena 2», «…luces Fuego».", actions: [] };
   }
   const actions = [];
+  // Pantallas por tiempos: «pantallas una tras otra cada 5 segundos», «sincroniza las pantallas»…
+  if (/(pantallas|superficies)/.test(t) && /(una tras otra|en cascada|en orden|sincroniz|a la vez|al mismo tiempo|altern|turn|persecuci|tiempos)/.test(t)) {
+    const ev = t.match(/cada\s+(\w+)\s*(segundos?|seg|s|minutos?|min)\b/);
+    const every = ev ? (num(ev[1]) || 1) * (/^min/.test(ev[2]) ? 60 : 1) : 5;
+    const template = /una tras otra|cascada|en orden/.test(t) ? "cascade" : /altern|turn/.test(t) ? "alternate" : /persecuci/.test(t) ? "chase" : "together";
+    return { reply: "Preparo los tiempos (luego puedes cambiar cada paso en En vivo):", actions: [A("screen_timer", { template, every, who: /superficies/.test(t) ? "surfaces" : "screens" })] };
+  }
+  const stg = screenTarget(t);
+  if (stg && /(enciend|prend|activa)/.test(t)) actions.push(A("screen_power", { screen: stg === "screens" ? "all" : stg.split(":")[1], on: true }));
+  else if (stg && /(apag|desactiva)/.test(t)) actions.push(A("screen_power", { screen: stg === "screens" ? "all" : stg.split(":")[1], on: false }));
+  if (actions.length) return { reply: "Propongo esto:", actions };
   // Música
   if (/(reaccion|al ritmo|con la m[uú]sica|con el beat|con el bajo)/.test(t)) {
     if (/luz|luces/.test(t)) actions.push(A("light_effect", { effect: /beat|golpe/.test(t) ? "Estrobo al tempo" : "Pulso de graves" }), A("lights_play", { on: true }));
