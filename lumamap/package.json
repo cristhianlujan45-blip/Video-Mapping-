@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node tests/core.test.js && node tests/params.test.js && node tests/dmx.test.js && node tests/lights.test.js && node tests/interactive.test.js && node tests/ai.test.js && node tests/show.test.js && node tests/server.test.js",
+    "test": "node tests/core.test.js && node tests/params.test.js && node tests/dmx.test.js && node tests/rdm.test.js && node tests/lights.test.js && node tests/interactive.test.js && node tests/ai.test.js && node tests/show.test.js && node tests/server.test.js",
     "test:browser": "node tests/browser.test.js && node tests/tracking.browser.test.js"
   },
   "engines": { "node": ">=18" },

@@ -20,6 +20,8 @@ import { patchPixels, pixelPositions, writePixel, rgbToRgbw, channelsPerPixel } 
 import { registerParams } from "./params.js";
 import { uid, defaultPixelMap } from "./model.js";
 import { prepareFx, prepareMove, defaultLightFx } from "./lightfx.js";
+import { channelsOf, kindOf } from "./rdm.js";
+import { UsbDmx } from "./usbdmx.js";
 
 /** Tipos de fixture: canales en orden. */
 export const FIXTURE_TYPES = {
@@ -31,8 +33,24 @@ export const FIXTURE_TYPES = {
   dimmer: { label: "Dimmer (1 canal)", channels: ["dimmer"] },
   par7: { label: "PAR LED 7 canales", channels: ["dimmer", "red", "green", "blue", "white", "strobe", "custom"] },
   moving: { label: "Cabeza móvil (11)", channels: ["pan", "panFine", "tilt", "tiltFine", "speed", "dimmer", "strobe", "red", "green", "blue", "white"] },
+  rgbwa: { label: "Dimmer + RGBWA (6)", channels: ["dimmer", "red", "green", "blue", "white", "amber"] },
+  rgbwauv: { label: "Dimmer + RGBWA + UV + estrobo (8)", channels: ["dimmer", "red", "green", "blue", "white", "amber", "uv", "strobe"] },
+  wash: { label: "Cabeza móvil wash (14)", channels: ["pan", "panFine", "tilt", "tiltFine", "speed", "dimmer", "strobe", "red", "green", "blue", "white", "custom", "custom", "custom"] },
+  beam: { label: "Cabeza móvil beam / spot (16)", channels: ["pan", "panFine", "tilt", "tiltFine", "speed", "dimmer", "strobe", "color", "gobo", "custom", "custom", "custom", "custom", "custom", "custom", "custom"] },
+  laser7: { label: "Láser DMX (7)", channels: ["intensity", "custom", "custom", "custom", "custom", "speed", "color"] },
+  laser13: { label: "Láser RGB DMX (13)", channels: ["intensity", "custom", "custom", "custom", "custom", "custom", "custom", "custom", "custom", "speed", "red", "green", "blue"] },
+  strobe: { label: "Estrobo (2)", channels: ["dimmer", "strobe"] },
+  fog: { label: "Máquina de humo (1)", channels: ["intensity"] },
+  uv: { label: "Luz UV (3)", channels: ["dimmer", "uv", "strobe"] },
+  blinder: { label: "Blinder 2 lámparas (2)", channels: ["dimmer", "dimmer"] },
   custom: { label: "Personalizado", channels: ["custom"] },
 };
+/** Respuestas de la detección guiada → tipo de canal. */
+export const PROBE_ANSWERS = [
+  ["dimmer", "Se encendió / brillo"], ["red", "Rojo"], ["green", "Verde"], ["blue", "Azul"], ["white", "Blanco"], ["amber", "Ámbar"], ["uv", "UV / violeta"],
+  ["pan", "Se movió de lado"], ["tilt", "Se movió arriba/abajo"], ["strobe", "Parpadea (estrobo)"], ["color", "Cambió el color (rueda)"], ["gobo", "Cambió la figura"],
+  ["speed", "Cambió la velocidad"], ["custom", "Otra cosa"], ["", "No pasó nada"],
+];
 export const CHANNEL_TYPES = [
   ["dimmer", "Dimmer"], ["red", "Rojo"], ["green", "Verde"], ["blue", "Azul"], ["white", "Blanco"], ["amber", "Ámbar"], ["uv", "UV"],
   ["strobe", "Estrobo"], ["pan", "Pan"], ["panFine", "Pan fino"], ["tilt", "Tilt"], ["tiltFine", "Tilt fino"], ["speed", "Velocidad"],
@@ -229,14 +247,38 @@ export class DmxEngine {
     this.blackout = false;       // apagón solo de luces
     this.frames = 0; this.lastSendMs = 0;
     this.onUpdate = null;        // refresco del panel
+    this.detected = null;        // luces RDM detectadas { devices, progress, done }
+    this.lasers = [];            // DAC láser detectados en la red
+    this.probe = null;           // detección guiada { universe, address, index, count, known }
+    // Interfaz USB-DMX: se abre sola si ya estaba autorizada y al enchufarla.
+    this.usb = new UsbDmx();
+    this.usb.onChange = () => { if (this.usb.ready) this.useUsb(); this.onUpdate?.("usb"); };
+    if (this.usb.supported && globalThis.LumaDesktop) {
+      this.usb.auto();
+      try { navigator.serial.addEventListener("connect", () => this.usb.auto()); } catch {}
+    }
     registerDmxParams(this);
   }
   get cfg() { return this.app.S.project.settings.dmx; }
-  get desktop() { return !!globalThis.LumaDesktop?.dmxStart; }
+  /** ¿Hay salida de red real? Windows (servicio aparte) o Android (UDP nativo de la app). */
+  get desktop() { return !!globalThis.LumaDesktop?.dmxStart || !!globalThis.LumaNative?.udpOpen; }
 
   /* ---------------- Servicio de red ---------------- */
   connect() {
     if (!this.desktop || this.connecting) return;
+    // Android: el mismo núcleo de red dentro de la app, con UDP nativo.
+    if (!globalThis.LumaDesktop?.dmxStart) {
+      if (this.port) return;
+      this.connecting = true;
+      import("./dmx-android.js").then(({ startAndroidDmx }) => {
+        const { port } = startAndroidDmx(globalThis.LumaNative);
+        this.port = port;
+        this.port.onmessage = (ev) => this.onService(ev.data);
+        this.port.start?.();
+        this.lastCfgSig = ""; this.connecting = false;
+      }).catch((e) => { this.service.error = e.message; this.connecting = false; });
+      return;
+    }
     this.connecting = true;
     if (!this.portListener) {
       this.portListener = (e) => {
@@ -262,7 +304,53 @@ export class DmxEngine {
     else if (m.t === "stats") this.service.stats = m.stats;
     else if (m.t === "nodes") this.service.nodes = m.list;
     else if (m.t === "input") this.onInput(m.list);
+    else if (m.t === "rdm") this.detected = { devices: m.devices || [], progress: m.progress || "", done: !!m.done, error: m.error || "" };
+    else if (m.t === "lasers") this.lasers = m.list;
     this.onUpdate?.(m.t);
+  }
+
+  /** Al conectar una interfaz USB-DMX: el primer universo (o el 1) sale por ella. */
+  useUsb() {
+    const c = this.cfg;
+    if (c.universes.some(u => u.protocol === "usb")) return;
+    let u = c.universes.find(x => x.protocol === "virtual") || null;
+    if (!u) { u = { num: c.universes.length ? Math.max(...c.universes.map(x => x.num)) + 1 : 1, name: "", portAddress: 0, sacnUniverse: 1, dest: "broadcast", ip: "", enabled: true, delayMs: 0, priority: 100 }; c.universes.push(u); }
+    u.protocol = "usb"; u.name = "USB-DMX";
+    this.app.changed?.({ panel: true });
+  }
+
+  /* ---------------- Detección automática (RDM) ---------------- */
+  /** Pide a todos los nodos la lista de luces RDM y qué es cada una. */
+  detectLights() {
+    if (!this.port) { this.connect(); setTimeout(() => this.port && this.detectLights(), 800); return; }
+    this.detected = { devices: [], progress: "Buscando luces…", done: false, error: "" };
+    this.port.postMessage({ t: "rdm-discover" });
+  }
+  /** ¿Esta luz detectada ya está en el proyecto? (mismo UID) */
+  hasDetected(dev) { return this.cfg.fixtures.some(f => f.rdmUid === dev.uid); }
+  /**
+   * Añade una luz detectada: universo de su salida (Art-Net a la IP del nodo),
+   * su dirección DMX, sus canales tal como los describe y un efecto para empezar.
+   */
+  addDetected(dev, names = {}) {
+    const c = this.cfg;
+    if (this.hasDetected(dev)) return null;
+    let u = c.universes.find(x => x.protocol === "artnet" && (x.portAddress ?? x.num - 1) === dev.portAddress);
+    if (!u) {
+      const num = Math.max(0, ...c.universes.map(x => x.num)) + 1;
+      u = { num, name: dev.model || "", protocol: "artnet", portAddress: dev.portAddress, sacnUniverse: num, dest: "unicast", ip: dev.ip, enabled: true, delayMs: 0, priority: 100 };
+      c.universes.push(u); c.universes.sort((a, b) => a.num - b.num);
+    } else if (u.protocol === "artnet" && !u.ip) Object.assign(u, { dest: "unicast", ip: dev.ip });
+    const channels = channelsOf(dev, names);
+    const hasColor = channels.some(ch => ch.type in COLOR_CH), moving = channels.some(ch => ch.type === "pan" || ch.type === "tilt");
+    const n = c.fixtures.length;
+    const f = { id: uid("fix"), name: dev.label || dev.model || kindOf(dev), type: "custom", universe: u.num, address: Math.max(1, dev.startAddress || 1),
+      channels, values: [], x: 0.1 + ((n * 0.13) % 0.8), y: 0.2 + (Math.floor(n / 6) % 4) * 0.15, source: hasColor ? "effect" : "manual", fx: hasColor ? defaultLightFx() : undefined,
+      move: moving ? { kind: "none", speed: 1, size: 0.5 } : undefined, screen: 1, enabled: true,
+      rdmUid: dev.uid, kind: dev.kind || kindOf(dev), maker: dev.manufacturer || "" };
+    c.fixtures.push(f);
+    this.ensureUniverses();
+    return f;
   }
   sendConfig(force = false) {
     const c = this.cfg;
@@ -432,6 +520,13 @@ export class DmxEngine {
         bufFor(u)[addr % 512] = Math.round(Math.max(0, Math.min(255, v)));
       });
     }
+    // Detección guiada: un canal al máximo (y los ya identificados como brillo, para ver el color).
+    if (this.probe) {
+      const pb = this.probe, b = bufFor(pb.universe);
+      for (let i = 0; i < pb.count; i++) b[(pb.address - 1 + i) % 512] = 0;
+      pb.known.forEach((t, i) => { if (t === "dimmer" || t === "intensity") b[(pb.address - 1 + i) % 512] = 255; });
+      b[(pb.address - 1 + pb.index) % 512] = 255;
+    }
     // 3) Snapshot activa (o la de EMERGENCIA): sustituye los universos que guardó.
     const em = this.app.S.emergency ? this.app.S.project.settings.show.emergency.snapshot : null;
     const snapId = em || this.snapshot;
@@ -446,6 +541,11 @@ export class DmxEngine {
 
     this.out = bufs;
     this.frames++;
+    // USB-DMX: el universo marcado como «usb» sale por la interfaz (una por universo).
+    if (this.usb.ready && c.enabled) {
+      const u = c.universes.find(x => x.protocol === "usb" && x.enabled !== false);
+      if (u) this.usb.send(bufs.get(u.num) || (this.ZERO || (this.ZERO = new Uint8Array(512))));
+    }
     if (c.enabled && this.port) {
       const list = [...bufs.entries()].filter(([n]) => this.universe(n)?.protocol !== "virtual");
       if (list.length) this.port.postMessage({ t: "frame", at: Date.now(), list });

@@ -234,7 +234,7 @@ function setOutputDisplay(id) {
 ipcMain.handle("displays", () => {
   const out = output ? screen.getDisplayMatching(output.getBounds()).id : null;
   return screen.getAllDisplays().map((d, i) => ({
-    id: d.id, label: `Pantalla ${i + 1}`, width: d.size.width, height: d.size.height,
+    id: d.id, label: `Pantalla ${i + 1}`, name: d.label || "", width: d.size.width * (d.scaleFactor || 1), height: d.size.height * (d.scaleFactor || 1), internal: !!d.internal,
     primary: d.id === screen.getPrimaryDisplay().id, isOutput: d.id === out, chosen: d.id === chosenDisplay,
   }));
 });
@@ -511,9 +511,18 @@ app.whenReady().then(() => {
     return new Response(fs.readFileSync(file), { headers: { "content-type": MIME[path.extname(file)] || "application/octet-stream" } });
   });
   // Micrófono (audio reactivo), cámara, MIDI y pantalla completa sin preguntar: es una app local.
-  const allowed = new Set(["media", "fullscreen", "midi", "clipboard-sanitized-write", "window-management"]);
+  const allowed = new Set(["media", "fullscreen", "midi", "clipboard-sanitized-write", "window-management", "serial"]);
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(allowed.has(perm)));
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => allowed.has(perm));
+  // Interfaces USB-DMX (Web Serial): se elige sola la que parezca DMX (chip FTDI o nombre), sin diálogos.
+  session.defaultSession.setDevicePermissionHandler((d) => d.deviceType === "serial");
+  session.defaultSession.on("select-serial-port", (event, list, _wc, cb) => {
+    event.preventDefault();
+    const isDmx = (p) => /^(0x)?0?403$|^1027$/i.test(String(p.vendorId || "")) || /dmx|enttec|ftdi|ultradmx|eurolite/i.test(`${p.displayName || ""} ${p.portName || ""}`);
+    const pick = list.find(isDmx);
+    log("dmx", "USB-DMX: " + (pick ? `${pick.displayName || pick.portName}` : "ninguna interfaz") + ` (${list.length} puerto(s) serie)`);
+    cb(pick ? pick.portId : "");
+  });
 
   // Conectar o desconectar el proyector con la salida abierta: se recoloca sola.
   const displaysChanged = () => { buildMenu(); editor?.webContents.send("displays-changed"); };

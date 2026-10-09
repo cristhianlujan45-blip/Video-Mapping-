@@ -2669,7 +2669,24 @@ async function init() {
       closeDialog();
       c.run();
     });
-    window.LumaDesktop.onDisplaysChanged(() => { if (S.tab === "output") renderPanel(); });
+    // Proyector (o pantalla) conectado: se detecta solo y se ofrece proyectar ahí con un toque.
+    let known = null;
+    const checkDisplays = async (announce) => {
+      const list = await window.LumaDesktop.displays().catch(() => []);
+      const fresh = known ? list.filter(d => !known.has(d.id) && !d.primary) : [];
+      known = new Set(list.map(d => d.id));
+      if (S.tab === "output") renderPanel();
+      if (!announce || !fresh.length || S.perfMode) return;
+      const d = fresh[0], name = d.name || "Proyector";
+      const r = await dialog({ title: "Proyector conectado", content: h("p", {}, `${name} · ${Math.round(d.width)}×${Math.round(d.height)}. ¿Proyectar ahí?`),
+        buttons: [{ label: "Ahora no", value: false }, { label: "Proyectar ahí", kind: "primary", value: true }] });
+      if (!r) return;
+      await window.LumaDesktop.setOutputDisplay(d.id);
+      if (resDiffers(d)) toast(`Consejo: la resolución del proyector es ${Math.round(d.width)}×${Math.round(d.height)} (Salida → Resolución)`);
+    };
+    const resDiffers = (d) => Math.abs(d.width - S.project.width) > 2 || Math.abs(d.height - S.project.height) > 2;
+    checkDisplays(false);
+    window.LumaDesktop.onDisplaysChanged(() => checkDisplays(true));
   }
   buildChrome();
   buildPerfHud();

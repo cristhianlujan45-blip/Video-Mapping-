@@ -211,6 +211,7 @@ class MainActivity : ComponentActivity() {
         displayManager.unregisterDisplayListener(displayListener)
         presentation?.dismiss()
         presentation = null
+        udp.closeAll()
         web.destroy()
         super.onDestroy()
     }
@@ -436,6 +437,28 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun installUpdate(url: String) = updater.install(url)
 
+        /* Luces: UDP para Art-Net / sACN / RDM (solo el editor). */
+        @JavascriptInterface
+        fun udpOpen(id: Int, port: Int, address: String, multicast: Boolean): Boolean = isEditor && udp.open(id, port, address, multicast)
+
+        @JavascriptInterface
+        fun udpSend(id: Int, host: String, port: Int, b64: String): String = if (isEditor) udp.send(id, host, port, b64) else "No disponible"
+
+        @JavascriptInterface
+        fun udpClose(id: Int) { if (isEditor) udp.close(id) }
+
+        @JavascriptInterface
+        fun udpJoin(id: Int, group: String) { if (isEditor) runCatching { udp.join(id, group) } }
+
+        @JavascriptInterface
+        fun udpLeave(id: Int, group: String) { if (isEditor) runCatching { udp.leave(id, group) } }
+
+        @JavascriptInterface
+        fun udpError(id: Int): String = udp.error(id)
+
+        @JavascriptInterface
+        fun netInterfaces(): String = udp.interfaces()
+
         @JavascriptInterface
         fun haptic() {
             val v = getSystemService(Vibrator::class.java) ?: return
@@ -480,4 +503,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private var pendingSaveName = "proyecto.lumamap"
+
+    /* ------------------------------------------------------------ luces (UDP) */
+
+    /** Sockets UDP de las luces; lo recibido se entrega a la página (web/js/dmx-android.js). */
+    private val udp by lazy {
+        UdpHub(this) { id, from, port, b64 ->
+            main.post { web.evaluateJavascript("window.__lumaUdp&&window.__lumaUdp($id,${JSONObject.quote(from)},$port,${JSONObject.quote(b64)})", null) }
+        }
+    }
 }

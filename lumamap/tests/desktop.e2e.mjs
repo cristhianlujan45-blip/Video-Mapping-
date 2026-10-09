@@ -12,6 +12,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as P from "../web/js/dmxproto.js";
+import * as R from "../web/js/rdm.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const desktop = path.join(here, "..", "desktop");
@@ -214,6 +215,46 @@ await test("IA local por el proceso principal: habla con Ollama de este equipo; 
   assert.equal(r.off.ok, false, "Ollama apagado: error controlado, sin colgarse");
   const hw = await win.evaluate(() => window.LumaDesktop.hardwareProfile());
   assert.ok(hw.ram > 0 && hw.cores > 0, "perfil de hardware para recomendar el modelo");
+});
+await test("detección automática (RDM): el nodo dice qué luces tiene y la app las añade con su tipo, canales y dirección", async () => {
+  // Nodo RDM falso en 127.0.0.2 con una cabeza móvil y un PAR RGB.
+  const lights = [
+    { uid: [0x4c, 0x55, 0, 0, 0, 1], info: { category: 0x0102, footprint: 7, startAddress: 101 }, maker: "Marca Test", model: "Beam 7R", label: "Cabeza izquierda",
+      slots: [{ offset: 0, label: 0x0101 }, { offset: 1, type: 1, label: 0x0101 }, { offset: 2, label: 0x0102 }, { offset: 3, type: 1, label: 0x0102 }, { offset: 4, label: 0x0001 }, { offset: 5, label: 0x0205 }, { offset: 6, label: 0x0404 }] },
+    { uid: [0x4c, 0x55, 0, 0, 0, 2], info: { category: 0x0101, footprint: 4, startAddress: 1 }, maker: "Marca Test", model: "PAR RGBW", label: "", slots: null },
+  ];
+  const rdmSock = dgram.createSocket({ type: "udp4", reuseAddr: true });
+  await new Promise(r => rdmSock.bind(P.ARTNET_PORT, "127.0.0.2", r));
+  rdmSock.setBroadcast(true);
+  const reply = (pkt) => rdmSock.send(pkt, P.ARTNET_PORT, "127.255.255.255");
+  const onReq = (b) => {
+    const m = R.parseArtRdm(new Uint8Array(b));
+    if (m?.op === "todRequest") reply(R.artTodData(m.addresses[0], lights.map(l => l.uid)));
+    if (m?.op === "rdm" && m.rdm?.cc === R.CC.get) {
+      const L = lights.find(l => R.uidStr(l.uid) === R.uidStr(m.rdm.dest));
+      if (!L) return;
+      const data = m.rdm.pid === R.PID.deviceInfo ? R.deviceInfoData(L.info) : m.rdm.pid === R.PID.manufacturerLabel ? new TextEncoder().encode(L.maker)
+        : m.rdm.pid === R.PID.modelDescription ? new TextEncoder().encode(L.model) : m.rdm.pid === R.PID.deviceLabel ? new TextEncoder().encode(L.label)
+        : m.rdm.pid === R.PID.slotInfo && L.slots ? R.slotInfoData(L.slots) : null;
+      const resp = R.rdmPacket({ dest: m.rdm.src, src: L.uid, tn: m.rdm.tn, port: data ? R.RESPONSE.ack : R.RESPONSE.nack, cc: R.CC.getResponse, pid: m.rdm.pid, data: data || [0, 0] });
+      reply(R.artRdm(m.portAddress, resp));
+    }
+  };
+  node.on("message", onReq); rdmSock.on("message", onReq);
+  await win.evaluate(() => window.__lumamap.dmx.detectLights());
+  await win.waitForFunction(() => window.__lumamap.dmx.detected?.done, null, { timeout: 20000 });
+  const r = await win.evaluate(() => {
+    const D = window.__lumamap.dmx, devs = D.detected.devices;
+    for (const d of devs) D.addDetected(d, { pan: "Pan", tilt: "Tilt" });
+    return { devs, fx: D.cfg.fixtures.filter(f => f.rdmUid).map(f => ({ name: f.name, kind: f.kind, address: f.address, ch: f.channels.map(c => c.type), src: f.source })) };
+  });
+  node.off("message", onReq); rdmSock.close();
+  assert.equal(r.devs.length, 2, JSON.stringify(r.devs));
+  const head = r.fx.find(f => f.name === "Cabeza izquierda"), par = r.fx.find(f => /PAR/.test(f.name));
+  assert.equal(head.kind, "Cabeza móvil (beam/spot)"); assert.equal(head.address, 101);
+  assert.deepEqual(head.ch, ["pan", "panFine", "tilt", "tiltFine", "intensity", "red", "strobe"]);
+  assert.deepEqual(par.ch, ["red", "green", "blue", "white"], "sin SLOT_INFO se deduce por tipo y canales");
+  assert.equal(par.address, 1); assert.equal(par.src, "effect");
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

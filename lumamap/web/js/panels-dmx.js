@@ -3,8 +3,8 @@
 // Arriba, los cuatro pasos simples: CONECTAR → PIXEL MAP → VIDEO → PLAY.
 // Debajo (plegado), universos, fixtures, snapshots, prueba, monitor, entrada y
 // diagnóstico.
-import { h, section, row, btn, slider, segmented, toggle, swatches, hint, toast, dialog, prompt } from "./ui.js";
-import { FIXTURE_TYPES, CHANNEL_TYPES, TEST_COLORS } from "./dmx.js";
+import { h, section, row, btn, slider, segmented, toggle, swatches, hint, toast, dialog, prompt, closeDialog } from "./ui.js";
+import { FIXTURE_TYPES, CHANNEL_TYPES, TEST_COLORS, PROBE_ANSWERS } from "./dmx.js";
 import { COLOR_ORDERS, channelsPerPixel, splitPortAddress, portAddress } from "./dmxproto.js";
 import { surfaceOutline, bbox } from "./math.js";
 import { LIGHT_FX, LIGHT_FX_CATEGORIES, MOVES, findFx, defaultLightFx, prepareFx } from "./lightfx.js";
@@ -171,6 +171,13 @@ function simpleLights(app) {
     for (const n of online) nodes.append(h("div", { class: "dev connected" }, h("i"), h("b", {}, n.shortName || n.longName || "Nodo"), h("small", {}, ` · ${n.ip} · ${n.outputs.length || 1} salida(s)`),
       btn({ label: net.some(u => u.ip === n.ip) ? "Conectado ✓" : "Conectar", kind: "small primary", onClick: () => set(() => { useNode(c, n); D.ensureUniverses(); toast(`Luces conectadas a ${n.shortName || n.ip}`); }) })));
     if (!online.length) nodes.append(hint("Si tu nodo no aparece (algunos solo usan sACN o no responden a la búsqueda), usa «Enviar a toda la red»."));
+    // Interfaz USB-DMX (Enttec Pro y compatibles): se detecta al enchufarla.
+    const U = D.usb;
+    if (U?.supported) nodes.append(h("div", { class: `dev ${U.ready ? "connected" : ""}` }, h("i"),
+      h("b", {}, U.ready ? "Interfaz USB-DMX conectada" : "Interfaz USB-DMX"),
+      h("small", {}, U.ready ? ` · universo ${c.universes.find(u => u.protocol === "usb")?.num ?? "—"} · ${U.frames} fotogramas` : U.error ? " · " + U.error : " · enchúfala y se detecta sola"),
+      U.ready ? null : btn({ label: "Conectar", kind: "small", onClick: async () => { await U.request(); app.renderPanel(); } })));
+    for (const l of D.lasers || []) nodes.append(h("div", { class: "dev connected" }, h("i"), h("b", {}, l.kind), h("small", {}, ` · ${l.ip} · detectado. Dibujar con el láser por red: EN DESARROLLO (los láseres DMX funcionan como cualquier luz).`)));
     conn.append(nodes,
       row(btn({ label: "Enviar a toda la red (Art-Net)", kind: "small", onClick: () => set(() => { for (const u of c.universes) Object.assign(u, { protocol: "artnet", dest: "broadcast" }); if (!c.universes.length) c.universes.push({ num: 1, name: "", protocol: "artnet", dest: "broadcast", ip: "", enabled: true, delayMs: 0, priority: 100, portAddress: 0, sacnUniverse: 1 }); D.ensureUniverses(); toast("Las luces se enviarán a toda la red"); }) }),
         btn({ label: "sACN", kind: "small", onClick: () => set(() => { for (const u of c.universes) Object.assign(u, { protocol: "sacn", dest: "broadcast" }); toast("Universos en sACN (multicast)"); }) }),
@@ -180,6 +187,21 @@ function simpleLights(app) {
 
   // ---- 2 · Mis luces ----
   const mine = section("2 · Mis luces");
+  // Detección automática: las luces con RDM dicen solas qué son y dónde están.
+  if (D.desktop) {
+    const det = D.detected;
+    mine.append(btn({ label: det && !det.done ? det.progress || "Buscando…" : "🔍 Detectar mis luces automáticamente", kind: "primary block", disabled: !!det && !det.done,
+      onClick: () => { D.detectLights(); app.renderPanel(); } }));
+    if (det?.error) mine.append(hint(det.error));
+    if (det?.devices?.length) {
+      const names = Object.fromEntries(CHANNEL_TYPES);
+      const fresh = det.devices.filter(d => !D.hasDetected(d) && d.footprint);
+      mine.append(h("div", { class: "list detected" }, ...det.devices.map(d => h("div", { class: "item" },
+        h("span", {}, h("b", {}, d.label || d.model || d.kind || "Luz"), h("small", {}, ` · ${[d.manufacturer, d.model].filter(Boolean).join(" ")} · ${d.kind || "Luz"} · ${d.footprint || "?"} canales · dirección ${d.startAddress || "?"}`)),
+        D.hasDetected(d) ? h("small", { class: "ok" }, "✓ añadida") : d.footprint ? btn({ label: "Añadir", kind: "small", onClick: () => set(() => { D.addDetected(d, names); }) }) : h("small", {}, "no respondió del todo")))),
+        fresh.length > 1 ? btn({ label: `Añadir las ${fresh.length}`, kind: "block", onClick: () => set(() => { for (const d of fresh) D.addDetected(d, names); toast(`${fresh.length} luces añadidas con su tipo y canales`); }) }) : null);
+    } else if (det?.done) mine.append(hint("No se encontró ninguna luz con RDM. Las luces sin RDM no pueden avisar qué son: añádelas abajo (o «No sé qué luz es» y te ayudo canal a canal)."));
+  }
   mine.append(h("div", { class: "tiles lkinds" }, ...LIGHT_KINDS.map(([k, label, sub]) => h("button", { class: "tile", onclick: async () => {
     let opts = {};
     if (k === "strip" || k === "ring" || k === "bar") {
@@ -190,14 +212,16 @@ function simpleLights(app) {
     ui.target = L.id; S.dmxSel = L.id;
     app.changed({ panel: true }); app.commit();
     toast(`${L.name} añadida · arrástrala en el escenario para elegir dónde está`);
-  } }, h("b", {}, "+ " + label), h("small", {}, sub)))));
+  } }, h("b", {}, "+ " + label), h("small", {}, sub))),
+    h("button", { class: "tile", onclick: () => otherLight(app) }, h("b", {}, "+ Otra luz…"), h("small", {}, "Láser, humo, wash, beam, UV…")),
+    h("button", { class: "tile", onclick: () => guidedLight(app) }, h("b", {}, "No sé qué luz es"), h("small", {}, "Te ayudo canal a canal"))));
   const lights = D.lights();
   const list = h("div", { class: "list" });
   for (const L of lights) {
     const isPm = c.pixelMaps.includes(L);
     const what = L.source === "effect" ? (findFx(L.fx?.id)?.name || "efecto") : L.source === "video" ? "video de la proyección" : L.source === "color" ? "color fijo" : "manual";
     list.append(h("div", { class: `item ${ui.target === L.id ? "on" : ""}`, onclick: (e) => { if (e.target.closest("button")) return; ui.target = ui.target === L.id ? "all" : L.id; S.dmxSel = isPm ? L.id : S.dmxSel; app.renderPanel(); } },
-      h("span", {}, L.name, h("small", {}, ` · ${isPm ? D.patchOf(L).pos.length + " LED" : "foco"} · ${what}`)),
+      h("span", {}, L.name, h("small", {}, ` · ${isPm ? D.patchOf(L).pos.length + " LED" : (L.kind || "foco") + " · U" + L.universe + " dir. " + L.address} · ${what}`)),
       btn({ ic: L.enabled === false ? "eyeoff" : "eye", kind: "icon", title: "Encender / apagar esta luz", onClick: () => set(() => { L.enabled = L.enabled === false; }) }),
       btn({ ic: "trash", kind: "icon", title: "Quitar", onClick: () => set(() => { const arr = isPm ? c.pixelMaps : c.fixtures; arr.splice(arr.indexOf(L), 1); if (ui.target === L.id) ui.target = "all"; }) })));
   }
@@ -250,8 +274,61 @@ function simpleLights(app) {
 
   wrap.append(section("", btn({ label: "Opciones avanzadas (universos, fixtures, monitor, diagnóstico…)", ic: "knob", kind: "block", onClick: () => { app.setPro(true); app.renderPanel(); } })));
   animatePreviews(wrap, app);
-  D.onUpdate = (t) => { if (S.tab === "lights" && (t === "nodes" || t === "ready") && !document.activeElement?.closest?.("#panelBody")) app.renderPanel(); };
+  D.onUpdate = (t) => { if (S.tab === "lights" && ["nodes", "ready", "rdm", "lasers", "usb"].includes(t) && !document.activeElement?.closest?.("#panelBody textarea, #panelBody input")) app.renderPanel(); };
   return wrap;
+}
+
+/** Biblioteca de perfiles: cualquier tipo de luz DMX (para las que no tienen RDM). */
+async function otherLight(app) {
+  const D = app.dmx;
+  const box = h("div", { class: "lkinds profiles" });
+  let pick = null;
+  for (const [k, t] of Object.entries(FIXTURE_TYPES)) {
+    if (k === "custom") continue;
+    box.append(h("button", { class: "tile", onclick: (e) => { pick = k; box.querySelectorAll(".tile").forEach(b => b.classList.toggle("on", b === e.currentTarget)); } }, h("b", {}, t.label.replace(/ \(\d+\)$/, "")), h("small", {}, `${t.channels.length} canales`)));
+  }
+  const addr = h("input", { class: "text-in small", type: "number", min: 0, max: 512, value: 0 });
+  const ok = await dialog({ title: "Añadir una luz", wide: true, content: h("div", {}, hint("Elige el tipo más parecido (mira el número de canales en su manual o en la pantalla de la luz)."), box,
+    field("Dirección DMX (0 = la siguiente libre)", addr)), buttons: [{ label: "Cancelar", value: false }, { label: "Añadir", kind: "primary", value: true }] });
+  if (!ok || !pick) return;
+  const u = D.cfg.fixtures.at(-1)?.universe || 1;
+  const f = D.addFixture(pick, { universe: u, ...(+addr.value ? { address: +addr.value } : {}) });
+  if (f.channels.some(ch => ["red", "green", "blue", "white"].includes(ch.type))) { const { defaultLightFx } = await import("./lightfx.js"); f.source = "effect"; f.fx = defaultLightFx(); }
+  app.changed({ panel: true }); app.commit();
+  toast(`${f.name} · universo ${f.universe}, dirección ${f.address}`);
+}
+
+/** Detección guiada: se enciende un canal cada vez y el usuario dice qué hizo la luz. */
+async function guidedLight(app) {
+  const D = app.dmx, c = D.cfg;
+  const uni = c.universes.find(u => u.protocol !== "virtual")?.num || c.universes[0]?.num || 1;
+  const addrIn = h("input", { class: "text-in small", type: "number", min: 1, max: 512, value: 1 });
+  const start = await dialog({ title: "No sé qué luz es", content: h("div", {}, hint("Pon la luz en modo DMX y mira qué dirección tiene en su pantalla (suele ser 001, d001 o A001). Voy a encender sus canales uno a uno: tú me dices qué pasa."),
+    field("Dirección de la luz", addrIn)), buttons: [{ label: "Cancelar", value: false }, { label: "Empezar", kind: "primary", value: true }] });
+  if (!start) return;
+  const was = c.enabled; c.enabled = true; D.connect();
+  const probe = D.probe = { universe: uni, address: Math.max(1, Math.min(512, +addrIn.value || 1)), index: 0, count: 32, known: [] };
+  try {
+    for (let i = 0; i < 32; i++) {
+      probe.index = i;
+      const r = await dialog({ title: `Canal ${i + 1} encendido`, content: h("div", {}, hint(`Dirección ${probe.address + i}. ¿Qué hizo la luz?`),
+        h("div", { class: "chips" }, ...PROBE_ANSWERS.map(([v, l]) => h("button", { class: "chip", onclick: () => closeDialog(v || "none") }, l)))),
+        buttons: [{ label: "Ya no hay más canales", value: "end" }, { label: "Cancelar", value: null }] });
+      if (r === null || r === undefined) return;
+      if (r === "end") break;
+      probe.known.push(r === "none" ? "custom" : r);
+    }
+    while (probe.known.length && probe.known.at(-1) === "custom") probe.known.pop();
+    if (!probe.known.length) return toast("No se identificó ningún canal", "err");
+    const names = Object.fromEntries(CHANNEL_TYPES);
+    const f = D.addFixture("custom", { universe: uni, address: probe.address, name: "Mi luz " + (c.fixtures.length + 1) });
+    f.channels = probe.known.map(t => ({ type: t, name: names[t] || t }));
+    if (f.channels.some(ch => ["red", "green", "blue"].includes(ch.type))) { const { defaultLightFx } = await import("./lightfx.js"); f.source = "effect"; f.fx = defaultLightFx(); }
+    if (f.channels.some(ch => ch.type === "pan" || ch.type === "tilt")) f.move = { kind: "circle", speed: 1, size: 0.5 };
+    D.ensureUniverses();
+    app.changed({ panel: true }); app.commit();
+    toast(`${f.name} creada con ${f.channels.length} canales`);
+  } finally { D.probe = null; c.enabled = was; app.renderPanel(); }
 }
 
 /** Usar un nodo detectado: un universo por cada salida del nodo, enviado solo a su IP. */
