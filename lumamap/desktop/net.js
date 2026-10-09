@@ -4,7 +4,6 @@
 //  - solo https y solo internet (nunca este equipo ni la red local), también
 //    después de cada redirección;
 //  - tamaño y tiempo máximos.
-const { ipcMain } = require("electron");
 const dns = require("node:dns").promises;
 const net = require("node:net");
 
@@ -54,6 +53,7 @@ async function get(url, { maxBytes = 30_000_000, timeout = 25000 } = {}) {
   }
 }
 
-function setup() { ipcMain.handle("net:get", (_e, url, opts) => get(url, opts)); }
+// Electron solo se carga al registrar el canal (así las pruebas pueden usar get() sin Electron).
+function setup() { require("electron").ipcMain.handle("net:get", (_e, url, opts) => get(url, opts)); }
 
 module.exports = { setup, get, privateIp };
