@@ -8,6 +8,7 @@
 ; En modo silencioso (actualizaciones, reparar) no pregunta nada.
 !macro customInit
   ${IfNot} ${Silent}
+  ${AndIfNot} ${UAC_IsInnerInstance}
     StrCpy $R8 ""
     ReadRegStr $R9 HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
     ReadRegStr $R8 HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation"
@@ -69,7 +70,10 @@
   ${If} $LumaDesk == "0"
     Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
   ${Else}
-    CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0
+    CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+    ClearErrors
+    WinShell::SetLnkAUMI "$DESKTOP\${SHORTCUT_NAME}.lnk" "${APP_ID}"
+    System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
     StrCpy $LumaDesk "1"
   ${EndIf}
   WriteRegStr HKCU "Software\LumaMap" "DesktopShortcut" "$LumaDesk"
