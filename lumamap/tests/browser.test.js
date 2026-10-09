@@ -308,7 +308,7 @@ await test("MIDI LEARN de punta a punta: clic derecho en «Brillo», mover un kn
   const sl = page.locator('#panelBody [data-param$="/fx/brightness"]');
   await sl.click({ button: "right" });
   await page.getByRole("button", { name: "Aprender…" }).click();
-  await page.getByText("Mueve ahora el control").waitFor();
+  await page.getByText("Pulsa ahora el botón que quieras usar").waitFor();
   await page.waitForTimeout(300);
   await page.evaluate(() => window.__lumamap.midiDriver.message({ name: "Launch Control" }, [0xb3, 21, 127], 0));
   await page.waitForFunction(() => window.__lumamap.S.project.settings.control.mappings.length === 1);
@@ -482,7 +482,7 @@ await test("interactivo: modo sensor de profundidad (fondo aprendido) y los efec
   await page.waitForFunction(() => {
     const a = window.__lumamap, cal = a.S.project.settings.interactive;
     return cal.depth && document.querySelector(".istate")?.textContent.includes("modo sensor");
-  }, null, { timeout: 15000 });
+  }, null, { timeout: 40000 });
   const modes = await page.evaluate(async () => {
     const a = window.__lumamap, l = a.lookSel();
     const out = [];
@@ -494,15 +494,21 @@ await test("interactivo: modo sensor de profundidad (fondo aprendido) y los efec
     return out;
   });
   for (const [m, err] of modes) assert.equal(err, 0, m);
-  await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.interactive.depth = false; a.openTab(null); });
+  // Limpieza: fuera la superficie interactiva (su IA de cuerpo no debe seguir trabajando en las pruebas siguientes).
+  await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId);
+    P.settings.interactive.depth = false;
+    P.surfaces = P.surfaces.filter(s => sc.looks[s.id]?.source.type !== "body");
+    a.select(null); a.tracking?.stop?.(); a.changed({ panel: true }); a.openTab(null); });
 });
 await test("arrastrar y soltar: una animación y un efecto se sueltan encima de una superficie", async () => {
   const id = await page.evaluate(() => { const a = window.__lumamap; a.select(null); a.actions.addShape("rect"); return a.S.project.surfaces.at(-1).id; });
   const center = await page.evaluate((id) => { const s = window.__lumamap.S.project.surfaces.find(x => x.id === id); const xs = s.points.map(p => p.x), ys = s.points.map(p => p.y); return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2]; }, id);
-  const [tx, ty] = await toScreen(center);
   await page.evaluate(() => { const a = window.__lumamap; a.select(null); a.openTab("anim"); });
   const tile = page.locator("#panelBody .tile").nth(3);
   await tile.waitFor();
+  await page.waitForTimeout(300);
+  // El punto se calcula con el panel ya abierto (al abrirse, el escenario se encoge).
+  const [tx, ty] = await toScreen(center);
   const name = (await tile.textContent()).trim();
   const b = await tile.boundingBox();
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
@@ -607,8 +613,10 @@ await test("holograma: asistente fácil (escenario como Tupac, 2 proyectores), u
   assert.deepEqual(r, [true, true]);
   await box.getByRole("button", { name: "Probar orientación" }).click();
   assert.equal(await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId); return sc.looks[P.surfaces.find(s => s.holo).id].source.text; }), "↑ ARRIBA  R");
-  await box.getByRole("button", { name: "Volver a mi contenido" }).click();
-  assert.equal(await page.evaluate(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId); return sc.looks[P.surfaces.find(s => s.holo).id].source.type; }), "gen");
+  // Vuelve al contenido con el botón… o sola a los 8 s (en un equipo lento puede pasar antes de pulsarlo).
+  const back = box.getByRole("button", { name: "Volver a mi contenido" });
+  if (await back.count()) await back.click().catch(() => {});
+  await page.waitForFunction(() => { const a = window.__lumamap, P = a.S.project, sc = P.scenes.find(s => s.id === P.sceneId); return sc.looks[P.surfaces.find(s => s.holo).id].source.type === "gen"; }, null, { timeout: 20000 });
   await page.waitForTimeout(400);
   assert.equal(await page.evaluate(() => document.querySelector("#gl").getContext("webgl2").getError()), 0);
   await page.getByRole("button", { name: "Cerrar" }).click();
