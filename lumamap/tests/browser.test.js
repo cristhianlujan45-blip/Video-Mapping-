@@ -641,6 +641,24 @@ await test("objetos 3D: «hazme un carro» desde la IA sin conexión, vista prev
   assert.deepEqual(r, { type: "model3d", style: "camioneta", color: "#1f5fff", gl: 0 });
   await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; P.surfaces.pop(); a.changed({ panel: true }); a.openTab(null); });
 });
+await test("burbujas interactivas: si alguien toca la proyección donde hay burbujas, revientan y cuentan", async () => {
+  const r = await page.evaluate(async () => {
+    const { ProFX } = await import("/js/fx-pro.js");
+    const W = 640, H = 360, out = Object.assign(document.createElement("canvas"), { width: W, height: H });
+    const mask = Object.assign(document.createElement("canvas"), { width: W, height: H });
+    const fx = new ProFX();
+    // Sin nadie: las burbujas suben y no revientan.
+    for (let i = 0; i < 90; i++) fx.render(out, mask, "burbujas_pro", W, H, 1 / 30, { sound: false });
+    const before = { score: fx.state.score, bubbles: fx.state.bubbles.length };
+    // Una persona con los brazos abiertos tapa la mitad inferior de la proyección.
+    const m = mask.getContext("2d"); m.fillStyle = "#fff"; m.fillRect(0, H * 0.45, W, H * 0.55);
+    for (let i = 0; i < 90; i++) fx.render(out, mask, "burbujas_pro", W, H, 1 / 30, { sound: false });
+    return { before, after: fx.state.score };
+  });
+  assert.equal(r.before.score, 0, "sin nadie no revienta ninguna");
+  assert.ok(r.before.bubbles > 3, "hay burbujas flotando");
+  assert.ok(r.after >= 3, "al tocarlas revientan (" + r.after + ")");
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();
