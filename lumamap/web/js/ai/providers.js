@@ -26,7 +26,7 @@ export const DEFAULT_SETTINGS = {
   allowImages: false, allowProjectData: false, saveConversations: false,
   autoSuggestions: true, vision: false,
   endpoint: "http://localhost:11434", model: "", temperature: 0.3, contextSize: 8192,
-  setupDismissed: false,
+  setupDismissed: false, pullOffered: false,
 };
 export function loadSettings() {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch { return { ...DEFAULT_SETTINGS }; }
@@ -41,7 +41,8 @@ export const MSG = {
   offline: "No se pudo conectar con la IA local. LumaMap continúa funcionando normalmente.",
   notInstalled: "Puedes utilizar LumaMap normalmente. Si deseas activar IA local: instala Ollama.",
   noModel: (m) => `El modelo «${m}» no está instalado en Ollama. Instálalo con: ollama pull ${m}`,
-  noModels: "Ollama está en marcha pero no tiene ningún modelo. Instala uno con: ollama pull qwen3:8b",
+  noModels: "Ollama está listo, pero falta descargar la IA (una sola vez). Pulsa «Descargar la IA».",
+  notStarting: "Ollama está instalado pero no arrancó. Ábrelo desde el menú Inicio (icono de la llama) y pulsa «Comprobar de nuevo».",
   timeout: "La IA tardó demasiado en responder. LumaMap continúa funcionando normalmente.",
   memory: "El modelo no cabe en la memoria de este equipo. Elige uno más pequeño en Diagnóstico del equipo.",
   remoteOff: "La IA remota está desactivada (Privacidad).",
@@ -198,8 +199,22 @@ export class LocalAIProvider extends AIProvider {
   get id() { return "local"; }
   get label() { return "IA local"; }
   get s() { return this.engine.settings; }
-  /** ¿Ollama instalado y en marcha? ¿qué modelos tiene? */
+  /**
+   * ¿Ollama instalado y en marcha? ¿qué modelos tiene? En Windows, si está instalado
+   * pero cerrado, la app lo arranca sola (una vez por sesión) y vuelve a mirar.
+   */
   async status() {
+    const r = await this.status1();
+    const D = globalThis.LumaDesktop?.ai;
+    if (r.code !== "notInstalled" || !D?.ollamaStart || this.engine.startTried) return r;
+    this.engine.startTried = true;
+    let st;
+    try { st = await D.ollamaStart(this.s.endpoint); } catch { return r; }
+    if (st?.ok) { const again = await this.status1(); if (st.started) again.autoStarted = true; return again; }
+    if (st?.found) return { ...r, code: "offline", reason: MSG.notStarting };
+    return r;
+  }
+  async status1() {
     const s = this.s;
     try {
       const v = await localHttp(s.endpoint, "/api/version", { timeout: 2500, fetchImpl: this.engine.fetchImpl });
@@ -280,6 +295,18 @@ export class RemoteAIProvider extends AIProvider {
   }
 }
 
+/** Error de la descarga de un modelo en palabras claras. */
+export function pullError(e = "") {
+  e = String(e);
+  if (e === "cancelled") return "Descarga cancelada.";
+  if (e === "offline") return MSG.offline;
+  if (e === "not-local") return "Por seguridad, la IA local solo puede estar en este equipo o en tu red local.";
+  if (/no such host|dial tcp|lookup|timeout|i\/o|connection/i.test(e)) return "Sin internet: la IA se descarga una sola vez de internet (luego funciona sin conexión). Conéctate y vuelve a intentarlo.";
+  if (/space|disk/i.test(e)) return "No hay espacio suficiente en el disco para la IA.";
+  if (/not found|manifest|does not exist/i.test(e)) return "Ese modelo no existe en Ollama.";
+  return "No se pudo descargar la IA: " + e.slice(0, 160);
+}
+
 /* ======================================================================
    Motor
    ====================================================================== */
@@ -316,6 +343,35 @@ export class AIEngine {
     if ((s.provider === "remote" || s.provider === "auto") && s.allowRemote && st.remote?.available) return this.remote;
     return this.none;
   }
+  /**
+   * Descarga un modelo en Ollama (lo mismo que «ollama pull», sin terminal) y lo deja
+   * elegido. onProgress({ status, completed, total }). En Windows con progreso real.
+   */
+  async pullModel(model, onProgress = () => {}) {
+    const s = this.settings, D = globalThis.LumaDesktop?.ai;
+    if (!/^[\w.\-/]{1,80}(:[\w.\-]{1,40})?$/.test(model || "")) throw new AIUnavailable("pull", "Nombre de modelo no válido.");
+    this.pulling = model; this.emit();
+    try {
+      if (D?.pull && !this.fetchImpl) {
+        const off = D.onPullProgress?.((p) => { if (p.model === model) onProgress(p); });
+        try {
+          const r = await D.pull({ endpoint: s.endpoint, model });
+          if (!r.ok) throw new AIUnavailable("pull", pullError(r.error));
+        } finally { off?.(); }
+      } else {
+        // Android y navegador: sin progreso parcial (se avisa de que tarda).
+        onProgress({ status: "descargando", completed: 0, total: 0 });
+        const r = await localHttp(s.endpoint, "/api/pull", { method: "POST", body: { model, stream: false }, timeout: 3 * 3600_000, fetchImpl: this.fetchImpl });
+        let j = {}; try { j = JSON.parse(r.text || "{}"); } catch {}
+        if (!r.ok || j.error || (j.status && j.status !== "success")) throw new AIUnavailable("pull", pullError(j.error || r.text || "HTTP " + r.status));
+      }
+      onProgress({ status: "success", completed: 1, total: 1 });
+      this.setSettings({ model });
+      await this.refresh({ force: true });
+      return this.state.local;
+    } finally { this.pulling = ""; this.emit(); }
+  }
+  cancelPull() { globalThis.LumaDesktop?.ai?.pullCancel?.(); }
   /** Línea de estado para la interfaz. */
   statusLine() {
     const a = this.active, st = this.state;

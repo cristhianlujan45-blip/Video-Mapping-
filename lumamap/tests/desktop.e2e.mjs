@@ -39,10 +39,15 @@ const sacn = dgram.createSocket({ type: "udp4", reuseAddr: true });
 sacn.on("message", (b) => { const m = P.parseSacn(new Uint8Array(b)); if (m) sacnPkts.push(m); });
 await new Promise(r => sacn.bind(P.SACN_PORT, "127.0.0.1", r));
 
+// «Ollama» instalado pero cerrado: un ejecutable «ollama» falso en el PATH (Linux de la CI).
+const fakeOllamaDir = fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-ollama-"));
+if (process.platform !== "win32") {
+  fs.writeFileSync(path.join(fakeOllamaDir, "ollama"), `#!/bin/sh\nexec "${process.execPath}" "${path.join(here, "fixtures", "fake-ollama.mjs")}" "$@"\n`, { mode: 0o755 });
+}
 const app = await _electron.launch({
   executablePath: electronBin, cwd: desktop,
   args: [path.join(desktop, ".stage"), "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
-  env: { ...process.env, ANTHROPIC_API_KEY: "", LUMAMAP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-e2e-")) },
+  env: { ...process.env, PATH: fakeOllamaDir + path.delimiter + process.env.PATH, OLLAMA_HOST: "", ANTHROPIC_API_KEY: "", LUMAMAP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-e2e-")) },
 });
 const win = await app.firstWindow();
 const errors = [];
@@ -203,7 +208,7 @@ await test("asistente: sin clave lo dice claro; una clave falsa no se guarda; la
   assert.match(r.step.error, /Falta la clave/);
   assert.equal(r.bad.ok, false, "clave falsa rechazada: " + r.bad.error);
   assert.equal(r.st1.hasKey, false, "no se guardó");
-  assert.deepEqual(r.keys.sort(), ["cancel", "http", "setKey", "status", "step"], "no hay forma de leer la clave desde la página");
+  assert.deepEqual(r.keys.sort(), ["cancel", "http", "ollamaStart", "onPullProgress", "pull", "pullCancel", "setKey", "status", "step"], "no hay forma de leer la clave desde la página");
 });
 await test("IA local por el proceso principal: habla con Ollama de este equipo; rechaza internet y rutas que no son de Ollama", async () => {
   const http = await import("node:http");
@@ -226,6 +231,44 @@ await test("IA local por el proceso principal: habla con Ollama de este equipo; 
   assert.equal(r.off.ok, false, "Ollama apagado: error controlado, sin colgarse");
   const hw = await win.evaluate(() => window.LumaDesktop.hardwareProfile());
   assert.ok(hw.ram > 0 && hw.cores > 0, "perfil de hardware para recomendar el modelo");
+});
+await test("IA local automática: Ollama instalado pero cerrado se abre solo y la IA se descarga con progreso (sin terminal)", async () => {
+  if (process.platform === "win32") return;
+  const net = await import("node:net");
+  const port = await new Promise(r => { const s = net.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
+  const ep = `http://127.0.0.1:${port}`;
+  try {
+    const r = await win.evaluate(async (ep) => {
+      const D = window.LumaDesktop.ai;
+      const before = await D.http({ url: ep + "/api/version", timeout: 1500 });
+      const st = await D.ollamaStart(ep);
+      const again = await D.ollamaStart(ep);
+      const prog = []; const off = D.onPullProgress(p => prog.push(p));
+      const pull = await D.pull({ endpoint: ep, model: "qwen3:4b" });
+      await new Promise(r => setTimeout(r, 300));   // el último aviso de progreso puede llegar justo después
+      off();
+      const tags = JSON.parse((await D.http({ url: ep + "/api/tags" })).text);
+      const internet = await D.pull({ endpoint: "http://8.8.8.8:11434", model: "qwen3:4b" });
+      const badName = await D.pull({ endpoint: ep, model: "qwen3:4b; rm -rf /" });
+      const remote = await D.ollamaStart("http://192.168.1.50:11434");
+      // Y el asistente lo usa solo: modelo elegido sin tocar nada.
+      const ai = window.__lumamap.ai || null;
+      return { before: before.ok, st, again, pull, prog, tags, internet, badName, remote, hasAi: !!ai };
+    }, ep);
+    assert.equal(r.before, false, "al principio Ollama está cerrado");
+    assert.equal(r.st.ok, true); assert.equal(r.st.started, true, "LumaMap abrió Ollama");
+    assert.equal(r.again.started, false, "si ya está abierto no lo abre otra vez");
+    assert.equal(r.pull.ok, true, JSON.stringify(r.pull));
+    assert.ok(r.prog.some(p => p.total === 2.5e9 && p.completed > 0 && p.completed < p.total), "progreso parcial: " + JSON.stringify(r.prog));
+    assert.equal(r.prog.at(-1).status, "success");
+    assert.deepEqual(r.tags.models.map(m => m.name), ["qwen3:4b"]);
+    assert.equal(r.internet.error, "not-local");
+    assert.equal(r.badName.error, "bad-model");
+    assert.equal(r.remote.error, "not-this-pc", "solo abre Ollama en este equipo");
+  } finally {
+    // Se cierran los «Ollama» falsos (también el que abrió la app al arrancar, en el puerto normal).
+    for (const u of [ep, "http://127.0.0.1:11434"]) await fetch(u + "/quit", { signal: AbortSignal.timeout(2000) }).catch(() => {});
+  }
 });
 await test("detección automática (RDM): el nodo dice qué luces tiene y la app las añade con su tipo, canales y dirección", async () => {
   // Nodo RDM falso en 127.0.0.2 con una cabeza móvil y un PAR RGB.

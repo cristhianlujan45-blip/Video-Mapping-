@@ -19,7 +19,7 @@ import java.util.concurrent.Executors
  */
 class LocalAi(private val done: (Int, JSONObject) -> Unit) {
     private val pool = Executors.newFixedThreadPool(2) { r -> Thread(r, "LumaMap IA local").apply { isDaemon = true } }
-    private val paths = Regex("^/api/(tags|version|chat|show|ps|generate)$")
+    private val paths = Regex("^/api/(tags|version|chat|show|ps|generate|pull)$")
 
     /** ¿Es este equipo o una IP privada de la red local? (igual que isLocalHost en desktop/ai.js) */
     private fun localName(h: String): Boolean {
@@ -43,7 +43,8 @@ class LocalAi(private val done: (Int, JSONObject) -> Unit) {
                 if (!paths.matches(u.path)) { done(id, r.put("ok", false).put("error", "bad-path")); return@execute }
                 // El nombre debe resolver a una IP local (evita que un .local apunte a internet).
                 if (InetAddress.getAllByName(host).any { !localAddress(it) }) { done(id, r.put("ok", false).put("error", "not-local")); return@execute }
-                val t = timeoutMs.coerceIn(1000, 600000)
+                // Descargar un modelo (varios GB) puede tardar mucho: hasta 3 horas.
+                val t = timeoutMs.coerceIn(1000, if (u.path == "/api/pull") 10_800_000 else 600000)
                 val c = u.openConnection() as HttpURLConnection
                 c.instanceFollowRedirects = false   // una redirección podría sacar la petición de la red local
                 c.connectTimeout = minOf(t, 8000)

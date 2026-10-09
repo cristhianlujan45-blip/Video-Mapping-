@@ -52,5 +52,9 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
     cancel: () => ipcRenderer.invoke("ai:cancel"),
     /** IA local (Ollama): solo este equipo o la red local. */
     http: (req) => ipcRenderer.invoke("ai:http", req),
+    ollamaStart: (endpoint) => ipcRenderer.invoke("ai:ollamaStart", endpoint),
+    pull: (req) => ipcRenderer.invoke("ai:pull", req),
+    pullCancel: () => ipcRenderer.invoke("ai:pullCancel"),
+    onPullProgress: (cb) => { const f = (_e, p) => cb(p); ipcRenderer.on("ai:pullProgress", f); return () => ipcRenderer.removeListener("ai:pullProgress", f); },
   },
 });

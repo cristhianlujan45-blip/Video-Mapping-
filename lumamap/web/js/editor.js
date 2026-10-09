@@ -3059,7 +3059,19 @@ async function init() {
   if ("serviceWorker" in navigator && !native && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
   window.__lumamap = app; // depuración y pruebas
   // IA opcional: se mira en segundo plano si hay IA local (nunca bloquea ni se repite sola).
-  setTimeout(() => { try { const ai = aiOf(app); if (ai.settings.enabled) ai.refresh().catch(() => {}); } catch {} }, 4000);
+  // IA local: se busca (y en Windows se abre Ollama si está cerrado) al poco de arrancar.
+  // Si Ollama está pero falta el modelo, se avisa UNA vez de que se descarga con un toque.
+  setTimeout(async () => {
+    try {
+      const ai = aiOf(app);
+      if (!ai.settings.enabled || !ai.settings.allowLocal) return;
+      const st = (await ai.refresh()).local || {};
+      if ((st.code === "noModels" || st.code === "noModel") && !ai.settings.pullOffered) {
+        ai.setSettings({ pullOffered: true });
+        toast("🧠 Ollama detectado: falta descargar la IA una sola vez. Asistente → «Descargar la IA».");
+      } else if (st.available && st.autoStarted) toast(`🧠 IA local lista · ${st.model} (Ollama se abrió solo)`);
+    } catch {}
+  }, 4000);
 
   // La GPU se reinició (controlador, memoria): se guarda y se recarga; el autoguardado lo restaura.
   $("#gl").addEventListener("webglcontextlost", (e) => {

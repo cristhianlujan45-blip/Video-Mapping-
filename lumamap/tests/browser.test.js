@@ -383,36 +383,44 @@ await test("asistente sin IA: una orden se PROPONE, se aplica con «Aplicar» y 
   await page.locator(".asst-in").press("Enter");
   await page.locator(".prop.crit").first().waitFor();   // las acciones críticas se marcan
 });
-await test("asistente con IA local (Ollama simulado): estado, modelo, contexto del proyecto y acción aplicada", async () => {
+await test("asistente con IA local (Ollama simulado): «Descargar la IA» con un toque, estado, modelo, contexto del proyecto y acción aplicada", async () => {
   const http = await import("node:http");
-  let lastChat = null;
+  let lastChat = null, pulled = null;
+  const models = [];   // Ollama recién instalado: sin ningún modelo
   const fake = http.createServer((req, res) => {
     res.setHeader("access-control-allow-origin", "*"); res.setHeader("access-control-allow-headers", "content-type"); res.setHeader("access-control-allow-methods", "GET,POST");
     if (req.method === "OPTIONS") return res.end();
     let body = ""; req.on("data", d => body += d); req.on("end", () => {
       res.setHeader("content-type", "application/json");
       if (req.url === "/api/version") return res.end(JSON.stringify({ version: "0.9.0" }));
-      if (req.url === "/api/tags") return res.end(JSON.stringify({ models: [{ name: "qwen3:8b", size: 5.2e9, details: { parameter_size: "8.2B", family: "qwen3" } }] }));
+      if (req.url === "/api/tags") return res.end(JSON.stringify({ models: models.map(name => ({ name, size: 5.2e9, details: { parameter_size: "8.2B", family: "qwen3" } })) }));
+      if (req.url === "/api/pull") { pulled = JSON.parse(body); return setTimeout(() => { models.push(pulled.model); res.end(JSON.stringify({ status: "success" })); }, 600); }
       if (req.url === "/api/chat") { lastChat = JSON.parse(body); return res.end(JSON.stringify({ message: { role: "assistant", content: JSON.stringify({ reply: "Creo una superficie para la columna.", actions: [{ action: "create_surface", parameters: { shape: "rect", name: "Columna IA" } }], intent: "none" }) } })); }
       res.statusCode = 404; res.end("{}");
     });
   });
   await new Promise(r => fake.listen(0, "127.0.0.1", r));
-  await page.evaluate(async (ep) => { const a = window.__lumamap; a.ai.setSettings({ endpoint: ep, enabled: true, allowLocal: true, provider: "auto" }); await a.ai.refresh({ force: true }); a.renderPanel(); }, `http://127.0.0.1:${fake.address().port}`);
-  await page.getByText("Modelo: qwen3:8b").waitFor();
+  await page.evaluate(async (ep) => { const a = window.__lumamap; a.ai.setSettings({ endpoint: ep, enabled: true, allowLocal: true, provider: "auto", model: "" }); await a.ai.refresh({ force: true }); if (a.S.tab !== "assistant") a.openTab("assistant"); else a.renderPanel(); }, `http://127.0.0.1:${fake.address().port}`);
+  // Sin modelo: un solo botón la descarga (sin terminal) y queda elegida.
+  await page.locator(".asst .aipull").getByRole("button", { name: "⬇ Descargar la IA" }).click();
+  await page.locator(".asst .aipull .pbar").waitFor();
+  await page.getByText(/Modelo: qwen3:/).waitFor({ timeout: 15000 });
+  assert.equal(pulled.stream, false);
+  const model = pulled.model;
+  assert.match(model, /^qwen3:(4b|8b|14b)$/);
   await page.locator(".asst-in").fill("Quiero una superficie para la columna");
   await page.locator(".asst-in").press("Enter");
   const card = page.locator(".prop", { hasText: "Columna IA" });
   await card.waitFor();
   assert.match(lastChat.messages.at(-1).content, /CONTEXTO DEL PROYECTO/);
-  assert.equal(lastChat.model, "qwen3:8b");
+  assert.equal(lastChat.model, model);
   await card.getByRole("button", { name: "Aplicar" }).click();
   await page.waitForFunction(() => window.__lumamap.S.project.surfaces.some(s => s.name === "Columna IA"));
   // Ollama se apaga: la app sigue y el asistente responde sin IA, con un mensaje claro.
   await new Promise(r => fake.close(r));
   await page.evaluate(async () => { await window.__lumamap.ai.refresh({ force: true }); window.__lumamap.renderPanel(); });
   await page.getByText("LumaMap funciona normal").waitFor();
-  await page.evaluate(() => { const a = window.__lumamap; a.ai.setSettings({ endpoint: "http://localhost:11434" }); const s = a.S.project.surfaces.find(x => x.name === "Columna IA"); a.actions.remove(s.id); });
+  await page.evaluate(() => { const a = window.__lumamap; a.ai.setSettings({ endpoint: "http://localhost:11434", model: "" }); const s = a.S.project.surfaces.find(x => x.name === "Columna IA"); a.actions.remove(s.id); });
 });
 await test("«¿Qué hago ahora?»: recomienda UN paso y «Hacerlo conmigo» lo hace", async () => {
   await page.evaluate(() => { const a = window.__lumamap; if (!a.S.blackout) a.actions.blackout(); });

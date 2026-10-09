@@ -12,7 +12,7 @@ const { validateAction, applyAction, ACTION_NAMES } = await import("../web/js/ai
 const { parseCommand } = await import("../web/js/ai/commands.js");
 const { planFromRules, normalizePlan } = await import("../web/js/ai/showplan.js");
 const { recommendTier, pickModel } = await import("../web/js/ai/hardware.js");
-const { AIEngine, parseModelJson, MSG, DEFAULT_SETTINGS } = await import("../web/js/ai/providers.js");
+const { AIEngine, parseModelJson, MSG, DEFAULT_SETTINGS, pullError } = await import("../web/js/ai/providers.js");
 const { searchKnowledge } = await import("../web/js/ai/knowledge.js");
 
 /** App mínima: proyecto real y las acciones del editor que usan las acciones de la IA. */
@@ -136,11 +136,18 @@ await test("Hardware: 16 GB + GPU 8 GB → qwen3:8b; básico → 4b; potente →
 });
 
 /* ---------------- Ollama simulado ---------------- */
-function fakeOllama({ running = true, models = ["qwen3:8b"], reply, status = 200, error = "", thinkError = false } = {}) {
+function fakeOllama({ running = true, models = ["qwen3:8b"], reply, status = 200, error = "", thinkError = false, pullError = "" } = {}) {
   const calls = [];
+  const fake = { calls, running };
   const fetchImpl = async (url, opts = {}) => {
     calls.push({ url, body: opts.body ? JSON.parse(opts.body) : null });
-    if (!running) throw new TypeError("fetch failed: ECONNREFUSED 127.0.0.1:11434");
+    if (!fake.running) throw new TypeError("fetch failed: ECONNREFUSED 127.0.0.1:11434");
+    if (url.endsWith("/api/pull")) {
+      const b = JSON.parse(opts.body);
+      if (pullError) return { ok: false, status: 500, text: async () => JSON.stringify({ error: pullError }) };
+      models.push(b.model);
+      return { ok: true, status: 200, text: async () => JSON.stringify({ status: "success" }) };
+    }
     const ok = (o, s = 200) => ({ ok: s < 400, status: s, text: async () => JSON.stringify(o) });
     if (url.endsWith("/api/version")) return ok({ version: "0.9.0" });
     if (url.endsWith("/api/tags")) return ok({ models: models.map(name => ({ name, size: 5e9, details: { parameter_size: "8B", family: "qwen3" } })) });
@@ -152,7 +159,8 @@ function fakeOllama({ running = true, models = ["qwen3:8b"], reply, status = 200
     }
     return ok({ error: "not found" }, 404);
   };
-  return { fetchImpl, calls };
+  fake.fetchImpl = fetchImpl;
+  return fake;
 }
 const engineWith = (fake, settings = {}) => {
   mem.clear();
@@ -174,6 +182,50 @@ await test("Sin Ollama (o sin internet): no bloquea, mensaje claro y el asistent
   assert.ok(r.proposals.some(p => p.ok && p.action === "create_surface"));
 });
 
+await test("Descargar la IA con un toque: Ollama sin modelos → descarga el recomendado, lo elige y queda lista", async () => {
+  const fake = fakeOllama({ models: [] });
+  const e = engineWith(fake);
+  await e.refresh({ force: true });
+  assert.equal(e.state.local.code, "noModels");
+  assert.match(e.state.local.reason, /Descargar la IA/);
+  const steps = [];
+  const st = await e.pullModel(e.recommended().model, (p) => steps.push(p.status));
+  const pull = fake.calls.find(c => c.url.endsWith("/api/pull"));
+  assert.deepEqual(pull.body, { model: "qwen3:8b", stream: false });
+  assert.equal(st.available, true); assert.equal(st.model, "qwen3:8b");
+  assert.equal(e.settings.model, "qwen3:8b"); assert.equal(e.active, e.local);
+  assert.equal(steps.at(-1), "success"); assert.equal(e.pulling, "");
+  await assert.rejects(e.pullModel("rm -rf /"), /no válido/);
+});
+await test("Descarga sin internet: mensaje claro y LumaMap sigue sin IA", async () => {
+  const e = engineWith(fakeOllama({ models: [], pullError: "pull model manifest: Get \"https://registry.ollama.ai/v2/library/qwen3/manifests/8b\": dial tcp: lookup registry.ollama.ai: no such host" }));
+  await e.refresh({ force: true });
+  await assert.rejects(e.pullModel("qwen3:8b"), /Sin internet/);
+  assert.equal(e.active, e.none); assert.equal(e.pulling, "");
+  assert.match(pullError("cancelled"), /cancelada/);
+});
+await test("Windows: si Ollama está instalado pero cerrado, la app lo abre sola (una vez) y lo usa", async () => {
+  const fake = fakeOllama({ running: false });
+  const e = engineWith(fake);
+  let starts = 0;
+  globalThis.LumaDesktop = { ai: { ollamaStart: async (ep) => { starts++; assert.equal(ep, "http://localhost:11434"); fake.running = true; return { ok: true, started: true }; } } };
+  try {
+    await e.refresh({ force: true });
+    assert.equal(starts, 1);
+    assert.equal(e.state.local.available, true); assert.equal(e.state.local.autoStarted, true);
+    assert.equal(e.active, e.local);
+    // No instalado: se dice claro y no se reintenta en cada comprobación.
+    const f2 = fakeOllama({ running: false }), e2 = engineWith(f2);
+    globalThis.LumaDesktop = { ai: { ollamaStart: async () => { starts++; return { ok: false, found: false } } } };
+    await e2.refresh({ force: true }); await e2.refresh({ force: true });
+    assert.equal(starts, 2); assert.equal(e2.state.local.code, "notInstalled");
+    // Instalado pero no arranca: lo dice.
+    const e3 = engineWith(fakeOllama({ running: false }));
+    globalThis.LumaDesktop = { ai: { ollamaStart: async () => ({ ok: false, found: true, error: "no-response" }) } };
+    await e3.refresh({ force: true });
+    assert.equal(e3.state.local.reason, MSG.notStarting);
+  } finally { delete globalThis.LumaDesktop; }
+});
 await test("Ollama sin modelos / con un modelo que no está: lo dice y sigue sin IA", async () => {
   let e = engineWith(fakeOllama({ models: [] }));
   await e.refresh({ force: true });

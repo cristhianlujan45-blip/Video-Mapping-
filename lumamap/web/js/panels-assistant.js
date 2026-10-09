@@ -241,6 +241,61 @@ function paintAcademy(app) {
     h("div", { class: "row" }, btn({ label: "Saltar paso", kind: "small", onClick: () => A.next() }), btn({ label: "Salir", kind: "small", onClick: () => A.stop() })));
 }
 
+/* ---------------- IA local: instalar y descargar con un toque ---------------- */
+const pull = { model: "", status: "", done: 0, total: 0, error: "" };
+const GBf = (b) => (b / 1073741824).toFixed(1).replace(".", ",") + " GB";
+/** Texto del progreso de la descarga. */
+function pullText() {
+  if (pull.error) return pull.error;
+  if (pull.total) return `Descargando ${pull.model}: ${Math.floor(pull.done / pull.total * 100)} % (${GBf(pull.done)} de ${GBf(pull.total)})`;
+  return pull.status === "success" ? `✓ ${pull.model} descargado` : `Descargando ${pull.model}… (varios minutos; LumaMap sigue funcionando)`;
+}
+/** Descarga la IA recomendada (o la indicada) y la deja lista. */
+export async function downloadModel(app, model) {
+  const ai = aiOf(app);
+  if (ai.pulling) return;
+  model = model || ai.recommended().model || "qwen3:4b";
+  Object.assign(pull, { model, status: "", done: 0, total: 0, error: "" });
+  const repaint = () => { document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); };
+  repaint();
+  try {
+    await ai.pullModel(model, (p) => { pull.status = p.status; if (p.total) { pull.total = p.total; pull.done = p.completed || 0; } repaint(); });
+    toast(`🧠 IA local lista · ${model}. Ya puedes escribirle al asistente.`);
+  } catch (e) { pull.error = e.message || String(e); toast(pull.error, "err"); }
+  repaint();
+  if (app.S.tab === "assistant") app.renderPanel();
+}
+/** Caja con el estado de la IA local y el siguiente paso (un solo botón). */
+export function pullBox(app) {
+  const ai = aiOf(app), st = ai.state.local || {}, tier = ai.recommended();
+  const box = h("div", { class: "aipull aicard soft" });
+  if (ai.pulling) {
+    const pct = pull.total ? pull.done / pull.total : 0;
+    box.append(h("p", {}, pullText()), h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(pct * 100)}%` })),
+      globalThis.LumaDesktop?.ai?.pullCancel ? btn({ label: "Cancelar", kind: "small", onClick: () => ai.cancelPull() }) : null);
+    return box;
+  }
+  if (st.available) { box.append(h("p", {}, `✓ IA local lista · ${st.model}${st.autoStarted ? " (Ollama se abrió solo)" : ""}`)); return box; }
+  const size = MODEL_TIERS.find(t => t.model === tier.model)?.size || "";
+  if (st.code === "noModels" || st.code === "noModel") {
+    box.append(h("p", {}, `Ollama está listo. Falta descargar la IA una sola vez (luego funciona sin internet). Para tu equipo: ${tier.model || "qwen3:4b"}${size ? " · " + size : ""}.`),
+      pull.error ? h("p", { class: "warn" }, pull.error) : null,
+      row(btn({ label: "⬇ Descargar la IA", kind: "primary", onClick: () => downloadModel(app) }),
+        st.code === "noModel" && st.models?.length ? btn({ label: "Usar la que ya tengo", kind: "small", onClick: async () => { ai.setSettings({ model: "" }); await ai.refresh({ force: true }); app.renderPanel(); } }) : null));
+    return box;
+  }
+  if (st.code === "notInstalled") {
+    box.append(h("p", {}, globalThis.LumaNative
+      ? "La IA local va en un PC con Ollama de tu misma red Wi-Fi (en Ajustes de la IA, «Dirección de Ollama»)."
+      : "Instala Ollama (gratis) desde ollama.com. Después no hace falta nada más: LumaMap lo abre solo y descarga la IA con un toque."),
+      row(globalThis.LumaNative ? null : btn({ label: "Abrir ollama.com", kind: "small", onClick: () => window.open("https://ollama.com/download", "_blank") }),
+        btn({ label: "Ya lo instalé: comprobar", kind: "small", onClick: async () => { ai.startTried = false; await ai.refresh({ force: true }); app.renderPanel(); document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); } })));
+    return box;
+  }
+  box.append(h("p", {}, st.reason || MSG.generic), btn({ label: "Comprobar de nuevo", kind: "small", onClick: async () => { ai.startTried = false; await ai.refresh({ force: true }); app.renderPanel(); document.querySelectorAll(".aipull").forEach(el => el.replaceWith(pullBox(app))); } }));
+  return box;
+}
+
 /* ---------------- Ajustes: Inteligencia / IA ---------------- */
 export async function aiSettings(app) {
   const ai = aiOf(app), s = { ...ai.settings };
@@ -262,13 +317,11 @@ export async function aiSettings(app) {
     hint(tier.note + " Si el modelo no puede ejecutarse, LumaMap sigue funcionando sin IA."),
     h("h4", { class: "res-group" }, "IA local (Ollama) · gratis y sin internet"),
     h("p", { class: `lstate ${st.local?.available ? "ok" : "warn"}` }, h("i"), localTxt),
-    st.local?.available ? null : h("ol", { class: "steps" },
-      h("li", {}, "Descarga e instala Ollama desde ollama.com (Windows, macOS o Linux)."),
-      h("li", {}, h("span", {}, "Abre una terminal y escribe: "), h("code", {}, `ollama pull ${tier.model || "qwen3:4b"}`)),
-      globalThis.LumaNative ? h("li", {}, "En Android: Ollama va en un PC de tu misma red Wi-Fi. En ese PC permite conexiones de la red (variable OLLAMA_HOST=0.0.0.0) y abajo, en «Dirección de Ollama», escribe http://IP-del-PC:11434.") : null,
-      h("li", {}, "Vuelve aquí y pulsa «Comprobar de nuevo». No hace falta reiniciar LumaMap.")),
-    row(btn({ label: "Comprobar de nuevo", ic: "restart", kind: "small", onClick: async () => { ai.setSettings({ endpoint: s.endpoint }); closeDialog(); aiSettings(app); } }),
-      btn({ label: "Copiar comando", kind: "small", onClick: () => { navigator.clipboard?.writeText(`ollama pull ${tier.model || "qwen3:4b"}`); toast("Comando copiado"); } })),
+    st.local?.available && !ai.pulling ? null : pullBox(app),
+    globalThis.LumaNative && !st.local?.available ? hint("En Android: Ollama va en un PC de tu misma red Wi-Fi. En ese PC permite conexiones de la red (variable OLLAMA_HOST=0.0.0.0) y abajo, en «Dirección de Ollama», escribe http://IP-del-PC:11434.") : null,
+    row(btn({ label: "Comprobar de nuevo", ic: "restart", kind: "small", onClick: async () => { ai.startTried = false; ai.setSettings({ endpoint: s.endpoint }); closeDialog(); aiSettings(app); } }),
+      st.local?.available && tier.model && !models.some(m => m.name === tier.model) ? btn({ label: `Descargar ${tier.model} (recomendada)`, kind: "small", onClick: () => downloadModel(app, tier.model) }) : null),
+    hint("¿Prefieres la terminal? Es lo mismo que «ollama pull " + (tier.model || "qwen3:4b") + "». No hace falta «ollama launch»: eso abre otros programas (como Claude Code), no LumaMap."),
     h("label", { class: "field" }, h("span", { class: "lab" }, "Modelo"), modelSel),
     hint(`Recomendados: ${MODEL_TIERS.filter(t => t.model).map(t => `${t.model} (${t.label.toLowerCase()})`).join(", ")}. Avanzado: ${ADVANCED_MODELS.map(m => m.model + " — " + m.note).join(" ")}`),
     h("label", { class: "field" }, h("span", { class: "lab" }, "Dirección de Ollama"), ep),
@@ -338,7 +391,9 @@ const assistantPanel = {
         h("small", {}, stl.ok ? ` · Modelo: ${stl.model} · Modo: ${stl.mode} · Contexto: proyecto actual` : " · LumaMap funciona normal")),
       btn({ ic: "knob", kind: "icon", title: "Inteligencia / IA (ajustes)", onClick: () => aiSettings(app) })));
     // Primera vez sin IA local: aviso amable, nunca bloquea.
-    if (!stl.ok && ai.state.local?.code === "notInstalled" && !ai.settings.setupDismissed && ai.settings.allowLocal) {
+    if (ai.pulling || (!stl.ok && ["noModels", "noModel"].includes(ai.state.local?.code) && ai.settings.allowLocal)) {
+      wrap.append(pullBox(app));
+    } else if (!stl.ok && ai.state.local?.code === "notInstalled" && !ai.settings.setupDismissed && ai.settings.allowLocal) {
       wrap.append(h("div", { class: "aicard soft" }, h("p", {}, "Puedes utilizar LumaMap normalmente. Si deseas activar IA local: instala Ollama (gratis)."),
         row(btn({ label: "Configurar IA", kind: "primary small", onClick: () => aiSettings(app) }), btn({ label: "Ahora no", kind: "small", onClick: () => { ai.setSettings({ setupDismissed: true }); app.renderPanel(); } }))));
     } else if (!stl.ok && stl.why && ai.settings.allowLocal && ai.state.local?.code !== "notInstalled" && ai.state.local?.code !== "off") {

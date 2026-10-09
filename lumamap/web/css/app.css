@@ -557,3 +557,7 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .interactive .ihow .ihowbody{padding:6px 2px;}
 .interactive .ihowsketch svg{width:100%;height:auto;border-radius:10px;display:block;margin-bottom:6px;}
 .interactive .ihow ol{margin:4px 0 8px 18px;padding:0;font-size:13px;line-height:1.45;}
+/* Descarga de la IA local (Ollama) */
+.aipull .pbar { height: 8px; border-radius: 4px; background: var(--bg3, #1c2230); overflow: hidden; margin: 6px 0; }
+.aipull .pbar i { display: block; height: 100%; background: var(--accent, #4fc3ff); transition: width .3s; }
+.aipull .warn { color: #ffb340; }
