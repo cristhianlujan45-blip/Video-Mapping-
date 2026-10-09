@@ -544,3 +544,11 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .holo .holomedia{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin:6px 0;}
 .holo .holohow{margin:4px 0 8px 18px;padding:0;font-size:13px;line-height:1.45;}
 .holo .holohow li{margin:3px 0;}
+
+/* Crear objeto 3D */
+.create3d .chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;}
+.create3d .c3preview{width:100%;max-height:42vh;aspect-ratio:16/10;object-fit:contain;background:#000;border-radius:12px;border:1px solid var(--line);display:block;margin:6px 0;}
+.create3d .c3status{min-height:1.3em;}
+.create3d .c3colors{display:flex;gap:14px;align-items:center;font-size:13px;}
+.create3d .c3colors input[type=color]{width:38px;height:28px;border:none;background:none;vertical-align:middle;}
+.create3d .c3acts{display:flex;flex-direction:column;gap:6px;margin-top:8px;}

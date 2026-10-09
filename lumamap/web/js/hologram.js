@@ -16,7 +16,7 @@ export const HOLO_TYPES = [
   { id: "piramide", emoji: "🔺", name: "Pirámide (4 caras)", desc: "Pirámide transparente boca abajo sobre una pantalla o mesa: se ve desde los 4 lados." },
 ];
 export const HOLO_CUTS = [["ai", "Quitar el fondo con IA"], ["green", "Fondo verde"], ["black", "Fondo negro"], ["none", "Ya está sin fondo"]];
-export const HOLO_SOURCES = [["video", "🎬 Mi video"], ["camera", "🎥 Cámara en vivo"], ["anim", "✨ Animación"], ["text", "🔤 Texto"]];
+export const HOLO_SOURCES = [["video", "🎬 Mi video"], ["camera", "🎥 Cámara en vivo"], ["model", "🧊 Objeto 3D"], ["anim", "✨ Animación"], ["text", "🔤 Texto"]];
 
 export function defaultHologram() {
   return { type: "escenario", n: 1, source: "video", mediaId: "", cut: "ai", anim: "Galaxia", text: "HOLA", flipH: false, flipV: false, look: true, overlap: 0.15 };
@@ -49,6 +49,9 @@ function contentLook(P, cfg) {
     if (cfg.cut === "green") { fx.chromaKey = 0.42; fx.keyColor = "#00ff00"; fx.keySoft = 0.12; }
     if (cfg.cut === "black") { fx.lumaKey = 0.08; fx.lumaSoft = 0.05; }
     look.volume = 1;
+  } else if (cfg.source === "model" && cfg.model?.parts?.length) {
+    // Objeto 3D (Crear objeto 3D): gira despacio; en la pirámide cada cara lo ve desde su lado.
+    Object.assign(look.source, { type: "model3d", model: cfg.model, spin: cfg.spin ?? 1, view: "front", yaw: 0, finish: "real" });
   } else if (cfg.source === "camera") {
     Object.assign(look.source, { type: "body", bodyMode: "persona", bodyGlow: 0.15 });
     look.fit = "contain";
@@ -92,16 +95,16 @@ export function buildHologram(app, cfgIn) {
   if (cfg.type === "piramide") {
     if (cfg.n >= 4) {
       // Pirámide grande: un proyector por cara, imagen completa y reflejada.
-      ["frente", "derecha", "detrás", "izquierda"].forEach((f, i) => add(`Holograma ${f}`, M.rectCorners(0, 0, W, H), i + 1, (l) => { l.fx.flipX = !cfg.flipH; l.fx.flipY = !!cfg.flipV; }));
+      ["frente", "derecha", "detrás", "izquierda"].forEach((f, i) => add(`Holograma ${f}`, M.rectCorners(0, 0, W, H), i + 1, (l) => { l.fx.flipX = !cfg.flipH; l.fx.flipY = !!cfg.flipV; if (l.source.type === "model3d") l.source.yaw = i * 90; }));
     } else {
       // Una pantalla: 4 vistas en cruz, cada una con la cabeza hacia fuera.
       const c = Math.min(W, H) / 3, cx = W / 2, cy = H / 2;
       const cells = [[cx - c / 2, cy + c / 2, 180, "frente"], [cx + c / 2, cy - c / 2, -90, "derecha"], [cx - c / 2, cy - 1.5 * c, 0, "detrás"], [cx - 1.5 * c, cy - c / 2, 90, "izquierda"]];
-      for (const [x, y, deg, f] of cells) {
-        const s = add(`Holograma ${f}`, M.rectCorners(x, y, c, c), 1, (l) => { l.fx.flipX = !cfg.flipH; l.fx.flipY = !!cfg.flipV; });
+      cells.forEach(([x, y, deg, f], i) => {
+        const s = add(`Holograma ${f}`, M.rectCorners(x, y, c, c), 1, (l) => { l.fx.flipX = !cfg.flipH; l.fx.flipY = !!cfg.flipV; if (l.source.type === "model3d") l.source.yaw = i * 90; });
         const r = deg * Math.PI / 180, ox = x + c / 2, oy = y + c / 2;
         for (const p of s.points) { const dx = p.x - ox, dy = p.y - oy; p.x = ox + dx * Math.cos(r) - dy * Math.sin(r); p.y = oy + dx * Math.sin(r) + dy * Math.cos(r); }
-      }
+      });
     }
   } else {
     // Escenario o tul: la imagen repartida entre n proyectores, en fila, con uniones suaves.

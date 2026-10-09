@@ -36,6 +36,7 @@ export function openHologram(app, preset = {}) {
   const cfg = () => ui.cfg;
   const TEST = { source: "text", text: "↑ ARRIBA  R" };
   const make = (quiet) => {
+    if (ui.cfg.source === "model" && !ui.cfg.model?.parts?.length) { toast("Primero crea el objeto 3D (botón «Crear objeto 3D»)"); return; }
     // Durante la prueba de orientación se ve la flecha; girar/espejo siguen cambiando la configuración real.
     const r = buildHologram(app, ui.testing ? { ...ui.cfg, ...TEST } : ui.cfg);
     P.settings.hologram = { ...ui.cfg };
@@ -69,6 +70,13 @@ export function openHologram(app, preset = {}) {
         segmented({ options: HOLO_CUTS, value: c.cut, small: true, cols: 2, onChange: (v) => { c.cut = v; draw(); } }),
         hint(c.cut === "ai" ? "La IA recorta a la persona en cada fotograma: el fondo queda negro (invisible en el holograma). Si el video tiene fondo verde o negro, elige esa opción: es más exacta."
           : c.cut === "green" ? "Se quita el verde (chroma key)." : c.cut === "black" ? "Lo negro se vuelve invisible." : "Se usa tal cual."));
+    } else if (c.source === "model") {
+      add(c.model?.parts?.length ? hint(`🧊 «${c.model.name}» · en la pirámide cada cara lo verá desde su lado (frente, derecha, detrás, izquierda).`)
+        : hint("Crea el objeto 3D que quieres que flote: un carro, un logo, un planeta…"),
+        btn({ label: c.model?.parts?.length ? "Cambiar el objeto 3D" : "🧊 Crear objeto 3D", kind: "block", onClick: () => {
+          const keep = { ...ui.cfg };
+          A.create3D({ onPick: (recipe) => A.hologramWizard({ ...keep, source: "model", model: recipe }) });
+        } }));
     } else if (c.source === "camera") {
       add(hint("La persona que está delante de la cámara aparece en el holograma EN DIRECTO, sin fondo (IA). Ilumínala bien y que se vea de cuerpo entero."));
     } else if (c.source === "anim") {

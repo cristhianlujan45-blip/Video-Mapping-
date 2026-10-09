@@ -213,7 +213,8 @@ const panel3d = {
         h("button", { class: "chip", onclick: () => rig(3) }, "3 alrededor"),
         h("button", { class: "chip", onclick: () => rig(4) }, "4 alrededor (360°)"),
         h("button", { class: "chip", onclick: () => rig(4, true) }, "🔺 Holograma (pirámide)"),
-        h("button", { class: "chip", onclick: () => app.actions.hologramWizard() }, "🎤 Holograma de escenario (como Tupac)")),
+        h("button", { class: "chip", onclick: () => app.actions.hologramWizard() }, "🎤 Holograma de escenario (como Tupac)"),
+        h("button", { class: "chip", onclick: () => app.actions.create3D() }, "🧊 Crear objeto 3D con texto")),
       d.projectors.length ? row(btn({ label: "Ver desde un proyector", kind: "wide", onClick: () => st.viewFromProjector(null) }), btn({ label: "Vista libre", kind: "wide", onClick: () => { st.vp.viewFrom = null; st.frameSelection(); } })) : null));
     wrap.append(easy);
     const adv = h("details", { class: "fold" }, h("summary", {}, "Avanzado (posiciones exactas, rejilla, snap, atajos)"));

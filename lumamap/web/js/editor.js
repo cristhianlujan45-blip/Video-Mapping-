@@ -25,6 +25,8 @@ import { MidiDriver } from "./midi.js";
 import { GamepadHub, basicPadMap, padControlName } from "./gamepad.js";
 import { openGifSearch } from "./panels-gif.js";
 import { openHologram } from "./panels-hologram.js";
+import { openCreate3D } from "./panels-create3d.js";
+import { exportOBJ } from "./render3d.js";
 import { warmThumbs } from "./thumbs.js";
 import { ParamEngine, describe, applyModList } from "./params.js";
 import { DmxEngine } from "./dmx.js";
@@ -838,6 +840,35 @@ A.addGif = async (file, { mode = "layer", surfaceId = S.sel, credit = "" } = {})
 A.searchGifs = (opts = {}) => openGifSearch(app, opts);
 /** Asistente de holograma (escenario como Tupac, tela/tul o pirámide; 1-4 proyectores). */
 A.hologramWizard = (preset = {}) => openHologram(app, preset);
+/** «Crear objeto 3D»: opts.prompt («un carro rojo») lo crea al abrir. */
+A.create3D = (opts = {}) => openCreate3D(app, opts);
+/**
+ * Proyecta un objeto 3D. look = fuente model3d. mode: "new" (superficie nueva centrada),
+ * "sel" (la superficie elegida) o "space3d" (al espacio 3D, para mapearlo con proyectores).
+ */
+A.add3DObject = async (look, mode = "new") => {
+  const P = S.project, name = look.model?.name || "Objeto 3D";
+  if (mode === "space3d") {
+    const st = await ensure3d(app);
+    const file = new File([exportOBJ(look.model)], `${name.replace(/[^\wáéíóúñ -]+/gi, "").trim() || "Objeto"}.obj`, { type: "model/obj" });
+    await st.importModel(file);
+    setPro(true); openTab("3d");
+    changed({ panel: true }); commit();
+    toast(`«${name}» en el espacio 3D: pon animaciones en sus caras y elige 1-4 proyectores`);
+    return;
+  }
+  const l = mode === "sel" ? lookSel() : null;
+  if (l) { l.source = { ...l.source, ...look }; select(S.sel); }
+  else {
+    const c = viewCenter(), hh = P.height * 0.7, ww = Math.min(P.width * 0.7, hh * 4 / 3);
+    const s = M.createQuad({ name: uniqueName(name.slice(0, 24)), corners: M.rectCorners(c.x - ww / 2, c.y - hh / 2, ww, hh) });
+    M.addSurface(P, s, look);
+    select(s.id);
+  }
+  if (!S.playing) A.togglePlay();
+  changed({ panel: true }); commit();
+  toast(`🧊 «${name}» proyectándose · arrastra sus esquinas para colocarlo`);
+};
 
 A.removeMedia = async (id) => {
   const m = S.project.media.find(x => x.id === id);

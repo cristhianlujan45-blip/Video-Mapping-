@@ -5,6 +5,7 @@
 import { DrawingCache } from "./drawing.js";
 import { TextCache, cameraIfReady, getCamera, camKey, cameraLost, offlineImage } from "./sources.js";
 import { BodyCache } from "./body.js";
+import { Model3DCache } from "./render3d.js";
 import { surfaceAspect } from "./math.js";
 
 export class Compositor {
@@ -16,6 +17,7 @@ export class Compositor {
     this.drawings = new DrawingCache();
     this.texts = new TextCache();
     this.bodies = new BodyCache();
+    this.models3d = new Model3DCache();
     this.drawVersion = new Map();
     this.cameraWanted = new Set();
   }
@@ -64,6 +66,13 @@ export class Compositor {
           return { id: "b:" + key, el: fx.out, key: fx.version };
         }
         return { id: "cam:" + ck, el: cam.el, key: cam.frameKey() };
+      }
+      case "model3d": {
+        // Objeto 3D creado con «Crear objeto 3D» (three.js; se carga la primera vez).
+        const { aspect } = surfaceAspect(s);
+        const key = scene.id + ":" + s.id + k;
+        const e = this.models3d.get(key, src, aspect, o.time);
+        return e ? { id: "o3:" + key, el: e.canvas, key: e.version } : null;
       }
       case "text": {
         const { aspect } = surfaceAspect(s);

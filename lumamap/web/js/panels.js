@@ -93,7 +93,8 @@ const add = {
           { id: "facade", label: "Fachada", ic: "building" },
           { id: "stage", label: "Escenario", ic: "stage" },
           { id: "holo", label: "Holograma", ic: "body" },
-        ], { onPick: (id) => id === "holo" ? A.hologramWizard() : A.addTemplate(id) }),
+          { id: "obj3d", label: "Objeto 3D", ic: "cube" },
+        ], { onPick: (id) => id === "holo" ? A.hologramWizard() : id === "obj3d" ? A.create3D() : A.addTemplate(id) }),
         btn({ label: "Detectar superficies en una foto (experimental)", ic: "wand", kind: "block", onClick: A.detectFromPhoto })),
     );
   },
@@ -233,7 +234,7 @@ function sourceThumb(app, src, fx) {
     const m = app.S.project.media.find(x => x.id === src.mediaId);
     return { img: m?.thumb || "", label: m?.name || "Video / foto" };
   }
-  const names = { text: "Texto: " + (src.text || "").slice(0, 16), camera: "Cámara en vivo", body: "Interactivo (cámara)", drawing: "Dibujo", color: "Color", none: "Solo borde" };
+  const names = { model3d: "Objeto 3D: " + (src.model?.name || ""), text: "Texto: " + (src.text || "").slice(0, 16), camera: "Cámara en vivo", body: "Interactivo (cámara)", drawing: "Dibujo", color: "Color", none: "Solo borde" };
   return { img: "", label: names[src.type] || src.type };
 }
 
@@ -417,6 +418,7 @@ const content = {
       wrap.append(section("Biblioteca", grid,
         btn({ label: "Importar video, imagen o GIF", ic: "upload", kind: "block primary", onClick: () => A.importMedia("selected") }),
         btn({ label: "Buscar GIF animado en internet", ic: "gif", kind: "block", onClick: () => A.searchGifs({ mode: "go" }) }),
+        btn({ label: "Crear objeto 3D (carro, casa, logo…)", ic: "cube", kind: "block", onClick: () => A.create3D() }),
         hint("Mantén pulsado un archivo para quitarlo. Formatos: MP4, WebM, MOV, JPG, PNG, WebP, GIF animado.")));
       wrap.append(section("Video",
         app.S.project.media.find(m => m.id === src.mediaId)?.kind === "video" ? h("div", {},
@@ -966,6 +968,7 @@ const menu = {
           value: app.autoOptimize(), onChange: (v) => app.setAutoOptimize(v) })),
       section("Control", h("div", { class: "list" },
         item("midi", "Conectar controlador MIDI", () => { A.midi(); if (S.pro) app.openTab("control"); }, S.pro ? "Asigna cualquier control con clic derecho → Aprender" : "Activa el Modo profesional para asignar knobs y faders"),
+        item("cube", "Crear objeto 3D («hazme un carro»)", () => A.create3D(), "Escribe qué quieres y proyéctalo, también como holograma"),
         item("body", "Holograma (como Tupac, tul o pirámide)", () => A.hologramWizard(), "Varios proyectores, quita el fondo de la persona solo"),
         item("live", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), "Controla el show desde el teléfono o una mesa OSC"),
         item("help", "Ayuda y atajos", () => A.help()),

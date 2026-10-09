@@ -305,6 +305,12 @@ export const ACTIONS = {
       return `Tiempos en marcha (${r.steps.length} pasos)`;
     },
   },
+  create_3d_object: {
+    label: "Crear un objeto 3D a partir de una frase (carro, casa, cohete, logo…) para proyectarlo", params: { prompt: "qué objeto (ej.: un carro rojo deportivo)" },
+    check: (app, p) => ({ prompt: str(p.prompt, "prompt", { max: 120 }) }),
+    text: (app, p) => `Crear el objeto 3D «${p.prompt}» (lo ves girar y eliges cómo proyectarlo)`,
+    run: (app, p) => { app.actions.create3D({ prompt: p.prompt }); return "Creando el objeto 3D"; },
+  },
   hologram_setup: {
     label: "Holograma (escenario como Tupac, tela/tul o pirámide; 1-4 proyectores)", params: { type: "escenario|tul|piramide", n: "1-4 proyectores" },
     check: (app, p) => ({ type: oneOf(p.type, "type", ["escenario", "tul", "piramide"], "escenario"), n: Math.round(num(p.n, "n", 1, 4, 1)) }),

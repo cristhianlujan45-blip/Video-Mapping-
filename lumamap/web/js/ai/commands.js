@@ -5,6 +5,7 @@
 import * as M from "../model.js";
 import { LIGHT_FX } from "../lightfx.js";
 import { findExperience } from "../experiences.js";
+import { parseRequest as parse3D } from "../gen3d.js";
 
 export const HELP = "Puedo hacer cosas por ti. Prueba: «pon fuego en todas», «busca un gif de confeti», «hazme un show con mi canción», «escribe Feliz cumpleaños», «sube el brillo», «estilo ASCII», «luces rojas», «pon un lago interactivo», «asigna el botón A del mando al apagón», «apaga la pantalla 2», «cuando alguien entre pon mi video». Siempre te enseño qué voy a hacer y tú pulsas «Aplicar».";
 /** Función de la app que nombra una frase («al apagón», «a la escena 2», «al brillo»…). */
@@ -124,6 +125,12 @@ export function parseCommand(app, text) {
     if (/(mando|xbox|playstation|play ?station|ps4|ps5|gamepad|joystick|control de)/.test(t)) return { reply: "Te dejo el mando listo (puedes cambiar cada botón en En vivo → «Mandos, teclado y MIDI»). Puedes usar varios mandos y el teclado a la vez.", actions: [A("gamepad_map", {}), A("open_panel", { tab: "live" })] };
   }
   // Varios proyectores y hologramas: se hacen en el espacio 3D.
+  // Objetos 3D: «hazme un carro», «crea un cohete 3D», «diseña un dragón en 3D».
+  if (/\b(hazme|haz|crea|creame|créame|genera|diseña|disena|modela|construye|quiero|dibuja)\b/.test(t) && !/\b(cubo|esfera|cilindro|cono|plano|prisma|show|escena|superficie|regla)\b/.test(t)
+    && (parse3D(t) || /\b(3d|tridimensional)\b/.test(t))) {
+    const prompt = raw.replace(/^\s*(hazme|haz|crea|créame|creame|genera|diseña|disena|modela|construye|quiero|dibuja)\s+(?:(?:unos|unas|una|un|el|la)\s+)?/i, "").replace(/\s*(en\s+)?3d\b/i, "").trim() || raw;
+    return { reply: "Lo creo en 3D: lo verás girar y eliges cómo proyectarlo (superficie, holograma o espacio 3D).", actions: [A("create_3d_object", { prompt })] };
+  }
   if (/varios proyectores|\b(2|3|4|dos|tres|cuatro) proyectores/.test(t)) return { reply: "Para un objeto (cubo, caja…) con varios proyectores: 3D → «3 · Proyectores» → elige 2, 3 o 4 y pon las animaciones en las caras. Para una persona flotando, pide «holograma».", actions: [A("open_panel", { tab: "3d" })] };
   // Reproducción.
   if (/^(reproduce|reproducir|play|dale( al)? play|arranca|empieza|inicia|reanuda|contin[uú]a)\b/.test(t)) return { reply: "Propongo esto:", actions: [A("transport", { do: "play" })] };
