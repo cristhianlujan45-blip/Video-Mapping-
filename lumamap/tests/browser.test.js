@@ -401,7 +401,7 @@ await test("asistente con IA local (Ollama simulado): estado, modelo, contexto d
 await test("«¿Qué hago ahora?»: recomienda UN paso y «Hacerlo conmigo» lo hace", async () => {
   await page.evaluate(() => { const a = window.__lumamap; if (!a.S.blackout) a.actions.blackout(); });
   await page.locator('#top [data-act="next"]').click();
-  await page.getByText("El apagón está activo").waitFor();
+  await page.locator("#modal").getByText("El apagón está activo").waitFor();
   await page.getByRole("button", { name: "Hacerlo conmigo" }).click();
   await page.waitForFunction(() => !window.__lumamap.S.blackout);
 });
