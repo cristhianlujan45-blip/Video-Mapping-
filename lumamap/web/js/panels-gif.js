@@ -13,6 +13,8 @@ const getKey = () => { try { return localStorage.getItem(KEY) || ""; } catch { r
 const setKey = (k) => { try { k ? localStorage.setItem(KEY, k) : localStorage.removeItem(KEY); } catch {} };
 // Resultados ya buscados (en memoria) y los del arranque (guardados: la ventana abre al instante).
 const memo = new Map();
+/** Olvida lo ya buscado (para volver a pedirlo a las fuentes). */
+export function clearGifMemo() { memo.clear(); pre.clear(); try { localStorage.removeItem(CACHE_KEY); } catch {} }
 const loadSaved = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch { return null; } };
 const saveFirst = (q, items) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify({ q, items: items.slice(0, 30), at: Date.now() })); } catch {} };
 // Descargas adelantadas (al pasar el ratón): id → promesa del archivo.

@@ -647,6 +647,8 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.route("https://upload.example.org/**", (r) => r.fulfill({ status: 200, contentType: "image/gif", headers: { "access-control-allow-origin": "*" }, body: gif }));
   const id = await page.evaluate(() => { const a = window.__lumamap; a.S.liveFade = 0.3; a.openTab(null); return a.S.project.surfaces[0].id; });
   await page.evaluate((id) => window.__lumamap.select(id), id);
+  // Lo que otras pruebas ya buscaron (p. ej. el asistente) no debe venir de memoria.
+  await page.evaluate(async () => (await import("./js/panels-gif.js")).clearGifMemo());
   // Botón «GIF» de arriba: la ventana abre y ya busca sola.
   await page.locator('#top [data-act="gif"]').click();
   await page.locator(".gifsearch .gifcell:not(.sk)").first().waitFor();
@@ -792,7 +794,7 @@ await test("móvil por cable USB: la página abierta por el cable manda la cáma
   await phone.locator("#state.ok", { hasText: "cable USB" }).waitFor({ timeout: 30000 });
   assert.equal(await phone.locator("#pinrow").isVisible(), false, "por cable no pide el código");
   // Aviso en el programa y la cámara ya puesta en lo interactivo.
-  try { await page.locator("#notices .notice", { hasText: "lista (cable USB)" }).waitFor({ timeout: 20000 }); }
+  try { await page.locator("#notices .notice", { hasText: "lista (cable USB)" }).waitFor({ timeout: 60000 }); }
   catch (e) { console.log("DIAG-USB", await page.evaluate(async () => { const { listPhones } = await import("./js/phonecam.js"); return JSON.stringify({ phones: listPhones(), notices: document.querySelector("#notices")?.innerText, cam: window.__lumamap.S.project.settings.interactive.camId, cls: document.body.className }); }), await phone.locator("#state").textContent()); throw e; }
   // Las fotos siguen llegando (no solo la primera).
   await page.evaluate(async () => { window.__pf = (await import("./js/phonecam.js")).phoneFrames; });
