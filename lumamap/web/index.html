@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12">
+<meta name="mobile-web-app-capable" content="yes">
+<title>LumaMap · Video Mapping</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <button class="tb" data-act="menu" title="Menú"></button>
+    <button id="projName" class="title" data-act="rename" title="Renombrar proyecto">Mi mapping</button>
+    <span class="grow"></span>
+    <button id="recBadge" class="rec" data-act="record" title="Detener grabación"></button>
+    <button id="btnNext" class="tb next" data-act="next" title="¿Qué hago ahora?"></button>
+    <button class="tb gifbtn" data-act="gif" title="GIF animados: buscar y poner en la proyección"></button>
+    <button class="tb" data-act="palette" title="Todos los comandos (Ctrl+K)"></button>
+    <button class="tb" data-act="undo" title="Deshacer (Ctrl+Z)"></button>
+    <button class="tb" data-act="redo" title="Rehacer (Ctrl+Y)"></button>
+    <span class="sep"></span>
+    <button class="tb" data-act="play" title="Reproducir / pausar (Espacio)"></button>
+    <button id="btnProject" class="cta" data-act="project" title="Proyectar"></button>
+  </header>
+
+  <main id="main">
+    <section id="stage">
+      <div id="frame"></div>
+      <img id="refImg" alt="">
+      <video id="refCam" muted playsinline></video>
+      <canvas id="gl"></canvas>
+      <canvas id="ov"></canvas>
+      <canvas id="loupe" width="180" height="180"></canvas>
+      <div id="modebar"></div>
+      <div id="selbar"></div>
+      <div id="nudge"></div>
+      <div id="viewbar"></div>
+      <div id="projbar"></div>
+      <div id="empty"></div>
+      <div id="ws3d"><div class="ws3d-bar"></div><div class="ws3d-view"></div></div>
+    </section>
+    <aside id="panel"><div id="panelHead"></div><div id="panelBody"></div></aside>
+  </main>
+
+  <nav id="dock"></nav>
+</div>
+<div id="modal"></div>
+<div id="toast"></div>
+<input type="file" id="fileMedia" accept="image/*,video/*,.gif,.webp,.mp4,.webm,.mov,.mkv,.m4v,.avi,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf,.ogv,.tif,.tiff,.tga,.psd,.exr,.dpx,.heic,.heif,.jp2,.hdr,.dds,.qoi" multiple hidden>
+<input type="file" id="fileProject" accept=".lumamap,.json,application/json" hidden>
+<input type="file" id="filePhoto" accept="image/*" hidden>
+<script type="module" src="js/editor.js"></script>
+</body>
+</html>
