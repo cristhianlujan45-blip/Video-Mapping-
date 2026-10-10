@@ -2,12 +2,13 @@
 // Intérprete de órdenes SIN IA: convierte frases en español en acciones
 // propuestas (las mismas de actions.js) o en una intención (plan de show,
 // diagnóstico, lección, auto map). Nada se ejecuta aquí: solo se propone.
+import { setFromText } from "../autovj.js";
 import * as M from "../model.js";
 import { LIGHT_FX } from "../lightfx.js";
 import { findExperience } from "../experiences.js";
 import { parseRequest as parse3D } from "../gen3d.js";
 
-export const HELP = "Puedo hacer cosas por ti. Prueba: «pon fuego en todas», «busca un gif de confeti», «hazme un show con mi canción», «escribe Feliz cumpleaños», «sube el brillo», «estilo ASCII», «luces rojas», «pon un lago interactivo», «asigna el botón A del mando al apagón», «apaga la pantalla 2», «cuando alguien entre pon mi video». Siempre te enseño qué voy a hacer y tú pulsas «Aplicar».";
+export const HELP = "Puedo hacer cosas por ti. Prueba: «pon fuego en todas», «busca un gif de confeti», «sé el VJ, estilo techno», «hazme un show con mi canción», «escribe Feliz cumpleaños», «sube el brillo», «estilo ASCII», «luces rojas», «pon un lago interactivo», «asigna el botón A del mando al apagón», «apaga la pantalla 2», «cuando alguien entre pon mi video». Siempre te enseño qué voy a hacer y tú pulsas «Aplicar».";
 /** Función de la app que nombra una frase («al apagón», «a la escena 2», «al brillo»…). */
 function controlTarget(t) {
   const sc = t.match(/escena\s+(\w+)/);
@@ -84,6 +85,13 @@ export function parseCommand(app, text) {
   const raw = String(text || "").trim();
   const t = raw.toLowerCase().replace(/[¡!¿?.,]/g, " ").replace(/\s+/g, " ").trim();
   const A = (action, parameters = {}) => ({ action, parameters });
+
+  // VJ automático: «sé el VJ», «VJ automático techno», «mezcla como un VJ profesional».
+  if (/\bvj\b|\bvee ?jay\b|como un dj de video/.test(t)) {
+    const off = /(para|det[eé]n|apaga|quita|stop)\b/.test(t);
+    const style = off ? "" : setFromText(t).style;
+    return { reply: off ? "Propongo esto:" : "Me pongo a mezclar como un VJ. Propongo esto:", actions: [A("auto_vj", { on: !off, style })] };
+  }
 
   if ((/(canci[oó]n|tema musical|mp3)/.test(t) && /(show|proyecto|autom[aá]tic|haz|hazme|crea|monta|arma)/.test(t)) || (/con (la|mi) m[uú]sica/.test(t) && /(show|proyecto|autom[aá]tic)/.test(t))) return { intent: "songshow", reply: "¡Hecho! Elige la canción y monto el show solo: escucho el tempo y sus partes (intro, subida, drop…).", actions: [] };
   if (/\bshow\b/.test(t) && /(crea|crear|haz|hacer|quiero|arma|prepara|genera)/.test(t)) return { intent: "show", reply: "Preparo un plan de show por secciones. No cambia nada hasta que lo apliques.", actions: [] };

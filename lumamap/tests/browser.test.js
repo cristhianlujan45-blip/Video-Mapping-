@@ -868,6 +868,39 @@ void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_Fr
   await page.evaluate((id) => { const a = window.__lumamap; a.S.project.surfaces = a.S.project.surfaces.filter(s => s.id !== id); a.select(a.S.project.surfaces[0]?.id || null); a.changed({ panel: true }); a.openTab(null); }, id);
   fs.rmSync(fsFile, { force: true });
 });
+await test("VJ automático: set desde una frase, mezcla sola al tempo (clips y efectos) sin llenar el deshacer, y al parar todo vuelve", async () => {
+  const before = await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(240); a.openTab(null); a.openTab("live");
+    return { undo: a.history.undoStack.length, fx: JSON.stringify(a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[a.S.project.surfaces[0].id].fx) }; });
+  await page.locator("#panelBody").getByRole("button", { name: /Mi set/ }).click();
+  await page.locator(".vjset input[type=text]").fill("techno rojo y blanco con láseres y espacio");
+  await page.locator(".vjset").getByRole("button", { name: "Crear", exact: true }).click();
+  await page.locator(".vjset .vjclip").first().waitFor();
+  const set = await page.evaluate(() => { const v = window.__lumamap.S.project.settings.vj; return { n: v.clips.length, style: v.style, pal: v.palette, gens: v.clips.map(c => c.gen) }; });
+  assert.ok(set.n >= 10, "clips en el set: " + set.n);
+  assert.equal(set.style, "techno"); assert.deepEqual(set.pal, ["#ff1a1a", "#ffffff"]);
+  assert.ok(set.gens.includes("lasershow") || set.gens.includes("crosslasers"), set.gens.join(","));
+  await page.locator("#modal").getByRole("button", { name: "Listo" }).click();
+  await page.locator("#panelBody").getByRole("button", { name: /Empezar el VJ automático/ }).click();
+  await page.locator(".vjstatus .vjsec").waitFor();
+  // Varios golpes después (240 BPM sin micrófono = estructura de tema al tempo): cambió de clip y los colores son los del set.
+  const seen = new Set();
+  for (let i = 0; i < 40; i++) {
+    const s = await page.evaluate(() => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[a.S.project.surfaces[0].id]; return { gen: (l.next || l).source.gen, c: (l.next || l).source.color, st: a.vjStatus() }; });
+    if (s.gen) seen.add(s.gen + "|" + s.c);
+    if (seen.size >= 2 && i > 10) break;
+    await page.waitForTimeout(500);
+  }
+  assert.ok(seen.size >= 2, "clips usados: " + [...seen].join(" "));
+  assert.ok([...seen].every(x => /#ff1a1a|#ffffff/i.test(x)), "colores del set: " + [...seen].join(" "));
+  const st = await page.evaluate(() => window.__lumamap.vjStatus());
+  assert.ok(st && st.bpm >= 200 && st.sectionName, JSON.stringify(st));
+  const mid = await page.evaluate(() => window.__lumamap.history.undoStack.length);
+  assert.ok(mid - before.undo <= 2, "el deshacer no se llena de clips: " + (mid - before.undo));
+  await page.locator("#panelBody").getByRole("button", { name: /Parar el VJ/ }).click();
+  const after = await page.evaluate(() => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[a.S.project.surfaces[0].id]; return { strobe: l.fx.strobe, rgb: l.fx.rgbShift, kal: l.fx.kaleido, audio: l.audio.enabled, on: a.S.vjOn }; });
+  assert.deepEqual(after, { strobe: 0, rgb: 0, kal: 0, audio: false, on: false });
+  await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(120); a.S.project.settings.vj.clips = []; a.S.project.settings.vj.palette = null; a.openTab(null); });
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();

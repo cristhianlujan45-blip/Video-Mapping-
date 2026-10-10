@@ -29,6 +29,7 @@ import { openCreate3D } from "./panels-create3d.js";
 import { exportOBJ } from "./render3d.js";
 import { warmThumbs } from "./thumbs.js";
 import { startPhoneCams } from "./phonecam.js";
+import { createVJ, VJ_STYLES } from "./autovj.js";
 import { startDeviceNotices, cameraPlugged } from "./phoneusb-ui.js";
 import { openMediaLibrary } from "./panels-library.js";
 import { loadPlugins } from "./plugins.js";
@@ -541,8 +542,91 @@ A.toggleSurfaceBlack = (id) => {
   l.hidden = !l.hidden;
   changed({ panel: true }); commit();
 };
+/* ---- VJ automático (autovj.js decide; aquí se aplica sin llenar el historial) ---- */
+let vj = null;
+const vjBase = new Map();      // superficie → { fx propio del clip, audio original }
+const VJ_SKIP = new Set(["body", "camera", "text", "drawing", "model3d", "projector3d"]);
+/** Clips del set (o, si está vacío, todo el catálogo de animaciones menos las de calibrar). */
+function vjClips() {
+  const V = S.project.settings.vj;
+  if (V.clips.length) return V.clips.filter(c => c.on !== false && (c.kind !== "media" || S.project.media.some(m => m.id === c.mediaId && !m.pending)));
+  return M.ANIM_LIBRARY.filter(a => a.cat !== "Calibración").map(a => a.shader ? { id: a.id, name: a.name, kind: "shader", shaderId: a.shader } : { id: a.id, name: a.name, kind: "anim", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale, fx: a.fx || null });
+}
+/** Superficies que lleva el VJ: las visibles con animación, video, shader o color (no toca cámara, interactivo, texto ni dibujo). */
+const vjSurfaces = () => S.project.surfaces.filter(s => !s.hidden && !VJ_SKIP.has(lookOfId(s.id).source.type)).map(s => s.id);
+function vjSource(c, palette) {
+  const V = S.project.settings.vj;
+  if (c.kind === "media") return { type: "media", mediaId: c.mediaId };
+  if (c.kind === "shader") return { type: "shader", shaderId: c.shaderId, shaderParams: c.params || {}, speed: 1 };
+  const pal = Array.isArray(V.palette) && V.palette.length === 2 ? V.palette : palette;   // colores propios del set, si los hay
+  const recolor = V.recolor && pal;
+  return { type: "gen", gen: c.gen, color: recolor ? pal[0] : c.color, color2: recolor ? pal[1] : c.color2, speed: c.speed ?? 1, scale: c.scale ?? 1 };
+}
+/** B pasa a A sin tocar el historial (el VJ cambia mucho: deshacer no debe llenarse de clips). */
+function vjTake(sid) {
+  clearTimeout(takeTimers.get(sid)); takeTimers.delete(sid);
+  const l = lookOfId(sid);
+  if (!l?.next) return;
+  const b = deckB(l);
+  l.source = b.source; l.fx = b.fx; l.fit = b.fit;
+  l.next = null; l.mix = 0; l.fade = null;
+  changed();
+}
+function vjApply(actions) {
+  const beatSec = 60 / Math.max(40, S.levels?.bpm || S.project.settings.bpm || 120);
+  const flash = new Set();
+  for (const a of actions) {
+    const l = lookOfId(a.surface || "");
+    if (a.type === "section") { S.vjSection = a.section; continue; }
+    if (!l) continue;
+    if (!vjBase.has(a.surface)) vjBase.set(a.surface, { fx: { ...l.fx }, audio: { ...l.audio }, orig: { fx: { ...l.fx }, audio: { ...l.audio } } });
+    const b = vjBase.get(a.surface);
+    if (a.type === "clip") {
+      if (l.next) vjTake(a.surface);
+      const fx = { ...M.DEFAULT_FX(), ...(a.clip.fx || {}) };
+      l.next = { source: { ...M.DEFAULT_SOURCE(), ...vjSource(a.clip, a.palette) }, fx: { ...fx }, fit: "cover" };
+      l.mix = 0; l.fade = null;
+      b.fx = fx;
+      if (a.flash) flash.add(a.surface);
+      if (!a.beats) vjTake(a.surface);
+      else { l.fade = { t0: S.clock, dur: a.beats * beatSec }; takeTimers.set(a.surface, setTimeout(() => vjTake(a.surface), a.beats * beatSec * 1000 + 30)); }
+    } else if (a.type === "fx") {
+      const fx = { ...b.fx, ...a.fx };
+      if (flash.has(a.surface)) fx.brightness = (fx.brightness || 1) * 2.2;   // destello al entrar el drop
+      l.fx = fx;
+      if (l.next?.fx) l.next.fx = { ...l.next.fx, ...a.fx };
+    } else if (a.type === "audio") l.audio = { ...b.orig.audio, ...a.audio };
+  }
+  changed();
+}
+A.vjStart = () => {
+  const V = S.project.settings.vj;
+  if (!vjSurfaces().length) { toast("Pon primero una superficie con animación o video (el VJ no toca cámara, interactivo, texto ni dibujo)", "err"); return false; }
+  vj = createVJ({ style: V.style, intensity: V.intensity });
+  vjBase.clear();
+  if (!S.playing) A.togglePlay();
+  S.autoMix = 0;
+  S.vjOn = true; S.vjSection = "calm";
+  vjApply(vj.beat(S.levels || {}, performance.now(), { clips: vjClips(), surfaces: vjSurfaces(), variety: V.variety }));
+  toast(`🤖 VJ automático: ${VJ_STYLES[V.style]?.name || V.style}${audio.active ? " · escuchando la música" : " · al tempo (activa el micrófono para que siga la música)"}`);
+  renderPanel();
+  return true;
+};
+A.vjStop = () => {
+  if (!vj) return;
+  vj = null; S.vjOn = false;
+  // Cada pantalla se queda con su clip actual y recupera sus efectos y su audio.
+  for (const [sid, b] of vjBase) { const l = lookOfId(sid); if (!l) continue; if (l.next) vjTake(sid); l.fx = b.fx; l.audio = b.orig.audio; }
+  vjBase.clear();
+  changed({ panel: true }); commit();
+  toast("VJ automático parado");
+};
+A.vjSkip = () => { vj?.skip(); };
+A.vjSet = (patch) => { Object.assign(S.project.settings.vj, patch); if (vj) { if (patch.style) vj.setStyle(patch.style); if ("intensity" in patch) vj.setIntensity(patch.intensity); } changed(); commitSoon(); };
+app.vjStatus = () => vj ? vj.status() : null;
+app.audioActive = () => !!audio.active;
 /** Mezcla automática: cada N golpes, una animación nueva al azar en cada pantalla. */
-A.setAutoMix = (beats) => { S.autoMix = beats; S.autoMixCount = 0; renderPanel(); toast(beats ? `Mezcla automática cada ${beats} golpes` : "Mezcla automática apagada"); };
+A.setAutoMix = (beats) => { if (beats && vj) A.vjStop(); S.autoMix = beats; S.autoMixCount = 0; renderPanel(); toast(beats ? `Mezcla automática cada ${beats} golpes` : "Mezcla automática apagada"); };
 
 /* ---- máscara ---- */
 A.editMask = () => {
@@ -2555,6 +2639,7 @@ function tick(now) {
   fpsAvg = fpsAvg * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
   if (S.playing) S.clock += dt;
   S.levels = audio.update(now);
+  vj?.frame({ ...S.levels, live: audio.active }, now);
   // Audio como fuente del motor de parámetros (solo si hay mapeos de audio).
   if (S.project.settings.control.mappings.some(m => m.src === "audio" && m.enabled !== false)) for (const k of ["bass", "mid", "high", "level", "beat"]) params.input({ src: "audio", key: k, v: Math.max(0, Math.min(1, S.levels[k] || 0)) });
   // Cambio de escena al ritmo: cada N golpes.
@@ -2563,6 +2648,7 @@ function tick(now) {
     S.lastCount = S.levels.count;
     if (S.playing && R.enabled && R.sceneBeats > 0 && S.project.scenes.length > 1 && ++S.beatsInScene >= R.sceneBeats) { S.beatsInScene = 0; A.stepScene(1); }
     if (S.playing && S.autoMix > 0 && ++S.autoMixCount >= S.autoMix) { S.autoMixCount = 0; A.randomAll(); }
+    if (vj && S.playing) vjApply(vj.beat(S.levels, now, { clips: vjClips(), surfaces: vjSurfaces(), variety: S.project.settings.vj.variety }));
   }
 
   tickSensors(now);

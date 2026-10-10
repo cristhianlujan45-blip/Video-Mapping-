@@ -597,3 +597,18 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .plugins .item.plug .desc{color:var(--dim);}
 .plugins .acts{display:flex;align-items:center;gap:8px;flex:none;}
 .plugins pre.code{background:#000;border-radius:10px;padding:10px;font-size:11px;overflow:auto;max-height:220px;white-space:pre;}
+
+/* ---------- VJ automático ---------- */
+.vjstatus{display:flex;flex-direction:column;gap:4px;background:var(--bg3);border-radius:12px;padding:8px 10px;margin:6px 0;}
+.vjstatus .vjsec{font-size:15px;}
+.vjstatus .vjsec.drop{color:#ff4d6d;}.vjstatus .vjsec.build{color:#ffd166;}.vjstatus .vjsec.break{color:var(--dim);}
+.vjbar{height:6px;border-radius:3px;background:#000;overflow:hidden;display:block;}
+.vjbar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),#ff2d95);transition:width .3s;}
+.vjclips{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow:auto;}
+.vjclip{display:grid;grid-template-columns:56px 1fr auto auto auto;gap:8px;align-items:center;background:var(--bg3);border-radius:10px;padding:4px 6px;}
+.vjclip.off{opacity:.5;}
+.vjclip img{width:56px;height:35px;object-fit:cover;border-radius:6px;background:#000;}
+.vjclip .nm{display:flex;flex-direction:column;font-size:12px;min-width:0;}
+.vjclip .nm small{color:var(--dim);}
+.vjclip .chips{flex-wrap:nowrap;}
+@media (max-width:700px){.vjclip{grid-template-columns:48px 1fr auto auto;}.vjclip .chips{grid-column:1/-1;}}

@@ -6,6 +6,7 @@
 // Solo cuando el usuario pulsa «Aplicar» se ejecuta, con las mismas funciones
 // del editor (guardado y deshacer incluidos). Las acciones «críticas»
 // (borrar, cambiar la resolución…) se marcan y piden confirmación aparte.
+import { VJ_STYLES } from "../autovj.js";
 import * as M from "../model.js";
 import { runAction } from "../rules.js";
 import { describe } from "../params.js";
@@ -402,6 +403,16 @@ export const ACTIONS = {
       const L = app.dmx?.lights?.() || [];
       for (const l of L) { l.source = "effect"; l.fx = { ...defaultLightFx(findFx("Color fijo").id), color: p.color }; }
       app.changed({ panel: true }); app.commitSoon?.(); return L.length ? `Luces en ${p.color} (${L.length})` : "No hay luces todavía (Luces → Añadir)";
+    },
+  },
+  auto_vj: {
+    label: "VJ automático (mezcla sola al ritmo como un VJ profesional)", params: { on: "true|false", style: Object.keys(VJ_STYLES).join("|") + " (opcional)" },
+    check: (app, p) => ({ on: p.on !== false && p.on !== "false", style: p.style && VJ_STYLES[p.style] ? p.style : "" }),
+    text: (app, p) => p.on ? `Empezar el VJ automático${p.style ? ` (estilo ${VJ_STYLES[p.style].name})` : ""}: cambia de clip en cada frase y mueve los efectos con la música` : "Parar el VJ automático",
+    run: (app, p) => {
+      if (!p.on) { app.actions.vjStop(); return "VJ automático parado"; }
+      if (p.style) app.actions.vjSet({ style: p.style });
+      return app.actions.vjStart() ? "VJ automático en marcha" : "Pon primero una superficie con animación o video";
     },
   },
   search_gif: {

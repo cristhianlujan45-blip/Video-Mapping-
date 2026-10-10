@@ -755,6 +755,8 @@ export function normalizeInteractive(c) {
 export function defaultSettings() {
   return {
     transitionMs: 800, autoAdvance: false, loopScenes: true, bpm: 120,
+    // VJ automático: estilo, intensidad, «cada pantalla distinta», recolorear y el set de clips.
+    vj: { style: "techno", intensity: 0.7, variety: false, recolor: true, palette: null, clips: [] },
     react: { enabled: false, amount: 1, pulse: true, zoom: true, color: true, motion: true, flash: false, sceneBeats: 0 },
     // Salida (como el «Advanced Output» de los media servers): calidad, color,
     // orientación del proyector y bordes suaves para unir varios proyectores.
@@ -1000,6 +1002,7 @@ export function normalizeProject(json) {
     show: normalizeShow(st.show),
     tracking: normalizeTracking(st.tracking),
     interactive: normalizeInteractive(st.interactive),
+    vj: { ...D.vj, ...(st.vj || {}), clips: Array.isArray(st.vj?.clips) ? st.vj.clips.slice(0, 300) : [] },
   };
   json.stage3d = normalizeStage3d(json.stage3d);
   if (!json.scenes.length) json.scenes.push(createScene());

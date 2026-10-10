@@ -9,6 +9,7 @@ import { openMediaLibrary } from "./panels-library.js";
 import { getShader } from "./plugins.js";
 import { hexToIsf, isfToHex } from "./isf.js";
 import { openPlugins } from "./panels-plugins.js";
+import { vjSection } from "./panels-vj.js";
 import { openPhoneCam } from "./panels-phonecam.js";
 import { canConvert } from "./convqueue.js";
 import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog, lazyThumb, draggable } from "./ui.js";
@@ -301,6 +302,7 @@ const live = {
     const A = app.actions, S = app.S, P = S.project;
     const wrap = h("div", {});
     if (!P.surfaces.length) return needSelection(app, "Añade superficies (una por pantalla o zona) y aquí podrás poner una animación distinta en cada una y mezclarlas en vivo.");
+    wrap.append(vjSection(app));
     wrap.append(section("Todas las pantallas",
       hint("Cada superficie tiene AHORA (lo que se ve) y SIGUIENTE (lo que preparas). Pulsa GO para fundir, o mueve el fader a mano."),
       h("div", { class: "lbl" }, "Duración del fundido"),
