@@ -84,4 +84,39 @@ await test("Windows (proceso principal): solo https y solo internet, también tr
   assert.equal((await N.get("nada")).error, "bad-url");
 });
 
+const COMMONS = { continue: { gsroffset: 30 }, query: { pages: {
+  "11": { pageid: 11, index: 2, title: "File:Fire loop.gif", imageinfo: [{ url: "https://upload.wikimedia.org/a/Fire_loop.gif", thumburl: "https://upload.wikimedia.org/thumb/a/240px-Fire_loop.gif", mime: "image/gif", size: 900000, width: 400, height: 300,
+    metadata: [{ name: "frameCount", value: 24 }], extmetadata: { Artist: { value: '<a href="//x">Luis</a>' }, LicenseShortName: { value: "CC BY-SA 4.0" } } }] },
+  "12": { pageid: 12, index: 1, title: "File:Diagrama.gif", imageinfo: [{ url: "https://upload.wikimedia.org/b/Diagrama.gif", mime: "image/gif", size: 20000, metadata: [{ name: "frameCount", value: 1 }] }] },
+  "13": { pageid: 13, index: 3, title: "File:Huge.gif", imageinfo: [{ url: "https://upload.wikimedia.org/c/Huge.gif", mime: "image/gif", size: 40e6, metadata: [{ name: "frameCount", value: 99 }] }] },
+} } };
+await test("en español: las palabras se traducen solas (los GIF están etiquetados en inglés)", () => {
+  assert.equal(G.toEnglish("🔥 fuego"), "fire");
+  assert.equal(G.toEnglish("fuegos artificiales"), "fireworks");
+  assert.equal(G.toEnglish("corazones rojos"), "hearts red");
+  assert.equal(G.toEnglish("dragón"), "dragon");
+  assert.equal(G.toEnglish("pikachu"), "pikachu");
+});
+await test("Wikimedia Commons (gratis, sin clave): solo GIF animados y que no pesen demasiado, con autor y licencia", () => {
+  const items = G.parseCommons(COMMONS);
+  assert.deepEqual(items.map(i => i.title), ["Fire loop"], "fuera el GIF quieto (1 fotograma) y el de 40 MB");
+  assert.equal(items[0].thumb, "https://upload.wikimedia.org/thumb/a/240px-Fire_loop.gif");
+  assert.equal(items[0].credit, "© Luis · CC BY-SA 4.0");
+  assert.match(G.commonsUrl("fire"), /filemime%3Aimage%2Fgif%20fire/);
+});
+await test("todas las fuentes a la vez: se ve lo que llega primero, sin repetidos, y si una falla siguen las otras", async () => {
+  const ov = { page_count: 3, results: [{ id: "o1", title: "Fuego", url: "https://upload.wikimedia.org/a/Fire_loop.gif", thumbnail: "t1", creator: "Ana", license: "by" }, { id: "o2", title: "Llamas", url: "https://x.org/llamas.gif", thumbnail: "t2" }] };
+  const ff = fakeFetch([[/api\.openverse\.org.*q=fire/, ov], [/commons\.wikimedia\.org.*fire/, COMMONS]]);
+  const seen = [];
+  const r = await G.searchAll("fuego", { fetchImpl: ff, onItems: (items, src) => seen.push([src, items.length]) });
+  assert.equal(r.items.length, 2, "el GIF que está en las dos fuentes sale una sola vez");
+  assert.equal(seen.reduce((n, [, k]) => n + k, 0), 2);
+  assert.equal(r.more, true);
+  assert.ok(ff.asked.some(u => /openverse.*q=fire/.test(u)) && ff.asked.some(u => /commons.*fire/.test(u)), "buscó «fire» en las dos");
+  // Commons caído: Openverse sigue.
+  const half = await G.searchAll("fuego", { fetchImpl: fakeFetch([[/api\.openverse\.org/, ov]]) });
+  assert.equal(half.items.length, 2);
+  // Las dos caídas: mensaje claro.
+  await assert.rejects(G.searchAll("fuego", { fetchImpl: fakeFetch([]) }), /conexión/);
+});
 report();

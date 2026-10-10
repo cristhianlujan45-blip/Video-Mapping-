@@ -42,7 +42,8 @@ public static class W {
   [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
   [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
-  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint ms, out IntPtr result);
   public static string Text(IntPtr h) { var s = new StringBuilder(512); GetWindowText(h, s, 512); return s.ToString(); }
   public static string Cls(IntPtr h) { var s = new StringBuilder(256); GetClassName(h, s, 256); return s.ToString(); }
   public static uint Pid(IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }
@@ -50,9 +51,11 @@ public static class W {
   public static List<IntPtr> Kids(IntPtr p) { var r = new List<IntPtr>(); EnumChildWindows(p, (h, l) => { r.Add(h); return true; }, IntPtr.Zero); return r; }
   public static bool IsRadio(IntPtr h) { int t = GetWindowLong(h, -16) & 0xF; return t == 4 || t == 9; }
   public static bool IsCheck(IntPtr h) { int t = GetWindowLong(h, -16) & 0xF; return t == 2 || t == 3; }
-  public static bool Checked(IntPtr h) { return (long)SendMessage(h, 0x00F0, IntPtr.Zero, IntPtr.Zero) == 1; }
-  // Un clic: WM_COMMAND (BN_CLICKED) a la ventana dueña del botón, como hace Windows al pulsarlo.
-  public static void Click(IntPtr btn) { SendMessage(GetParent(btn), 0x0111, (IntPtr)(GetDlgCtrlID(btn) & 0xffff), btn); }
+  // Lectura con tiempo máximo (nunca se queda esperando a una ventana ocupada).
+  public static bool Checked(IntPtr h) { IntPtr r; SendMessageTimeout(h, 0x00F0, IntPtr.Zero, IntPtr.Zero, 0x0002, 2000, out r); return (long)r == 1; }
+  // Un clic: WM_COMMAND (BN_CLICKED) a la ventana dueña del botón, SIN esperar (como un clic de verdad):
+  // las páginas del instalador abren su propio bucle y un SendMessage se quedaría esperando para siempre.
+  public static void Click(IntPtr btn) { PostMessage(GetParent(btn), 0x0111, (IntPtr)(GetDlgCtrlID(btn) & 0xffff), btn); }
 }
 "@
 function TreePids($root) {
@@ -99,7 +102,7 @@ while (-not $wiz.HasExited -and (Get-Date) -lt $deadline) {
     if ($c.Radio -and $c.On) { $sawRadio = $true }
   }
   $c = Press $wiz.Id @("Terminar", "Finish", "Instalar", "Install", "Siguiente*", "Next*")
-  if ($c) { $clicked += $c; Write-Host "  clic: $c" }
+  if ($c) { $clicked += $c; Write-Host "  clic: $c"; Start-Sleep -Milliseconds 1500 }
   if ((++$n % 25) -eq 0) { Dump $wiz.Id }
   Start-Sleep -Milliseconds 800
 }

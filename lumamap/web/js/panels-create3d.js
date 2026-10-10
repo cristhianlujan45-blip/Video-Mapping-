@@ -8,7 +8,12 @@ import { loadThree, modelView, exportOBJ } from "./render3d.js";
 import { aiOf } from "./panels-assistant.js";
 
 const SPINS = [[0, "Quieto"], [0.5, "Lento"], [1, "Normal"], [2, "Rápido"]];
-const ui = { text: "", recipe: null, finish: "real", view: "three", spin: 1 };
+const ui = { text: "", recipe: null, finish: "real", view: "three", spin: 1, fromCache: "" };
+// Lo que ya diseñó la IA se guarda: pedir lo mismo otra vez es instantáneo.
+const CACHE = "lumamap:3dcache";
+const keyOf = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ").trim();
+const cacheGet = (t) => { try { return JSON.parse(localStorage.getItem(CACHE) || "{}")[keyOf(t)] || null; } catch { return null; } };
+const cachePut = (t, r) => { try { const all = JSON.parse(localStorage.getItem(CACHE) || "{}"); all[keyOf(t)] = r; const keys = Object.keys(all); for (const k of keys.slice(0, Math.max(0, keys.length - 20))) delete all[k]; localStorage.setItem(CACHE, JSON.stringify(all)); } catch {} };
 
 /**
  * opts.prompt: crear directamente con esa frase · opts.onPick(recipe, look): modo «elegir»
@@ -26,6 +31,8 @@ export async function openCreate3D(app, opts = {}) {
   let busy = false, alive = true, t0 = performance.now();
 
   try { await loadThree(); } catch (e) { toast("No se pudo cargar el motor 3D: " + e.message, "err"); return; }
+  // La IA se va cargando en memoria mientras eliges (la primera vez es lo que más tarda).
+  aiOf(app).warmup().catch(() => {});
 
   // Vista previa que gira (se para al cerrar).
   const loop = () => {
@@ -49,9 +56,18 @@ export async function openCreate3D(app, opts = {}) {
       status.textContent = `${OBJECTS3D.find(o => o.id === req.id).emoji} Hecho con la biblioteca 3D de LumaMap (sin internet).`;
       return draw();
     }
+    // Ya diseñado antes: al instante (pulsar «Crear» otra vez con lo mismo = otra versión).
+    const cached = cacheGet(text);
+    if (cached && ui.fromCache !== keyOf(text)) {
+      ui.recipe = cached; ui.fromCache = keyOf(text);
+      status.textContent = `🧠 «${cached.name}» (${cached.parts.length} piezas), ya diseñado antes. Pulsa «Crear» otra vez para otra versión.`;
+      return draw();
+    }
+    ui.fromCache = "";
     // Fuera de la biblioteca: la IA (si está activada) diseña la receta de piezas.
     const ai = aiOf(app);
     busy = true; status.textContent = "Comprobando la IA…"; draw();
+    let tick = 0;
     try {
       await ai.refresh();
       const p = ai.active;
@@ -59,14 +75,17 @@ export async function openCreate3D(app, opts = {}) {
         status.textContent = `Sin IA puedo crear: ${OBJECTS3D.map(o => o.name.toLowerCase()).join(", ")}. Para «${text}» activa la IA local (Asistente → Configuración) y vuelve a intentarlo.`;
         return;
       }
-      status.textContent = `La IA (${p.label}) está diseñando «${text}»…`;
+      const t0 = Date.now();
+      const say = () => { const sec = Math.round((Date.now() - t0) / 1000); status.textContent = `La IA (${p.label}) está diseñando «${text}»… ${sec} s${sec > 20 ? " (la primera vez tarda más: está cargando la IA)" : ""}`; };
+      say(); tick = setInterval(say, 1000);
       const q = aiPrompt(text);
-      const out = await p.ask({ system: q.system, user: q.user, schema: q.schema });
+      const out = await p.ask({ system: q.system, user: q.user, schema: q.schema, maxTokens: q.maxTokens });
       ui.recipe = validateRecipe(out);
-      status.textContent = `🧠 Diseñado por la IA (${p.label}) con ${ui.recipe.parts.length} piezas. Si no te convence, pulsa «Crear» otra vez para otra versión.`;
+      cachePut(text, ui.recipe); ui.fromCache = keyOf(text);
+      status.textContent = `🧠 Diseñado por la IA (${p.label}) en ${Math.round((Date.now() - t0) / 1000)} s con ${ui.recipe.parts.length} piezas. Si no te convence, pulsa «Crear» otra vez para otra versión.`;
     } catch (e) {
       status.textContent = "La IA no pudo crearlo: " + (e?.message || e) + ". Prueba con otra frase o con un objeto de la lista.";
-    } finally { busy = false; draw(); }
+    } finally { clearInterval(tick); busy = false; draw(); }
   }
 
   const rebuildLibrary = (patch) => {

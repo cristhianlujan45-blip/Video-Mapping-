@@ -45,13 +45,41 @@ await test("receta de la IA: solo formas permitidas, números acotados, máximo 
     ...Array.from({ length: 100 }, () => ({ s: "box" })),
   ] });
   assert.equal(r.parts.length, 80, "80 como máximo (las no permitidas se descartan)");
-  assert.equal(r.parts[1].p[0], 20); assert.equal(r.parts[1].d[0], 0.01);
+  // Números acotados (999 → 20, tamaño negativo → 0,01) y después centrado y escalado: todo cerca del origen.
+  assert.ok(r.parts.every(q => [...q.p, ...q.d].every(Number.isFinite) && q.p.every(v => Math.abs(v) <= 6)), "todo dentro de la escena");
   assert.equal(r.parts[1].c, "#8a93a6"); assert.equal(r.parts[1].m, "paint");
   assert.ok(!JSON.stringify(r).includes("alert"));
   assert.throws(() => G.validateRecipe({ parts: [{ s: "eval" }] }), /no devolvió piezas/);
   assert.match(G.aiPrompt("un dragón").user, /SOLO|JSON/);
 });
 
+await test("lo que diseña la IA queda bien colocado: centrado, apoyado en el suelo, a buen tamaño y sin piezas diminutas", () => {
+  const r = G.validateRecipe({ name: "Mini", parts: [
+    { s: "box", p: [10, 5, 3], d: [0.2, 0.2, 0.2], c: "#ff0000", m: "paint" },
+    { s: "sphere", p: [10.5, 5.3, 3], d: [0.3, 0.3, 0.3], c: "#00ff00", m: "paint" },
+    { s: "box", p: [0, 0, 0], d: [0.001, 0.001, 0.001], c: "#000000", m: "paint" },
+  ] });
+  assert.equal(r.parts.length, 2, "fuera la pieza diminuta");
+  const minY = Math.min(...r.parts.map(q => q.p[1] - q.d[1] / 2));
+  assert.ok(Math.abs(minY) < 0.01, "apoyado en y = 0: " + minY);
+  const xs = r.parts.flatMap(q => [q.p[0] - q.d[0] / 2, q.p[0] + q.d[0] / 2]);
+  assert.ok(Math.abs((Math.min(...xs) + Math.max(...xs)) / 2) < 0.05, "centrado");
+  const size = Math.max(...xs) - Math.min(...xs);
+  assert.ok(size > 1.5 && size < 5, "tamaño cómodo: " + size);
+  // Uno enorme se reduce.
+  const big = G.validateRecipe({ parts: [{ s: "box", p: [0, 9, 0], d: [18, 18, 18], c: "#fff", m: "paint" }] });
+  assert.ok(Math.max(...big.parts[0].d) <= 4, "reducido");
+  // La IA recibe un formato estricto (más rápido y sin errores) y un límite de texto.
+  const q = G.aiPrompt("un dragón");
+  assert.deepEqual(q.schema.properties.parts.items.properties.s.enum.includes("eval"), false);
+  assert.ok(q.maxTokens > 0 && q.maxTokens <= 4000);
+});
+await test("biblioteca ampliada: moto, barco, flor, seta, globo, faro, castillo, taza, cactus y nube al instante (sin IA)", () => {
+  for (const [t, id] of [["hazme una moto roja", "moto"], ["un velero", "barco"], ["una flor rosa", "flor"], ["un hongo", "seta"], ["globo aerostático", "globo"],
+    ["un faro", "faro"], ["castillo azul", "castillo"], ["una taza de café", "taza"], ["un cactus", "cactus"], ["una nube", "nube"]]) assert.equal(G.parseRequest(t)?.id, id, t);
+  assert.equal(G.parseRequest("hazme un dragón, te lo pido"), null, "«te» no es una taza");
+  assert.equal(G.parseRequest("un carro rosa")?.id, "carro");
+});
 await test("holograma con un objeto 3D: en la pirámide cada cara lo ve desde su lado", () => {
   const project = M.createProject(), app = { S: { project } };
   const model = G.libraryRecipe("carro", {});

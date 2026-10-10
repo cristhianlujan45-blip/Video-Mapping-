@@ -1,13 +1,38 @@
 // web/js/gifsearch.js
 // Buscar GIF animados en internet y traerlos a la proyección.
-//  - Openverse: gratis, sin cuenta, imágenes con licencia libre (hay que citar al autor).
-//  - GIPHY: el catálogo grande de GIF; necesita una clave gratuita (developers.giphy.com).
+//  - Openverse y Wikimedia Commons: gratis, sin cuenta ni clave, licencia libre
+//    (hay que citar al autor). Se buscan a la vez y se ve lo que llegue primero.
+//  - GIPHY: el catálogo grande de GIF; opcional, necesita una clave gratuita.
 //  - Un enlace pegado (de GIPHY, Tenor u otra web) también vale.
+// Las palabras en español se traducen solas al inglés (casi todo está etiquetado en inglés).
 // Las descargas pasan por la app de Windows (proceso principal) o la de Android
 // (NetGet.kt) para que CORS no las bloquee; en el navegador se intenta con fetch.
 
-export const GIF_SOURCES = [["openverse", "Openverse (gratis)"], ["giphy", "GIPHY"]];
-export const GIF_IDEAS = ["fuego", "humo", "neón", "corazones", "estrellas", "confeti", "fuegos artificiales", "lluvia", "agua", "baile", "brillo", "partículas", "espacio", "fiesta", "flores", "nieve"];
+export const GIF_SOURCES = [["all", "Todo (gratis)"], ["openverse", "Openverse"], ["commons", "Wikimedia"], ["giphy", "GIPHY (con clave)"]];
+export const GIF_IDEAS = ["🔥 fuego", "💨 humo", "✨ neón", "💖 corazones", "⭐ estrellas", "🎉 confeti", "🎆 fuegos artificiales", "🌧 lluvia", "🌊 agua", "💃 baile", "💎 brillo", "🌌 espacio", "🪐 planetas", "🦋 mariposas", "🌸 flores", "❄️ nieve", "🌀 hipnótico", "🔁 bucle"];
+/** Lo que se busca al abrir (sin escribir nada). */
+export const GIF_DEFAULT = "animación";
+
+/** Español → inglés para las palabras más comunes (los GIF están etiquetados en inglés). */
+const ES_EN = {
+  fuego: "fire", llamas: "flames", humo: "smoke", "neón": "neon", neon: "neon", corazones: "hearts", "corazón": "heart", corazon: "heart",
+  estrellas: "stars", estrella: "star", confeti: "confetti", "fuegos artificiales": "fireworks", lluvia: "rain", agua: "water", olas: "waves", mar: "sea",
+  baile: "dance", bailar: "dance", brillo: "sparkle", brillos: "glitter", "partículas": "particles", particulas: "particles", espacio: "space",
+  fiesta: "party", flores: "flowers", flor: "flower", nieve: "snow", galaxia: "galaxy", planetas: "planets", planeta: "planet", luna: "moon", sol: "sun",
+  mariposas: "butterflies", mariposa: "butterfly", "pájaros": "birds", pajaros: "birds", peces: "fish", gato: "cat", perro: "dog", "dragón": "dragon",
+  "hipnótico": "hypnotic", hipnotico: "hypnotic", bucle: "loop", "animación": "animation", animacion: "animation", "explosión": "explosion",
+  rayo: "lightning", rayos: "lightning", nubes: "clouds", arcoiris: "rainbow", "arcoíris": "rainbow", "música": "music", musica: "music",
+  "calavera": "skull", "fantasma": "ghost", "navidad": "christmas", "halloween": "halloween", "cumpleaños": "birthday", "boda": "wedding",
+  "geometría": "geometry", geometria: "geometry", "túnel": "tunnel", tunel: "tunnel", "líquido": "liquid", liquido: "liquid", "abstracto": "abstract",
+  rojo: "red", rojos: "red", roja: "red", rojas: "red", azul: "blue", azules: "blue", verde: "green", verdes: "green", amarillo: "yellow",
+  morado: "purple", violeta: "violet", rosa: "pink", rosado: "pink", blanco: "white", negro: "black", dorado: "gold", oro: "gold",
+  plateado: "silver", naranja: "orange", colores: "colorful", luces: "lights", luz: "light", "corriendo": "running", caminando: "walking",
+};
+export function toEnglish(q) {
+  let t = String(q || "").toLowerCase().replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "").trim();
+  if (ES_EN[t]) return ES_EN[t];
+  return t.split(/\s+/).map(w => ES_EN[w] || w).join(" ");
+}
 const MAX_BYTES = 16_000_000;
 
 /* ---------------- Descarga (sin CORS en Windows y Android) ---------------- */
@@ -90,8 +115,54 @@ export function parseGiphy(j) {
   }).filter(g => g.url);
 }
 
+/* ---------------- Wikimedia Commons (gratis, sin clave) ---------------- */
+export function commonsUrl(q, page = 1) {
+  const search = `filemime:image/gif ${q}`.trim();
+  return "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=30"
+    + `&gsroffset=${(page - 1) * 30}&gsrsearch=${encodeURIComponent(search)}`
+    + "&prop=imageinfo&iiprop=url%7Csize%7Cmime%7Cmetadata%7Cextmetadata&iiurlwidth=240&iiextmetadatafilter=Artist%7CLicenseShortName";
+}
+const stripHtml = (s) => String(s || "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+export function parseCommons(j) {
+  const pages = Object.values(j?.query?.pages || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
+  return pages.map(p => {
+    const ii = p.imageinfo?.[0];
+    if (!ii?.url || ii.mime !== "image/gif" || (ii.size || 0) > MAX_BYTES) return null;
+    // Solo los GIF ANIMADOS (Commons tiene también muchos GIF quietos, como diagramas).
+    const frames = +((ii.metadata || []).find(m => m.name === "frameCount")?.value || 0);
+    if (frames && frames < 2) return null;
+    const md = ii.extmetadata || {}, who = stripHtml(md.Artist?.value), lic = stripHtml(md.LicenseShortName?.value);
+    return { id: "wc:" + p.pageid, title: String(p.title || "GIF").replace(/^File:|\.gif$/gi, "").trim(), thumb: ii.thumburl || ii.url, url: ii.url,
+      w: ii.width || 0, h: ii.height || 0, size: ii.size || 0, credit: [who ? "© " + who.slice(0, 40) : "", lic].filter(Boolean).join(" · "), page: ii.descriptionurl || "" };
+  }).filter(Boolean);
+}
+
+/**
+ * Busca en varias fuentes a la vez y va entregando lo que llega (onItems(items, fuente)).
+ * Devuelve { items, more, errors } cuando han respondido todas.
+ */
+export async function searchAll(q, { page = 1, onItems = () => {}, fetchImpl, sources = ["openverse", "commons"] } = {}) {
+  const en = toEnglish(q) || toEnglish(GIF_DEFAULT);
+  const seen = new Set(), all = [], errors = [];
+  let more = false;
+  await Promise.all(sources.map(async (src) => {
+    try {
+      const r = await searchGifs(en, { source: src, page, fetchImpl });
+      const fresh = r.items.filter(it => !seen.has(it.url) && seen.add(it.url));
+      all.push(...fresh); more = more || r.more;
+      if (fresh.length) onItems(fresh, src);
+    } catch (e) { errors.push(e); }
+  }));
+  if (!all.length && errors.length) throw errors[0];
+  return { items: all, more, errors };
+}
+
 /** Busca GIF: { items, more }. */
 export async function searchGifs(q, { source = "openverse", key = "", page = 1, fetchImpl } = {}) {
+  if (source === "commons") {
+    const j = await netJson(commonsUrl(q, page), { fetchImpl });
+    return { items: parseCommons(j), more: !!j?.continue };
+  }
   if (source === "giphy") {
     if (!key) throw new GifError("key");
     const j = await netJson(giphyUrl(q, key, page), { fetchImpl });

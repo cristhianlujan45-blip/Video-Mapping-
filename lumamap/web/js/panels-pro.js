@@ -327,7 +327,8 @@ const perfPanel = {
       section("Vista previa del editor",
         hint("Reduce solo la vista previa: la salida al proyector y la grabación mantienen su resolución y fps."),
         segmented({ options: [[1, "100 %"], [0.75, "75 %"], [0.5, "50 %"]], value: S.previewScale || 1, onChange: (v) => app.actions.setPreview({ scale: +v }) }),
-        segmented({ options: [[0, "Fps de la pantalla"], [30, "30 fps"]], value: S.previewFps || 0, onChange: (v) => app.actions.setPreview({ fps: +v }) })),
+        segmented({ options: [[30, "30 fps (más ligero)"], [60, "60 fps"], [-1, "Los de la pantalla"]], value: S.previewFps === 30 || S.previewFps === -1 ? S.previewFps : 60, onChange: (v) => app.actions.setPreview({ fps: +v }) }),
+        hint("60 fps es lo recomendado: con un monitor de 144 Hz, «Los de la pantalla» dibuja 144 veces por segundo y gasta más del doble.")),
     );
   },
 };

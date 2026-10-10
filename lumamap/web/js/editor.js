@@ -2197,6 +2197,8 @@ function buildChrome() {
   set("menu", "menu"); set("undo", "undo"); set("redo", "redo"); set("play", "pause"); set("palette", "wand");
   const nb = document.querySelector('[data-act="next"]');
   if (nb) nb.innerHTML = icon("ai") + "<span>¿Qué hago ahora?</span>";
+  const gb = document.querySelector('[data-act="gif"]');
+  if (gb) gb.innerHTML = icon("gif") + "<span>GIF</span>";
   document.querySelectorAll("#top [data-act]").forEach(b => b.addEventListener("click", () => {
     const a = b.dataset.act;
     if (a === "menu") openTab("menu");
@@ -2207,6 +2209,7 @@ function buildChrome() {
     else if (a === "project") openTab("output");
     else if (a === "palette") openPalette(app);
     else if (a === "next") whatNow(app);
+    else if (a === "gif") A.searchGifs();
     else if (a === "record") A.record();
   }));
   buildDock();
@@ -2507,8 +2510,19 @@ app.perfReset = () => perf.reset();
  */
 let lastRun = 0, inFrame = false;
 function rafLoop(t) { requestAnimationFrame(rafLoop); runFrame(t); }
+/**
+ * Fotogramas por segundo del editor: 60 por defecto (antes iba a los Hz de la pantalla:
+ * 144 en un monitor de 144 Hz, sin ganar nada y gastando el doble). 30 = más ligero;
+ * -1 = los de la pantalla. Las salidas al proyector van a sus propios fps (60).
+ */
+const editorFpsCap = () => S.previewFps === -1 ? 0 : S.previewFps === 30 ? 30 : 60;
+let lastPreviewDraw = 0;
 function runFrame(now) {
   if (inFrame || now - lastRun < 4 || window.__lumaPause) return;   // __lumaPause: pruebas (congelar para capturar)
+  // Sin salidas abiertas, todo el editor va al límite; con salidas, la lógica sigue a su ritmo
+  // (para que el proyector no dé saltos) y solo se limita el dibujo de la vista previa.
+  const cap = editorFpsCap();
+  if (cap && !hosted.size && now - lastRun < 1000 / cap - 2) return;
   inFrame = true;
   try { tick(now); } catch (e) { console.error(e); } finally { inFrame = false; lastRun = now; }
 }
@@ -2549,8 +2563,10 @@ function tick(now) {
   const view = { sx: v.sx, sy: v.sy, tx: v.tx, ty: v.ty };
   const pk = previewK();
   const glView = pk === 1 ? view : { sx: v.sx * pk, sy: v.sy * pk, tx: v.tx * pk, ty: v.ty * pk };
-  // Vista previa a menos fps (opcional): se salta fotogramas del editor; la salida no cambia.
-  S.previewSkip = !S.projecting && S.previewFps === 30 ? !S.previewSkip : false;
+  // Vista previa al límite de fps del editor; la salida al proyector no cambia.
+  const cap = editorFpsCap();
+  S.previewSkip = !S.projecting && cap > 0 && now - lastPreviewDraw < 1000 / cap - 2;
+  if (!S.previewSkip) lastPreviewDraw = now;
   // Show: timecode, cues por timecode y líneas de automatización.
   show.tick();
   app.timers?.tick(now);
@@ -2581,7 +2597,7 @@ function tick(now) {
   pool.applyLookAudio(layers.flatMap(l => Object.values(l.scene.looks)), S.muted || outputPlaysAudio());
   // Luces: el video alimenta los pixel maps y los fixtures (muestreo en la GPU).
   dmx.tick(now, { project: RP.project, layers, time: S.clock, levels: S.levels, master: RP.master });
-  if (!document.hidden) { drawOverlay(v, view); drawLoupe(v, view); }
+  if (!document.hidden && !S.previewSkip) { drawOverlay(v, view); drawLoupe(v, view); }
   params.tickFeedback(now);
   const rb = $("#recBadge");
   if (S.rec) {

@@ -617,32 +617,45 @@ await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al 
   await page.evaluate(() => { window.__lumamap.S.project.settings.control.mappings = []; window.__lumamap.paramMappingsChanged(); window.__lumamap.openTab(null); });
 });
 
-await test("buscar GIF animado: buscar, tocar uno y entra en vivo (con fundido) o como capa encima", async () => {
+await test("GIF animados: botón de arriba, busca solo al escribir (en español), dos fuentes gratis a la vez, entra en vivo o como capa", async () => {
   const gif = fs.readFileSync(new URL("./fixtures/anim.gif", import.meta.url));
-  await page.route("https://api.openverse.org/**", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
-    body: JSON.stringify({ page_count: 1, results: [{ id: "g1", title: "Fuego animado", url: "https://upload.example.org/fuego.gif", thumbnail: "https://upload.example.org/fuego.gif", creator: "Ana", license: "by", license_version: "4.0" }] }) }));
+  const asked = [];
+  await page.route("https://api.openverse.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify({ page_count: 1, results: [{ id: "g1", title: "Fuego animado", url: "https://upload.example.org/fuego.gif", thumbnail: "https://upload.example.org/fuego.gif", creator: "Ana", license: "by", license_version: "4.0" }] }) }); });
+  await page.route("https://commons.wikimedia.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify({ query: { pages: { "5": { pageid: 5, index: 1, title: "File:Llamas.gif", imageinfo: [{ url: "https://upload.example.org/llamas.gif", thumburl: "https://upload.example.org/llamas.gif", mime: "image/gif", size: 9000, metadata: [{ name: "frameCount", value: 8 }], extmetadata: { Artist: { value: "Luis" }, LicenseShortName: { value: "CC0" } } }] } } } }) }); });
   await page.route("https://upload.example.org/**", (r) => r.fulfill({ status: 200, contentType: "image/gif", headers: { "access-control-allow-origin": "*" }, body: gif }));
-  const id = await page.evaluate(() => { const a = window.__lumamap; a.S.liveFade = 0.3; return a.S.project.surfaces[0].id; });
-  await page.evaluate((id) => { window.__lumamap.select(id); window.__lumamap.openTab("live"); }, id);
-  await page.getByRole("button", { name: "Buscar GIF animado y ponerlo en vivo" }).click();
+  const id = await page.evaluate(() => { const a = window.__lumamap; a.S.liveFade = 0.3; a.openTab(null); return a.S.project.surfaces[0].id; });
+  await page.evaluate((id) => window.__lumamap.select(id), id);
+  // Botón «GIF» de arriba: la ventana abre y ya busca sola.
+  await page.locator('#top [data-act="gif"]').click();
+  await page.locator(".gifsearch .gifcell:not(.sk)").first().waitFor();
+  // Escribir basta (sin pulsar «Buscar»): «fuego» se busca como «fire» en las dos fuentes.
+  asked.length = 0;
   await page.locator(".gifsearch input[type=search]").fill("fuego");
-  await page.locator(".gifsearch").getByRole("button", { name: "Buscar" }).click();
-  await page.locator(".gifcell").first().waitFor();
-  assert.match(await page.locator(".gifcell small").first().textContent(), /Ana · CC BY 4.0/);
-  await page.locator(".gifcell").first().click();
+  for (let t = 0; t < 100 && !(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u))); t++) await page.waitForTimeout(100);
+  await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 2, null, { timeout: 15000 });
+  assert.ok(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u)), "buscó «fire» en las dos: " + asked.join(" "));
+  assert.ok(!/\bnull\b/.test(await page.locator(".gifsearch").textContent()), "sin textos sueltos");
+  const fuego = page.locator(".gifcell", { hasText: "Ana" });
+  assert.match(await fuego.locator("small").textContent(), /Ana · CC BY 4.0/);
+  await fuego.hover();              // empieza a descargarse antes del clic
+  await page.waitForTimeout(400);
+  await fuego.click();
   await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 15000 });
   const m = await page.evaluate((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; const med = a.S.project.media.find(x => x.id === l.source.mediaId); return { kind: med.kind, name: med.name, credit: med.credit }; }, id);
   assert.deepEqual(m, { kind: "anim", name: "Fuego animado.gif", credit: "© Ana · CC BY 4.0" });
-  // Como capa nueva encima.
+  // Como capa nueva encima (y al reabrir, lo buscado sale al instante).
   const n0 = await page.evaluate(() => window.__lumamap.S.project.surfaces.length);
   await page.evaluate(() => window.__lumamap.actions.searchGifs({ query: "fuego" }));
   await page.locator(".gifsearch .seg button", { hasText: "Capa nueva encima" }).click();
-  await page.locator(".gifcell").first().click();
+  await page.locator(".gifcell", { hasText: "Luis" }).click();
   await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0, { timeout: 15000 });
   assert.match(await page.evaluate(() => window.__lumamap.S.project.surfaces.at(-1).name), /^GIF /);
-  await page.unroute("https://api.openverse.org/**"); await page.unroute("https://upload.example.org/**");
+  await page.unroute("https://api.openverse.org/**"); await page.unroute("https://commons.wikimedia.org/**"); await page.unroute("https://upload.example.org/**");
   await page.evaluate(() => window.__lumamap.openTab(null));
 });
+
 await test("holograma: asistente fácil (escenario como Tupac, 2 proyectores), uniones suaves, girar/espejo y prueba de orientación", async () => {
   await page.evaluate(() => window.__lumamap.actions.hologramWizard());
   const box = page.locator(".holo");

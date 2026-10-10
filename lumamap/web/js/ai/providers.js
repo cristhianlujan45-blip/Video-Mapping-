@@ -230,14 +230,14 @@ export class LocalAIProvider extends AIProvider {
       return { available: false, code: e.code === "offline" ? "notInstalled" : e.code || "offline", reason: e.code === "offline" ? MSG.notInstalled : e.message };
     }
   }
-  async ask({ system, user, history = [], schema, images, model }) {
+  async ask({ system, user, history = [], schema, images, model, maxTokens }) {
     const s = this.s, st = this.engine.state.local;
     const m = model || st?.model || s.model;
     if (!m) throw new AIUnavailable("noModels", MSG.noModels);
     const body = {
-      model: m, stream: false, keep_alive: "10m", think: false,
+      model: m, stream: false, keep_alive: "30m", think: false,
       messages: [{ role: "system", content: system }, ...history.slice(-6), { role: "user", content: user, ...(images ? { images } : {}) }],
-      format: schema || "json", options: { temperature: s.temperature, num_ctx: s.contextSize },
+      format: schema || "json", options: { temperature: s.temperature, num_ctx: s.contextSize, ...(maxTokens ? { num_predict: maxTokens } : {}) },
     };
     let r = await localHttp(s.endpoint, "/api/chat", { method: "POST", body, timeout: 180000, fetchImpl: this.engine.fetchImpl });
     // Versiones o modelos sin «think»: se repite sin ese campo.
@@ -251,6 +251,13 @@ export class LocalAIProvider extends AIProvider {
     const msg = JSON.parse(r.text || "{}").message?.content || "";
     try { return parseModelJson(msg); }
     catch { return { reply: msg.replace(/<think>[\s\S]*?<\/think>/g, "").trim().slice(0, 1200), actions: [] }; }
+  }
+  /** Carga el modelo en memoria por adelantado (la primera respuesta deja de tardar tanto). */
+  async warmup() {
+    const s = this.s, m = this.engine.state.local?.model || s.model;
+    if (!m) return false;
+    try { const r = await localHttp(s.endpoint, "/api/generate", { method: "POST", body: { model: m, prompt: "", keep_alive: "30m" }, timeout: 120000, fetchImpl: this.engine.fetchImpl }); return r.ok; }
+    catch { return false; }
   }
   /** Imágenes: con un modelo de visión instalado y permiso de imágenes; si no, visión clásica. */
   async analyzeImage(img) {
@@ -373,6 +380,12 @@ export class AIEngine {
     } finally { this.pulling = ""; this.emit(); }
   }
   cancelPull() { globalThis.LumaDesktop?.ai?.pullCancel?.(); }
+  /** Si la IA local está lista, la deja cargada para que responda rápido (no bloquea). */
+  async warmup() {
+    if (!this.state.checkedAt) await this.refresh();
+    if (this.active === this.local) return this.local.warmup();
+    return false;
+  }
   /** Línea de estado para la interfaz. */
   statusLine() {
     const a = this.active, st = this.state;

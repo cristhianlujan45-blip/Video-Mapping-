@@ -147,6 +147,19 @@ function handleWsMessage(client, raw) {
   }
 }
 
+/**
+ * Imagen de la cámara de un móvil por el propio WebSocket (JPEG): para el móvil por
+ * cable USB (adb reverse), donde WebRTC no puede conectar. Al motor le llega con
+ * la cámara delante: [largo del id (1 byte)][id][JPEG]. Si el motor va con retraso,
+ * se descarta la imagen (mejor saltar un fotograma que acumular segundos de retraso).
+ */
+function relayFrame(client, payload) {
+  if (client.role !== "camera" || !client.ok || payload.length > 4_000_000) return;
+  const id = Buffer.from(client.camId || "", "utf8").subarray(0, 255);
+  const frame = encodeFrame(Buffer.concat([Buffer.from([id.length]), id, payload]), { opcode: 0x2 });
+  for (const c of clients) if (c.role === "display" && c.ok && c.sock.writableLength < 2_000_000) { try { c.sock.write(frame); } catch {} }
+}
+
 function onUpgrade(req, sock) {
   const key = req.headers["sec-websocket-key"];
   if (!key) { sock.destroy(); return; }
@@ -168,7 +181,8 @@ function onUpgrade(req, sock) {
       if (f.opcode === 0x8) { sock.end(); }                       // close
       else if (f.opcode === 0x9) { sock.write(encodeFrame(f.payload, { opcode: 0xA })); } // ping->pong
       else if (f.opcode === 0x1 && f.fin) handleWsMessage(client, f.payload);
-      // Nota: frames binarios y fragmentación no usados por el protocolo LumaMap.
+      else if (f.opcode === 0x2 && f.fin) relayFrame(client, f.payload);
+      // Nota: la fragmentación no la usa el protocolo LumaMap.
     }
   });
   const drop = () => { if (clients.delete(client)) broadcastState(); };
