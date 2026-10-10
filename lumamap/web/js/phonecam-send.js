@@ -114,7 +114,8 @@ function startFrames() {
     if (!running || !frames) return;
     frameTimer = setTimeout(tick, 1000 / 24);
     if (sending && performance.now() - since > 3000) sending = false;   // una foto que no termina no para el envío
-    if (sending || ws?.readyState !== 1 || ws.bufferedAmount > 512 * 1024 || !video.videoWidth) return;
+    // (Al arrancar, algunas cámaras dan un primer fotograma diminuto: se espera a la imagen de verdad.)
+    if (sending || ws?.readyState !== 1 || ws.bufferedAmount > 512 * 1024 || video.videoWidth < 16 || video.videoHeight < 16) return;
     sending = true; since = performance.now();
     try {
       const w = Math.min(video.videoWidth, (QUALITY[$("quality").value] || QUALITY[720])[3]);

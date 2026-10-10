@@ -807,7 +807,7 @@ await test("móvil por cable USB: la página abierta por el cable manda la cáma
     const a = window.__lumamap, cal = a.S.project.settings.interactive;
     const { getCamera, listCameras } = await import("./js/sources.js");
     const cam = await getCamera(cal.camId);
-    for (let i = 0; i < 40 && !cam.el.videoWidth; i++) await new Promise(r => setTimeout(r, 100));
+    for (let i = 0; i < 100 && cam.el.videoWidth < 320; i++) await new Promise(r => setTimeout(r, 100));
     // La imagen es la de la cámara (no negra; los primeros fotogramas pueden serlo).
     const c = Object.assign(document.createElement("canvas"), { width: 64, height: 36 }), g = c.getContext("2d");
     let sum = 0;
