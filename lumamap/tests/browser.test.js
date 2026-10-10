@@ -570,6 +570,7 @@ await test("arrastrar y soltar: una animación y un efecto se sueltan encima de 
   await page.evaluate(() => { const a = window.__lumamap; a.select(null); a.openTab("anim"); });
   const tile = page.locator("#panelBody .tile").nth(3);
   await tile.waitFor();
+  await tile.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
   // El punto se calcula con el panel ya abierto (al abrirse, el escenario se encoge).
   const [tx, ty] = await toScreen(center);
@@ -577,7 +578,8 @@ await test("arrastrar y soltar: una animación y un efecto se sueltan encima de 
   const b = await tile.boundingBox();
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
   await page.mouse.move(b.x + b.width / 2 - 40, b.y + b.height / 2, { steps: 4 });
-  await page.mouse.move(tx, ty, { steps: 12 }); await page.mouse.up();
+  await page.mouse.move(tx, ty, { steps: 12 });
+  await page.mouse.up();
   const r = await page.evaluate((id) => { const a = window.__lumamap; return { sel: a.S.sel, gen: a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id].source.gen }; }, id);
   const want = await page.evaluate((n) => window.__lumamap.M.ANIM_LIBRARY.find(a => a.name === n)?.gen, name);
   assert.equal(r.sel, id, "la superficie de destino queda seleccionada");
@@ -660,7 +662,8 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await fuego.hover();              // empieza a descargarse antes del clic
   await page.waitForTimeout(400);
   await fuego.click();
-  await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 15000 });
+  try { await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 15000 }); }
+  catch (e) { console.log("DIAG-GIF", await page.evaluate((id) => { const a = window.__lumamap, S = a.S, l = S.project.scenes.find(s => s.id === S.project.sceneId).looks[id]; return JSON.stringify({ src: l.source.type, next: l.next && { t: l.next.source?.type }, mix: l.mix, playing: S.playing, blackout: S.blackout, perf: S.perfMode, liveFade: S.liveFade, hidden: document.hidden, toast: document.querySelector("#toast").textContent, media: S.project.media.length }); }, id)); throw e; }
   const m = await page.evaluate((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; const med = a.S.project.media.find(x => x.id === l.source.mediaId); return { kind: med.kind, name: med.name, credit: med.credit }; }, id);
   assert.deepEqual(m, { kind: "anim", name: "Fuego animado.gif", credit: "© Ana · CC BY 4.0" });
   // Como capa nueva encima (y al reabrir, lo buscado sale al instante).
@@ -789,7 +792,8 @@ await test("móvil por cable USB: la página abierta por el cable manda la cáma
   await phone.locator("#state.ok", { hasText: "cable USB" }).waitFor({ timeout: 30000 });
   assert.equal(await phone.locator("#pinrow").isVisible(), false, "por cable no pide el código");
   // Aviso en el programa y la cámara ya puesta en lo interactivo.
-  await page.locator("#notices .notice", { hasText: "lista (cable USB)" }).waitFor({ timeout: 20000 });
+  try { await page.locator("#notices .notice", { hasText: "lista (cable USB)" }).waitFor({ timeout: 20000 }); }
+  catch (e) { console.log("DIAG-USB", await page.evaluate(async () => { const { listPhones } = await import("./js/phonecam.js"); return JSON.stringify({ phones: listPhones(), notices: document.querySelector("#notices")?.innerText, cam: window.__lumamap.S.project.settings.interactive.camId, cls: document.body.className }); }), await phone.locator("#state").textContent()); throw e; }
   // Las fotos siguen llegando (no solo la primera).
   await page.evaluate(async () => { window.__pf = (await import("./js/phonecam.js")).phoneFrames; });
   await page.waitForFunction(() => (window.__pf(window.__lumamap.S.project.settings.interactive.camId)?.frames || 0) >= 4, null, { timeout: 60000 });
