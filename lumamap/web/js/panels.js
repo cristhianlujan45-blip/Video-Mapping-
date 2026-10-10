@@ -162,7 +162,19 @@ function shaderControls(app, src) {
   if (!sh) return section("Shader", hint("Este shader es de un plugin que no está instalado o está apagado (Menú → Plugins)."));
   const P = (src.shaderParams ||= {});
   const val = (i) => P[i.name] ?? i.def;
+  const media = app.S.project.media.filter(m => (m.kind === "video" || m.kind === "image") && !m.pending);
   const ctl = sh.isf.inputs.map(i => {
+    if (i.type === "image") {
+      const b = P[i.name] || { kind: "camera" };
+      return h("div", {}, h("div", { class: "lbl" }, `${i.label}: qué imagen usa`),
+        h("div", { class: "chips" },
+          h("button", { class: `chip ${b.kind !== "media" ? "on" : ""}`, onclick: () => app.edit(() => { P[i.name] = { kind: "camera" }; app.renderPanel(); }) }, "📷 Cámara"),
+          ...media.map(m => h("button", { class: `chip ${b.kind === "media" && b.id === m.id ? "on" : ""}`, onclick: () => app.edit(() => { P[i.name] = { kind: "media", id: m.id }; app.renderPanel(); }) }, `🎞 ${m.name}`))),
+        b.kind !== "media" ? hint("Usa la cámara de lo interactivo (Interactivo → 1 · Cámara), o la cámara por defecto.") : null);
+    }
+    if (i.type === "audio" || i.type === "audioFFT") return app.audioActive?.() ? null
+      : h("div", {}, hint("🎤 Reacciona al sonido: activa el micrófono (o la entrada de línea) para que siga la música. Sin él, sigue el pulso del tempo."),
+        btn({ label: "🎤 Activar el micrófono", kind: "block", onClick: () => app.actions.toggleMic() }));
     if (i.type === "float") return slider({ label: i.label, min: i.min, max: i.max, step: (i.max - i.min) / 200 || 0.01, value: val(i), def: i.def, fmt: (v) => (+v).toFixed(2), onInput: (v) => app.edit(() => { P[i.name] = v; }) });
     if (i.type === "long" && i.values) return h("div", {}, h("div", { class: "lbl" }, i.label), segmented({ options: i.values.map((v, k) => [v, i.labels?.[k] ?? String(v)]), value: val(i), small: true, onChange: (v) => app.edit(() => { P[i.name] = v; }) }));
     if (i.type === "long") return stepper({ label: i.label, value: val(i), min: i.min, max: i.max, onChange: (v) => app.edit(() => { P[i.name] = v; }) });

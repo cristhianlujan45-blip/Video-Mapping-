@@ -841,7 +841,8 @@ await test("plugins: se instala un shader ISF desde el menú, aparece en las ani
 void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_FragColor = vec4(tint.rgb * v, 1.0); }`);
   await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("menu"); });
   await page.locator("#panelBody .item", { hasText: "Plugins" }).click();
-  await page.locator(".plugins .item", { hasText: "Shaders ISF" }).waitFor();
+  await page.locator(".plugins .item", { hasText: "Shaders ISF v" }).waitFor();
+  assert.ok(await page.locator(".plugins .item", { hasText: "Cámara reactiva al audio" }).count());
   assert.ok(await page.locator(".plugins .item", { hasText: "Fiesta y neón" }).count());
   const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator(".plugins").getByRole("button", { name: /Instalar plugin/ }).click()]);
   await chooser.setFiles(fsFile);
@@ -865,6 +866,16 @@ void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_Fr
     return { err: sc.error(sh.id), green: s / (64 * 36) };
   }, id);
   assert.equal(drawn.err, ""); assert.ok(drawn.green > 20, "pinta en verde " + drawn.green);
+  // Plugin de cámara reactiva: la cámara (la de prueba del navegador) entra en el shader de verdad.
+  await page.locator("#panelBody .chip", { hasText: "🧩 Cámara reactiva al audio" }).click();
+  await page.locator("#panelBody .tile", { hasText: "Explosión de cámara" }).first().click();
+  await page.locator("#panelBody .sec", { hasText: "Explosión de cámara" }).getByText("📷 Cámara").waitFor();
+  await page.waitForFunction(() => { const sc = window.__lumamap.compositor().shaders; return [...sc.out.values()].some(e => e.version > 5 && e.tex.has("inputImage")); }, null, { timeout: 30000 });
+  const cam = await page.evaluate(() => { const sc = window.__lumamap.compositor().shaders, e = [...sc.out.values()].find(x => x.tex.has("inputImage"));
+    const g = Object.assign(document.createElement("canvas"), { width: 64, height: 36 }).getContext("2d"); g.drawImage(e.canvas, 0, 0, 64, 36);
+    const d = g.getImageData(0, 0, 64, 36).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2];
+    return { light: s / (64 * 36 * 3), w: e.tex.get("inputImage").w, err: [...sc.errors.values()].join(" ") }; });
+  assert.equal(cam.err, ""); assert.ok(cam.w >= 320, "llega la cámara " + cam.w); assert.ok(cam.light > 5, "dibuja " + cam.light);
   await page.evaluate((id) => { const a = window.__lumamap; a.S.project.surfaces = a.S.project.surfaces.filter(s => s.id !== id); a.select(a.S.project.surfaces[0]?.id || null); a.changed({ panel: true }); a.openTab(null); }, id);
   fs.rmSync(fsFile, { force: true });
 });

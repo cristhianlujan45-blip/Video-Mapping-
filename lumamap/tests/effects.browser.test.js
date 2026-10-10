@@ -68,12 +68,25 @@ const r = await page.evaluate(async () => {
   loadPlugins();
   const sc = new ShaderCache();
   out.shaders = [];
+  // Imagen de «cámara» (persona a contraluz) y dos sonidos: silencio y un golpe de graves.
+  const camImg = Object.assign(document.createElement("canvas"), { width: 320, height: 180 }), cg = camImg.getContext("2d");
+  const grd = cg.createRadialGradient(160, 70, 5, 160, 90, 170); grd.addColorStop(0, "#ffe0c0"); grd.addColorStop(0.35, "#e02010"); grd.addColorStop(1, "#080000");
+  cg.fillStyle = grd; cg.fillRect(0, 0, 320, 180); cg.fillStyle = "#120302"; cg.beginPath(); cg.arc(160, 75, 24, 0, 7); cg.fill(); cg.fillRect(126, 100, 68, 80);
+  const quiet = { fft: new Uint8Array(256), wave: new Uint8Array(256).fill(128) };
+  const loud = { fft: new Uint8Array(256).map((_, k) => k < 40 ? 255 : 120), wave: new Uint8Array(256).map((_, k) => 128 + Math.round(100 * Math.sin(k / 6))) };
   for (const a of M.ANIM_LIBRARY.filter(x => x.shader)) {
     const sh = getShader(a.shader);
     const pick = (e) => { const c = document.createElement("canvas"); c.width = 128; c.height = 72; const g2 = c.getContext("2d"); g2.drawImage(e.canvas, 0, 0, 128, 72); return g2.getImageData(0, 0, 128, 72).data; };
-    const e1 = sc.draw("t", sh.id, sh.isf, {}, { width: 256, height: 144, time: 1.1 }); const a1 = e1 && pick(e1);
-    const e2 = sc.draw("t", sh.id, sh.isf, {}, { width: 256, height: 144, time: 2.9 }); const a2 = e2 && pick(e2);
-    out.shaders.push({ name: a.name, err: sc.error(sh.id), mean: a1 ? mean(a1) : 0, dt: a1 && a2 ? diff(a1, a2) : 0 });
+    const images = {}; for (const i of sh.isf.inputs) if (i.type === "image") images[i.name] = camImg;
+    const run = (key, t, audio) => { const e = sc.draw(key, sh.id, sh.isf, {}, { width: 256, height: 144, time: t, images, audio }); return e && pick(e); };
+    const a1 = run("t", 1.1, quiet), a2 = run("t", 2.9, quiet);
+    let react = null;
+    if (sh.isf.usesAudio) {
+      // Mismo momento, con silencio y con graves (en superficies distintas: la memoria de estelas no se mezcla).
+      const q = run("q", 1.5, quiet), l = run("l", 1.5, loud);
+      react = q && l ? diff(q, l) : 0;
+    }
+    out.shaders.push({ name: a.name, err: sc.error(sh.id), mean: a1 ? mean(a1) : 0, dt: a1 && a2 ? diff(a1, a2) : 0, react, cam: sh.isf.usesCamera, passes: sh.isf.passes.length });
   }
   out.plugins = listPlugins().length;
   return out;
@@ -104,8 +117,11 @@ await test(`${r.gens.length} animaciones: dibujan algo y se mueven`, () => {
 });
 await test(`plugins incluidos (${r.plugins}): sus ${r.shaders.length} shaders ISF compilan, dibujan y se mueven`, () => {
   assert.ok(r.shaders.length >= 4);
-  const bad = r.shaders.filter(x => x.err || x.mean < 3 || x.dt < 0.3).map(x => `${x.name}: ${x.err || `media ${x.mean.toFixed(1)}, cambio ${x.dt.toFixed(2)}`}`);
+  // Los de cámara pueden estar quietos sin sonido (la imagen de prueba no se mueve): lo suyo es reaccionar a los graves.
+  const bad = r.shaders.filter(x => x.err || x.mean < 3 || (!x.cam && x.dt < 0.3) || (x.react !== null && x.react < 2)).map(x => `${x.name}: ${x.err || `media ${x.mean.toFixed(1)}, cambio ${x.dt.toFixed(2)}, con graves ${x.react?.toFixed(2)}`}`);
   assert.ok(!bad.length, bad.join(" | "));
+  assert.ok(r.shaders.filter(x => x.cam).length >= 4, "plugin de cámara reactiva");
+  assert.ok(r.shaders.some(x => x.passes >= 2), "con varias pasadas (estelas)");
 });
 await test("sin errores de WebGL ni de JavaScript", () => { assert.equal(r.glErr, 0); assert.deepEqual(errors, []); });
 

@@ -30,6 +30,7 @@ import { exportOBJ } from "./render3d.js";
 import { warmThumbs } from "./thumbs.js";
 import { startPhoneCams } from "./phonecam.js";
 import { createVJ, VJ_STYLES } from "./autovj.js";
+import { spectrum256 } from "./isf.js";
 import { startDeviceNotices, cameraPlugged } from "./phoneusb-ui.js";
 import { openMediaLibrary } from "./panels-library.js";
 import { loadPlugins } from "./plugins.js";
@@ -625,6 +626,12 @@ A.vjSkip = () => { vj?.skip(); };
 A.vjSet = (patch) => { Object.assign(S.project.settings.vj, patch); if (vj) { if (patch.style) vj.setStyle(patch.style); if ("intensity" in patch) vj.setIntensity(patch.intensity); } changed(); commitSoon(); };
 app.vjStatus = () => vj ? vj.status() : null;
 app.audioActive = () => !!audio.active;
+// Sonido para los shaders ISF que lo piden (espectro y onda); sin micrófono, el compositor lo hace con los niveles.
+{
+  const fft = new Uint8Array(256), wave = new Uint8Array(256);
+  globalThis.__lumaAudio = () => audio.active && audio.bins ? { fft: spectrum256(audio.bins, fft), wave: audio.wave(wave) } : null;
+  globalThis.__lumaDefaultCam = () => S.project.settings.interactive?.camId || "default";
+}
 /** Mezcla automática: cada N golpes, una animación nueva al azar en cada pantalla. */
 A.setAutoMix = (beats) => { if (beats && vj) A.vjStop(); S.autoMix = beats; S.autoMixCount = 0; renderPanel(); toast(beats ? `Mezcla automática cada ${beats} golpes` : "Mezcla automática apagada"); };
 
@@ -3070,6 +3077,7 @@ async function init() {
   pool = new MediaPool();
   pool.setPlaying(true);
   comp = new Compositor(renderer, pool);
+  app.compositor = () => comp;   // pruebas: lo que dibujó cada fuente
   link = new Link("editor", onLinkMsg);
   audio = new AudioEngine();
   params = app.params = new ParamEngine(app);

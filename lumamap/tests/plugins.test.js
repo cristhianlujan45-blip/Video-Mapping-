@@ -2,7 +2,7 @@
 // avisados como EN DESARROLLO), y que entran y salen de las bibliotecas al encender/apagar.
 import assert from "node:assert/strict";
 import { test, report } from "./harness.js";
-import { parseISF } from "../web/js/isf.js";
+import { parseISF, evalSize } from "../web/js/isf.js";
 import { validatePlugin, pluginFromFile, cleanFx, loadPlugins, installPlugin, setPluginEnabled, removePlugin, listPlugins, getShader } from "../web/js/plugins.js";
 import { BUNDLED } from "../web/js/plugins-bundled.js";
 import { FX_LIBRARY, FX_PRESETS, ANIM_LIBRARY, ANIM_CATEGORIES, GENERATORS } from "../web/js/model.js";
@@ -23,11 +23,24 @@ await test("lee un shader ISF con sus controles (número, interruptor, color, pu
   assert.deepEqual(s.inputs[4].labels, ["A", "B", "C"]);
   assert.match(s.body, /void main/);
 });
-await test("ISF que aún no se puede usar lo dice claro (EN DESARROLLO), sin fingir", () => {
-  assert.throws(() => parseISF(`/*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ] }*/ void main(){}`), /EN DESARROLLO/);
-  assert.throws(() => parseISF(`/*{ "PASSES": [ { "TARGET": "buf", "PERSISTENT": true }, {} ] }*/ void main(){}`), /EN DESARROLLO/);
-  assert.throws(() => parseISF(`/*{ "INPUTS": [ { "NAME": "fft", "TYPE": "audioFFT" } ] }*/ void main(){}`), /EN DESARROLLO/);
+await test("ISF con cámara, sonido y varias pasadas con memoria (feedback); lo que aún no, lo dice claro", () => {
+  const f = parseISF(`/*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" }, { "NAME": "fft", "TYPE": "audioFFT" }, { "NAME": "w", "TYPE": "audio" } ],
+    "PASSES": [ { "TARGET": "buf", "PERSISTENT": true, "WIDTH": "$WIDTH/2", "HEIGHT": "floor($HEIGHT*0.5)" }, {} ] }*/
+    void main(){ gl_FragColor = IMG_NORM_PIXEL(inputImage, isf_FragNormCoord) + IMG_PIXEL(buf, gl_FragCoord.xy) * IMG_SIZE(fft).x; }`);
+  assert.deepEqual(f.inputs.map(i => i.type), ["image", "audioFFT", "audio"]);
+  assert.deepEqual(f.passes.map(p => [p.target, p.persistent]), [["buf", true], ["", false]]);
+  assert.ok(f.usesCamera && f.usesAudio);
+  assert.throws(() => parseISF(`/*{ "IMPORTED": { "logo": { "PATH": "logo.png" } } }*/ void main(){}`), /EN DESARROLLO/);
+  assert.throws(() => parseISF(`/*{ "INPUTS": [ { "NAME": "x", "TYPE": "cubemap" } ] }*/ void main(){}`), /no compatible/);
   assert.throws(() => parseISF(`void main(){ gl_FragColor = vec4(1.0); }`), /cabecera JSON/);
+});
+await test("tamaños de pasada con expresiones ($WIDTH/2, floor…) sin ejecutar código", () => {
+  assert.equal(evalSize("$WIDTH/2", 1920, 1080), 960);
+  assert.equal(evalSize("floor($HEIGHT*0.33)", 1920, 1080), 356);
+  assert.equal(evalSize("max($WIDTH,$HEIGHT)/4", 1920, 1080), 480);
+  assert.equal(evalSize(64, 1, 1), 64);
+  assert.equal(evalSize("alert(1)", 1, 1), null);
+  assert.equal(evalSize("$WIDTH;x", 10, 10), null);
 });
 await test("un plugin solo trae datos: se quitan ajustes que no existen, colores raros y animaciones inventadas", () => {
   const p = validatePlugin({ "lumamap-plugin": 1, id: "Mi Pack!", name: "Mi pack <b>",
@@ -51,6 +64,7 @@ await test("los plugins incluidos son válidos y sus animaciones existen", () =>
     assert.equal(p.animations.length, (b.animations || []).length, b.id + " animaciones");
     for (const a of b.animations || []) assert.ok(ids.has(a.gen), a.gen);
     for (const s of b.shaders || []) assert.ok(parseISF(s.isf).inputs.length > 0, s.name);
+    if (b.id === "camara-reactiva") assert.ok((b.shaders || []).every(s => { const i = parseISF(s.isf); return i.usesCamera && i.usesAudio; }));
   }
 });
 await test("instalar un shader .fs suelto, apagarlo y quitarlo: entra y sale de las bibliotecas", () => {

@@ -175,6 +175,14 @@ export class AudioEngine {
 
   fire(now = performance.now()) { this.lastFire = now; this.levels.count++; }
 
+  /** Forma de onda (256 muestras, 128 = silencio) para los shaders que la piden. */
+  wave(out = new Uint8Array(256)) {
+    if (!this.analyser) return out.fill(128);
+    const n = this.analyser.fftSize, tmp = this._wave && this._wave.length === n ? this._wave : (this._wave = new Uint8Array(n));
+    this.analyser.getByteTimeDomainData(tmp);
+    for (let i = 0; i < 256; i++) out[i] = tmp[Math.floor(i * n / 256)];
+    return out;
+  }
   /** Actualiza niveles; llamar una vez por fotograma. */
   update(now = performance.now()) {
     const L = this.levels;

@@ -7,7 +7,7 @@ import { TextCache, cameraIfReady, getCamera, camKey, cameraLost, offlineImage }
 import { BodyCache } from "./body.js";
 import { Model3DCache } from "./render3d.js";
 import { surfaceAspect } from "./math.js";
-import { ShaderCache } from "./isf.js";
+import { ShaderCache, spectrumFromLevels } from "./isf.js";
 import { getShader } from "./plugins.js";
 
 export class Compositor {
@@ -85,7 +85,19 @@ export class Compositor {
         const hgt = Math.round(Math.max(144, Math.min(720, sa.h || 540)));
         const wid = Math.round(Math.max(64, Math.min(1280, hgt * sa.aspect)));
         const key = scene.id + ":" + s.id + k;
-        const e = this.shaders.draw(key, sh.id, sh.isf, src.shaderParams || {}, { width: wid, height: hgt, time: o.time * (src.speed ?? 1) });
+        // Entradas del shader: la cámara (o un video de la biblioteca) y el sonido.
+        const images = {};
+        for (const inp of sh.isf.inputs) {
+          if (inp.type !== "image") continue;
+          const b = (src.shaderParams || {})[inp.name];
+          if (b?.kind === "media") { const rt = this.pool.get(b.id); if (rt) images[inp.name] = rt.source(o.time); else this.pool.ensure(b.id); continue; }
+          const ck = b?.camId || globalThis.__lumaDefaultCam?.() || "default";
+          const cam = cameraIfReady(ck);
+          if (cam) images[inp.name] = cam.el;
+          else if (!this.cameraWanted.has(ck)) { this.cameraWanted.add(ck); getCamera(ck).catch(e => console.warn(e)).finally(() => setTimeout(() => this.cameraWanted.delete(ck), 3000)); }
+        }
+        const audio = sh.isf.usesAudio ? (globalThis.__lumaAudio?.() || { fft: spectrumFromLevels(o.levels || {}, this._fft ||= new Uint8Array(256)), wave: null }) : null;
+        const e = this.shaders.draw(key, sh.id, sh.isf, src.shaderParams || {}, { width: wid, height: hgt, time: o.time * (src.speed ?? 1), images, audio });
         return e ? { id: "sh:" + key, el: e.canvas, key: e.version } : null;
       }
       case "text": {

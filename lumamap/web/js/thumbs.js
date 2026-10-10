@@ -44,14 +44,27 @@ export function genThumb(id) {
 /** Todas las miniaturas de generadores (compatibilidad). */
 export function genThumbs() { return Object.fromEntries(GENERATORS.map(g => [g.id, genThumb(g.id)])); }
 
-let shaderThumbs = null;
+let shaderThumbs = null, sample = null;
+/** Imagen de ejemplo (una persona a contraluz en un escenario rojo) para las miniaturas de shaders de cámara. */
+function samplePicture() {
+  if (sample) return sample;
+  sample = Object.assign(document.createElement("canvas"), { width: 160, height: 100 });
+  const g = sample.getContext("2d"), gr = g.createRadialGradient(80, 40, 5, 80, 50, 90);
+  gr.addColorStop(0, "#ffd0b0"); gr.addColorStop(0.3, "#e02010"); gr.addColorStop(1, "#100000");
+  g.fillStyle = gr; g.fillRect(0, 0, 160, 100);
+  g.fillStyle = "#1a0502"; g.beginPath(); g.arc(80, 42, 13, 0, 7); g.fill(); g.fillRect(62, 56, 36, 44);
+  return sample;
+}
 export function animThumb(a) {
   if (animCache.has(a.id)) return animCache.get(a.id);
   if (a.shader) {   // shader ISF de un plugin: su propia miniatura
     try {
       const sh = getShader(a.shader);
       shaderThumbs ||= new ShaderCache();
-      const e = sh && shaderThumbs.draw("thumb", sh.id, sh.isf, {}, { width: 160, height: 100, time: 2.3 });
+      // Los shaders de cámara se ven en la miniatura con una imagen de ejemplo y un golpe de sonido.
+      const images = {}; for (const i of sh?.isf.inputs || []) if (i.type === "image") images[i.name] = samplePicture();
+      const fft = new Uint8Array(256).map((_, k) => Math.max(0, 230 - k));
+      const e = sh && shaderThumbs.draw("thumb:" + a.id, sh.id, sh.isf, {}, { width: 160, height: 100, time: 2.3, images, audio: { fft, wave: new Uint8Array(256).fill(128) } });
       animCache.set(a.id, e ? e.canvas.toDataURL("image/jpeg", 0.75) : "");
     } catch { animCache.set(a.id, ""); }
     return animCache.get(a.id);
