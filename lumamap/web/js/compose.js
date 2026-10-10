@@ -9,6 +9,8 @@ import { Model3DCache } from "./render3d.js";
 import { surfaceAspect } from "./math.js";
 import { ShaderCache, spectrumFromLevels } from "./isf.js";
 import { getShader } from "./plugins.js";
+import { DEFAULT_FX } from "./model.js";
+const NEUTRAL_FX = DEFAULT_FX();
 
 export class Compositor {
   /** shared: Compositor de otra ventana (el editor) del que tomar las fuentes. */
@@ -158,6 +160,13 @@ export class Compositor {
         // Mezcla en vivo: «siguiente» (B) se funde encima de lo actual (A).
         const m = look.next ? mixOf(look, o.time) : 0;
         const opts = { view: o.view, time: o.time, levels: o.levels, master: o.master, react: project.settings.react, tr, frameRect };
+        // Comparador antes/después (solo en el editor): a la izquierda de la línea, sin efectos.
+        if (o.compare?.id === s.id && !tr && m < 0.001) {
+          const tex = this.textureFor(scene, s, look, o);
+          this.r.drawSurface(s, { ...look, fx: NEUTRAL_FX }, { ...opts, alpha, tex, tr: { mode: "wipe", p: o.compare.x, role: 1 } });
+          this.r.drawSurface(s, look, { ...opts, alpha, tex, tr: { mode: "wipe", p: o.compare.x, role: 0 } });
+          continue;
+        }
         if (m < 0.999) this.r.drawSurface(s, look, { ...opts, alpha, tex: this.textureFor(scene, s, look, o) });
         if (m > 0.001) {
           const b = deckB(look);

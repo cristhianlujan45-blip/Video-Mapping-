@@ -99,6 +99,7 @@ await test("la ventana de salida recibe el proyecto del editor", async () => {
   await out.goto(base + "output.html");
   await out.waitForFunction(() => /Cubo 3D/.test(document.querySelector("#hud small").textContent), null, { timeout: 5000 });
   await out.close();
+  await page.bringToFront();   // una pestaña de atrás deja de pintar y sus temporizadores van lentos
 });
 await test("paleta de comandos (Ctrl+K) y copiar/pegar", async () => {
   await page.keyboard.press("Escape");
@@ -299,7 +300,7 @@ await test("salida abierta desde el editor: motor compartido (sin decodificar do
   const same = await page.evaluate(() => { const a = window.__lumamap; a.S.project.name = "Compartido"; a.changed(); return true; });
   assert.ok(same);
   await popup.waitForFunction(() => /Compartido/.test(document.querySelector("#hud small").textContent) || true);
-  } finally { await popup.close().catch(() => {}); }   // una ventana colgada no debe afectar a las pruebas siguientes
+  } finally { await popup.close().catch(() => {}); await page.bringToFront(); }   // una ventana colgada no debe afectar a las pruebas siguientes
 });
 await test("menús sin repetir: Animaciones dentro de Contenido, Dibujar en Añadir, menú por grupos", async () => {
   const tabs = await page.evaluate(() => [...document.querySelectorAll("#dock button[data-tab]")].map(b => b.dataset.tab));
@@ -645,6 +646,7 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.route("https://commons.wikimedia.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
     body: JSON.stringify({ query: { pages: { "5": { pageid: 5, index: 1, title: "File:Llamas.gif", imageinfo: [{ url: "https://upload.example.org/llamas.gif", thumburl: "https://upload.example.org/llamas.gif", mime: "image/gif", size: 9000, metadata: [{ name: "frameCount", value: 8 }], extmetadata: { Artist: { value: "Luis" }, LicenseShortName: { value: "CC0" } } }] } } } }) }); });
   await page.route("https://upload.example.org/**", (r) => r.fulfill({ status: 200, contentType: "image/gif", headers: { "access-control-allow-origin": "*" }, body: gif }));
+  await page.bringToFront();
   const id = await page.evaluate(() => { const a = window.__lumamap; a.S.liveFade = 0.3; a.openTab(null); return a.S.project.surfaces[0].id; });
   await page.evaluate((id) => window.__lumamap.select(id), id);
   // Lo que otras pruebas ya buscaron (p. ej. el asistente) no debe venir de memoria.
@@ -658,7 +660,7 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   asked.length = 0;
   await page.locator(".gifsearch input[type=search]").fill("fuego ");
   for (let t = 0; t < 100 && !(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u))); t++) await page.waitForTimeout(100);
-  await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 2, null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 2, null, { timeout: 15000, polling: 100 });
   if (!asked.length) console.log("DIAG-GIF2", await page.evaluate(() => JSON.stringify({ val: document.querySelector(".gifsearch input[type=search]")?.value, cells: document.querySelectorAll(".gifsearch .gifcell").length,
     text: document.querySelector(".gifsearch")?.innerText.slice(0, 300), online: navigator.onLine, desk: !!window.LumaDesktop, native: !!window.LumaNative })));
   assert.ok(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u)), "buscó «fire» en las dos: " + asked.join(" "));
@@ -668,8 +670,8 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await fuego.hover();              // empieza a descargarse antes del clic
   await page.waitForTimeout(400);
   await fuego.click();
-  try { await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 15000 }); }
-  catch (e) { console.log("DIAG-GIF", await page.evaluate((id) => { const a = window.__lumamap, S = a.S, l = S.project.scenes.find(s => s.id === S.project.sceneId).looks[id]; return JSON.stringify({ src: l.source.type, next: l.next && { t: l.next.source?.type }, mix: l.mix, playing: S.playing, blackout: S.blackout, perf: S.perfMode, liveFade: S.liveFade, hidden: document.hidden, toast: document.querySelector("#toast").textContent, media: S.project.media.length }); }, id)); throw e; }
+  try { await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 15000, polling: 100 }); }
+  catch (e) { console.log("DIAG-GIF", await page.evaluate((id) => { const a = window.__lumamap, S = a.S, l = S.project.scenes.find(s => s.id === S.project.sceneId).looks[id]; return JSON.stringify({ src: l.source.type, next: l.next && { t: l.next.source?.type }, mix: l.mix, playing: S.playing, blackout: S.blackout, perf: S.perfMode, liveFade: S.liveFade, hidden: document.hidden, toast: document.querySelector("#toast").textContent, media: S.project.media.length, scene: S.project.sceneId, scenes: S.project.scenes.length, looksWithNext: S.project.scenes.map(sc => sc.looks[id]?.next ? sc.id : null).filter(Boolean), vj: !!S.vjOn, sched: JSON.stringify(S.project.settings.timers || S.project.timers || null).slice(0, 200) }); }, id)); throw e; }
   const m = await page.evaluate((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; const med = a.S.project.media.find(x => x.id === l.source.mediaId); return { kind: med.kind, name: med.name, credit: med.credit }; }, id);
   assert.deepEqual(m, { kind: "anim", name: "Fuego animado.gif", credit: "© Ana · CC BY 4.0" });
   // Como capa nueva encima (y al reabrir, lo buscado sale al instante).
@@ -677,7 +679,7 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.evaluate(() => window.__lumamap.actions.searchGifs({ query: "fuego" }));
   await page.locator(".gifsearch .seg button", { hasText: "Capa nueva encima" }).click();
   await page.locator(".gifcell", { hasText: "Luis" }).click();
-  await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0, { timeout: 15000 });
+  await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0, { timeout: 15000, polling: 100 });
   assert.match(await page.evaluate(() => window.__lumamap.S.project.surfaces.at(-1).name), /^GIF /);
   await page.unroute("https://api.openverse.org/**"); await page.unroute("https://commons.wikimedia.org/**"); await page.unroute("https://upload.example.org/**");
   await page.evaluate(() => window.__lumamap.openTab(null));
@@ -760,8 +762,10 @@ await test("móvil como cámara: código QR, el móvil manda su cámara por WebR
   assert.match(await page.locator(".phonecam .pcurl code").textContent(), new RegExp(`^https://[\\d.]+:${httpsPort}/phonecam\\.html`));
   await page.locator(".phonecam").getByText("Esperando al móvil").waitFor();
   assert.ok(!/\bnull\b/.test(await page.locator(".phonecam").textContent()), "sin textos sueltos");
-  // El «móvil»: otra pestaña con la cámara de prueba (http://127.0.0.1 cuenta como página segura).
-  const phone = await ctx.newPage();
+  // El «móvil»: otra ventana (contexto aparte, como otro aparato) con la cámara de prueba
+  // (http://127.0.0.1 cuenta como página segura). En una pestaña del mismo, el editor quedaría detrás sin pintar.
+  const phoneCtx = await browser.newContext({ permissions: ["camera"] });
+  const phone = await phoneCtx.newPage();
   const phoneErrors = []; phone.on("pageerror", e => phoneErrors.push(e.message));
   await phone.goto(base + "phonecam.html?auto=1");
   await phone.locator("#state.ok").waitFor({ timeout: 30000 });
@@ -782,12 +786,13 @@ await test("móvil como cámara: código QR, el móvil manda su cámara por WebR
   assert.equal(r.listed, "Móvil (Wi-Fi)");
   await page.getByRole("button", { name: "Listo" }).click();
   // El móvil se va: el programa lo marca desconectado (y la cámara vuelve sola si reconecta).
-  await phone.close();
+  await phoneCtx.close();
   await page.waitForFunction(async () => { const { listPhones } = await import("./js/phonecam.js"); return listPhones().every(p => !p.online); }, null, { timeout: 15000 });
   assert.deepEqual(phoneErrors, [], JSON.stringify(phoneErrors));
   await page.evaluate(() => { const a = window.__lumamap, cal = a.S.project.settings.interactive; cal.camId = ""; a.openTab(null); });
 });
 await test("móvil por cable USB: la página abierta por el cable manda la cámara por el WebSocket, el programa avisa y la usa sola", async () => {
+  await page.bringToFront();
   await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.interactive.camId = ""; });
   // Otro proceso (como otro aparato): en la misma pestaña-proceso el editor le quitaría el hilo.
   const phoneCtx = await browser.newContext({ permissions: ["camera"] });
@@ -820,10 +825,12 @@ await test("móvil por cable USB: la página abierta por el cable manda la cáma
     const { phoneFrames } = await import("./js/phonecam.js");
     const recv = phoneFrames(cal.camId)?.frames || 0;
     const cs = await listCameras();
-    return { camId: cal.camId, w: cam.el.videoWidth, bright: sum / (64 * 36 * 3), recv, listed: cs.find(c => c.id === cal.camId)?.kindName };
+    const pf = phoneFrames(cal.camId) || {};
+    return { camId: cal.camId, w: cam.el.videoWidth, bright: sum / (64 * 36 * 3), recv, listed: cs.find(c => c.id === cal.camId)?.kindName,
+      diag: JSON.stringify({ fw: pf.width, fh: pf.height, paused: cam.el.paused, rs: cam.el.readyState, h: cam.el.videoHeight, live: cam.el.srcObject?.getVideoTracks?.().map(t => t.readyState) }) };
   });
   assert.match(r.camId, /^phone:/);
-  assert.ok(r.w >= 320, `imagen del móvil ${r.w}`);
+  assert.ok(r.w >= 320, `imagen del móvil ${r.w} ${r.diag}`);
   assert.ok(r.recv >= 4, `fotos llegadas por el cable: ${r.recv} (enviadas ${await phone.evaluate(() => window.__lumaCamSent())})`);
   assert.ok(r.bright > 5, `con imagen en la cámara ${r.bright} (recibido ${r.recv})`);
   assert.equal(r.listed, "Móvil (cable USB)");
@@ -911,6 +918,35 @@ await test("VJ automático: set desde una frase, mezcla sola al tempo (clips y e
   const after = await page.evaluate(() => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[a.S.project.surfaces[0].id]; return { strobe: l.fx.strobe, rgb: l.fx.rgbShift, kal: l.fx.kaleido, audio: l.audio.enabled, on: a.S.vjOn }; });
   assert.deepEqual(after, { strobe: 0, rgb: 0, kal: 0, audio: false, on: false });
   await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(120); a.S.project.settings.vj.clips = []; a.S.project.settings.vj.palette = null; a.openTab(null); });
+});
+await test("comparador antes/después en Efectos: a un lado de la línea el original, al otro con el efecto (y no sale en la proyección)", async () => {
+  await page.bringToFront();
+  const id = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces[0]; a.select(s.id); a.actions.setSource({ type: "color", color: "#ff0000" });
+    a.edit(() => { a.lookSel().fx.invert = true; }); a.openTab("fx"); return s.id; });
+  // Cuenta píxeles rojos (original) y cian (negativo) en la vista, justo después de dibujarse.
+  const count = () => page.evaluate(() => new Promise(res => requestAnimationFrame(() => {
+    const gl = document.querySelector("#gl"), c = Object.assign(document.createElement("canvas"), { width: gl.width >> 2, height: gl.height >> 2 }), g = c.getContext("2d");
+    g.drawImage(gl, 0, 0, c.width, c.height);
+    const d = g.getImageData(0, 0, c.width, c.height).data; let red = 0, cyan = 0;
+    for (let i = 0; i < d.length; i += 4) { if (d[i] > 200 && d[i + 1] < 60 && d[i + 2] < 60) red++; if (d[i] < 60 && d[i + 1] > 200 && d[i + 2] > 200) cyan++; }
+    res({ red, cyan });
+  })));
+  await page.waitForTimeout(300);
+  const off = await count();
+  assert.ok(off.cyan > 50 && off.red === 0, "sin comparar: todo con el efecto " + JSON.stringify(off));
+  await page.locator("#panelBody .fxcompare").getByText("Comparar antes / después").click();
+  await page.waitForFunction((id) => window.__lumamap.S.compare?.id === id, id);
+  // La línea en el centro de la superficie.
+  await page.evaluate(() => { const a = window.__lumamap, s = a.surf(), xs = s.corners ? s.corners.map(p => p.x) : s.points.map(p => p.x); a.S.compare.x = (Math.min(...xs) + Math.max(...xs)) / 2 / a.S.project.width; });
+  await page.waitForTimeout(300);
+  const on = await count();
+  assert.ok(on.red > 20 && on.cyan > 20, "con la línea: original y con efecto " + JSON.stringify(on));
+  assert.ok(await page.locator("#panelBody .fxcompare input[type=range]").count(), "control de la línea");
+  // Al salir de Efectos deja de comparar.
+  await page.evaluate(() => window.__lumamap.openTab(null));
+  await page.waitForTimeout(300);
+  assert.equal((await count()).red, 0, "fuera de Efectos no se compara");
+  await page.evaluate(() => { const a = window.__lumamap; a.S.compare = null; a.edit(() => { a.lookSel().fx.invert = false; }); });
 });
 await test("móvil: nada amontonado (de pie 4 + «Más», tumbado 7 + «Más», nada cortado ni fuera de la pantalla)", async () => {
   for (const [vp, max] of [[{ width: 393, height: 852 }, 5], [{ width: 852, height: 393 }, 8]]) {

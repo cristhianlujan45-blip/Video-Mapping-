@@ -618,7 +618,15 @@ const fx = {
     search.addEventListener("input", () => { fxUI.q = search.value; renderGrid(); });
     renderGrid();
 
+    // Comparador antes/después: la línea divide la superficie en original (izquierda) y con efectos.
+    const cmp = app.S.compare?.id === s.id ? app.S.compare : null;
+    const compareSec = h("div", { class: "fxcompare" },
+      toggle({ label: "↔ Comparar antes / después", hint: "Una línea en la vista: a la izquierda sin efectos, a la derecha con ellos. No sale en la proyección.", value: !!cmp,
+        onChange: (v) => { app.S.compare = v ? { id: s.id, x: 0.5 } : null; app.renderPanel(); } }),
+      cmp ? slider({ label: "Línea", min: 0, max: 1, step: 0.01, value: cmp.x, def: 0.5, fmt: (v) => Math.round(v * 100) + "%", onInput: (v) => { cmp.x = v; } }) : null);
+
     return h("div", {},
+      compareSec,
       section(`Biblioteca de efectos (${FX_LIBRARY.length})`,
         search, cats,
         toggle({ label: "Combinar con el efecto actual", hint: "Apagado: cada efecto sustituye al anterior", value: fxUI.combine, onChange: (v) => { fxUI.combine = v; } }),

@@ -524,6 +524,88 @@ void main() {
   gl_FragColor = vec4(c, 1.0);
 }`;
 
+/* ======================= Nube de puntos 3D (look LiDAR / Kinect) ======================= */
+
+const POINTCLOUD = head("Nube de puntos 3D tipo LiDAR/Kinect: la imagen se vuelve miles de puntos con profundidad que giran en 3D; graves = profundidad, medios = ondas, agudos = dispersión. La profundidad sale del brillo (con la imagen de una cámara de profundidad es la distancia real)", [CAM, AUD,
+  `{ "NAME": "density", "TYPE": "float", "DEFAULT": 90.0, "MIN": 30.0, "MAX": 200.0, "LABEL": "Puntos" }`,
+  `{ "NAME": "depth", "TYPE": "float", "DEFAULT": 0.45, "MIN": 0.0, "MAX": 1.2, "LABEL": "Profundidad" }`,
+  `{ "NAME": "orbit", "TYPE": "float", "DEFAULT": 0.6, "MIN": 0.0, "MAX": 1.2, "LABEL": "Giro" }`,
+  `{ "NAME": "orbitSpeed", "TYPE": "float", "DEFAULT": 0.35, "MIN": 0.0, "MAX": 2.0, "LABEL": "Velocidad de giro" }`,
+  `{ "NAME": "dotSize", "TYPE": "float", "DEFAULT": 0.35, "MIN": 0.1, "MAX": 0.5, "LABEL": "Tamaño del punto" }`,
+  `{ "NAME": "colorMode", "TYPE": "long", "DEFAULT": 0, "VALUES": [0, 1, 2, 3], "LABELS": ["Falso color (profundidad)", "Colores de la imagen", "Un color", "Térmico"], "LABEL": "Color" }`,
+  `{ "NAME": "tint", "TYPE": "color", "DEFAULT": [0.2, 0.9, 1.0, 1.0], "LABEL": "Color (modo un color)" }`,
+  `{ "NAME": "invert", "TYPE": "bool", "DEFAULT": false, "LABEL": "Invertir profundidad" }`,
+  `{ "NAME": "react", "TYPE": "float", "DEFAULT": 1.0, "MIN": 0.0, "MAX": 3.0, "LABEL": "Reacción al sonido" }`]) + BAND + `
+vec3 turbo(float x) {
+  // Aproximación polinómica del mapa «Turbo» (azul → verde → amarillo → rojo).
+  x = clamp(x, 0.0, 1.0);
+  vec4 v4 = vec4(1.0, x, x * x, x * x * x);
+  vec2 v2 = v4.zw * v4.z;
+  return clamp(vec3(
+    dot(v4, vec4(0.13572138, 4.61539260, -42.66032258, 132.13108234)) + dot(v2, vec2(-152.94239396, 59.28637943)),
+    dot(v4, vec4(0.09140261, 2.19418839, 4.84296658, -14.18503333)) + dot(v2, vec2(4.27729857, 2.82956604)),
+    dot(v4, vec4(0.10667330, 12.64194608, -60.58204836, 110.36276771)) + dot(v2, vec2(-89.90310912, 27.34824973))), 0.0, 1.0);
+}
+vec3 thermal(float x) { return clamp(vec3(x * 2.0 - 0.2, x * x * 1.6 - 0.3, sin(x * 3.1416) * 0.9 - x * 0.5 + 0.2), 0.0, 1.0); }
+void main() {
+  float a = RENDERSIZE.x / RENDERSIZE.y;
+  vec2 sc = (isf_FragNormCoord - 0.5) * vec2(a, 1.0);
+  float bass = band(0.0, 0.08) * react, mid = band(0.08, 0.35) * react, high = band(0.35, 0.9) * react;
+  // Cámara que orbita alrededor de la nube (con un pequeño cabeceo).
+  float yaw = sin(TIME * orbitSpeed) * orbit, pitch = 0.18 + sin(TIME * orbitSpeed * 0.7 + 1.0) * orbit * 0.25;
+  vec3 fw = normalize(vec3(-sin(yaw) * cos(pitch), -sin(pitch), -cos(yaw) * cos(pitch)));
+  vec3 ro = -fw * 2.4 + vec3(0.0, 0.0, depth * 0.5);
+  vec3 rt = normalize(cross(fw, vec3(0.0, 1.0, 0.0))), up = cross(rt, fw);
+  vec3 rd = normalize(fw * 1.6 + rt * sc.x + up * sc.y);
+  // La nube vive en x∈[-a/2,a/2], y∈[-0.5,0.5], z∈[0, prof] (más cerca = más z).
+  float dz = depth * (1.0 + bass * 1.2) + 0.08;
+  float t0 = (dz + 0.04 - ro.z) / rd.z, t1 = (-0.06 - ro.z) / rd.z;
+  if (t0 > t1) { float tt = t0; t0 = t1; t1 = tt; }
+  t0 = max(t0, 0.0);
+  float cells = density, cw = 1.0 / cells;
+  vec3 col = vec3(0.0);
+  float hit = 0.0;
+  const int STEPS = 96;
+  for (int i = 0; i < STEPS; i++) {
+    if (hit > 0.5) break;
+    float t = mix(t0, t1, (float(i) + 0.5) / float(STEPS));
+    vec3 p = ro + rd * t;
+    vec2 g = vec2(p.x / a + 0.5, p.y + 0.5);
+    if (g.x < 0.0 || g.x > 1.0 || g.y < 0.0 || g.y > 1.0) continue;
+    vec2 cell = floor(g * cells);
+    // Revisa esta celda y sus vecinas (un punto alto puede caer sobre la celda de al lado).
+    for (int k = 0; k < 4; k++) {
+      vec2 cc = cell + vec2(mod(float(k), 2.0), floor(float(k) / 2.0)) - vec2(step(fract(g.x * cells), 0.5), step(fract(g.y * cells), 0.5));
+      vec2 uvc = (cc + 0.5) * cw;
+      if (uvc.x < 0.0 || uvc.x > 1.0 || uvc.y < 0.0 || uvc.y > 1.0) continue;
+      vec3 img = IMG_NORM_PIXEL(inputImage, uvc).rgb;
+      float d = lumi(img);
+      if (invert) d = 1.0 - d;
+      float jit = hash(cc) - 0.5;
+      float z = d * depth * (1.0 + bass * 1.2) + sin(uvc.x * 9.0 + TIME * 2.5) * mid * 0.06 + jit * high * 0.12;
+      vec3 P = vec3((uvc.x - 0.5) * a, uvc.y - 0.5, z);
+      float dist = length(cross(P - ro, rd));
+      float r = cw * dotSize * (0.7 + d * 0.6);
+      if (dist < r) {
+        float k2 = 1.0 - dist / r;
+        float shade = clamp(z / max(depth * 1.2, 0.01), 0.0, 1.0);
+        vec3 c = colorMode == 0 ? turbo(0.15 + shade * 0.85) : colorMode == 1 ? img * 1.3 : colorMode == 2 ? tint.rgb * (0.4 + d) : thermal(d);
+        col = c * (0.55 + k2 * 0.9) * (1.0 + high * 0.6);
+        hit = 1.0;
+        break;
+      }
+    }
+  }
+  // Rejilla del suelo muy tenue, como en las vistas de un escáner.
+  if (hit < 0.5 && rd.y < 0.0) {
+    float tf = (-0.62 - ro.y) / rd.y;
+    vec2 fp = (ro + rd * tf).xz * 6.0;
+    vec2 gl = abs(fract(fp) - 0.5);
+    col += vec3(0.0, 0.35, 0.45) * smoothstep(0.04, 0.0, min(gl.x, gl.y)) * exp(-tf * 0.35) * 0.5;
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
 export const VIRAL = [
   {
     "lumamap-plugin": 1, id: "virales-camara", name: "Virales Pro: cámara y video", version: "1.0", author: "LumaMap",
@@ -540,6 +622,11 @@ export const VIRAL = [
     "lumamap-plugin": 1, id: "virales-analogico", name: "Virales Pro: analógico", version: "1.0", author: "LumaMap",
     description: "Emulación analógica con perillas (curvatura, líneas, rejilla RGB, resplandor, sangrado de color, ruido, temblor, tracking, viñeta y color): televisor CRT, VHS, película de 16 mm y Betacam.",
     shaders: [{ name: "Televisor CRT", isf: CRT_TV }, { name: "VHS", isf: VHS }, { name: "Película 16 mm", isf: FILM }, { name: "Betacam 90s", isf: BETACAM }],
+  },
+  {
+    "lumamap-plugin": 1, id: "nube-de-puntos", name: "Nube de puntos 3D (LiDAR)", version: "1.0", author: "LumaMap",
+    description: "La cámara o un video convertidos en una nube de puntos 3D que gira, como un escaneo LiDAR o Kinect, con falso color por profundidad, colores reales, un color o térmico; reacciona al sonido (graves = profundidad, medios = ondas, agudos = dispersión). La profundidad se toma del brillo de la imagen; con una cámara de profundidad (Kinect, RealSense) es la distancia real. Profundidad estimada por IA desde una cámara normal: EN DESARROLLO.",
+    shaders: [{ name: "Nube de puntos 3D", isf: POINTCLOUD }],
   },
   {
     "lumamap-plugin": 1, id: "virales-club", name: "Virales Pro: club", version: "1.0", author: "LumaMap",

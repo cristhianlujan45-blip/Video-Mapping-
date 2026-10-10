@@ -489,11 +489,10 @@ A.setNext = (id, next) => {
   l.mix = 0; l.fade = null;
   changed({ panel: true }); commit();
 };
-/** B pasa a ser A. */
-A.take = (id) => {
+/** B pasa a ser A (en la escena dada: si mientras tanto se cambió de escena, termina en la suya). */
+A.take = (id, l = lookOfId(id)) => {
   clearTimeout(takeTimers.get(id)); takeTimers.delete(id);
-  const l = lookOfId(id);
-  if (!l.next) return;
+  if (!l?.next) return;
   const b = deckB(l);
   l.source = b.source; l.fx = b.fx; l.fit = b.fit;
   l.next = null; l.mix = 0; l.fade = null;
@@ -514,7 +513,7 @@ A.go = (id, dur = S.liveFade) => {
   l.fade = { t0: S.clock, dur }; l.mix = 0;
   changed();
   clearTimeout(takeTimers.get(id));
-  takeTimers.set(id, setTimeout(() => A.take(id), dur * 1000 + 30));
+  takeTimers.set(id, setTimeout(() => A.take(id, l), dur * 1000 + 30));
   return true;
 };
 A.goAll = (dur = S.liveFade) => {
@@ -2732,12 +2731,12 @@ function tick(now) {
     layers, time: S.clock, levels: S.levels, view: glView, screen: S.viewScreen || 0,
     master: RP.master * (S.viewScreen ? RP.project.settings.screens[S.viewScreen].master : 1),
     blackout: S.blackout || (S.viewScreen ? !S.project.settings.screens[S.viewScreen].on : false), clear: S.projecting ? [0, 0, 0, 1] : [0, 0, 0, 0],
-    live: S.live,
+    live: S.live, compare: compareNow(),
   });
   pool.applyLookAudio(layers.flatMap(l => Object.values(l.scene.looks)), S.muted || outputPlaysAudio());
   // Luces: el video alimenta los pixel maps y los fixtures (muestreo en la GPU).
   dmx.tick(now, { project: RP.project, layers, time: S.clock, levels: S.levels, master: RP.master });
-  if (!document.hidden && !S.previewSkip) { drawOverlay(v, view); drawLoupe(v, view); }
+  if (!document.hidden && !S.previewSkip) { drawOverlay(v, view); drawCompare(ovCtx(), v, DPR()); drawLoupe(v, view); }
   params.tickFeedback(now);
   const rb = $("#recBadge");
   if (S.rec) {
@@ -2765,6 +2764,21 @@ function tick(now) {
   perf.lastWork = performance.now() - workStart;
 }
 
+/** Comparador antes/después de la pestaña Efectos (solo en el editor, nunca en la proyección). */
+const compareNow = () => S.compare && S.tab === "fx" && S.compare.id === S.sel && !S.projecting ? S.compare : null;
+function drawCompare(ctx, v, d) {
+  const c = compareNow(), s = c && surf(c.id);
+  if (!s) return;
+  const P = S.project, x = v.tx + c.x * P.width * v.sx, y0 = v.ty, y1 = v.ty + P.height * v.sy;
+  ctx.save();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 * d; ctx.shadowColor = "#000"; ctx.shadowBlur = 6 * d;
+  ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, (y0 + y1) / 2, 9 * d, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0; ctx.font = `600 ${11 * d}px system-ui, sans-serif`; ctx.textBaseline = "top";
+  const tag = (t, tx, al) => { ctx.textAlign = al; const w = ctx.measureText(t).width + 10 * d; ctx.fillStyle = "rgba(0,0,0,.65)"; ctx.fillRect(al === "right" ? tx - w : tx, y0 + 8 * d, w, 18 * d); ctx.fillStyle = "#fff"; ctx.fillText(t, al === "right" ? tx - 5 * d : tx + 5 * d, y0 + 11 * d); };
+  tag("ANTES", x - 6 * d, "right"); tag("DESPUÉS", x + 6 * d, "left");
+  ctx.restore();
+}
 function drawOverlay(v, view) {
   const ctx = ovCtx(), W = $("#ov").width, H = $("#ov").height, d = DPR(), P = S.project;
   ctx.clearRect(0, 0, W, H);

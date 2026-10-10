@@ -71,6 +71,8 @@ export function handleFrame(buf) {
   if (p.decoding) return;            // aún pintando la anterior: se salta esta (sin retraso acumulado)
   p.decoding = true;
   createImageBitmap(new Blob([u8.subarray(1 + n)], { type: "image/jpeg" })).then((bmp) => {
+    // Un fotograma diminuto (la cámara del móvil arrancando) no vale: la pista se quedaría con ese tamaño.
+    if (bmp.width < 16 || bmp.height < 16) { bmp.close?.(); return; }
     p.frames = (p.frames || 0) + 1; p.fw = bmp.width; p.fh = bmp.height;
     // Primera imagen por cable (aunque quedara un video viejo por Wi-Fi de este móvil): se cambia a esta.
     const fresh = !p.usb || !p.stream || !p.stream.getVideoTracks().some(t => t.readyState === "live");
