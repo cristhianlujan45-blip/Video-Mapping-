@@ -912,6 +912,34 @@ await test("VJ automático: set desde una frase, mezcla sola al tempo (clips y e
   assert.deepEqual(after, { strobe: 0, rgb: 0, kal: 0, audio: false, on: false });
   await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(120); a.S.project.settings.vj.clips = []; a.S.project.settings.vj.palette = null; a.openTab(null); });
 });
+await test("móvil: nada amontonado (de pie 4 + «Más», tumbado 7 + «Más», nada cortado ni fuera de la pantalla)", async () => {
+  for (const [vp, max] of [[{ width: 393, height: 852 }, 5], [{ width: 852, height: 393 }, 8]]) {
+    const mctx = await browser.newContext({ viewport: vp, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    const m = await mctx.newPage();
+    const errs = []; m.on("pageerror", e => errs.push(e.message));
+    await m.goto(base);
+    await m.waitForFunction(() => window.__lumamap?.S);
+    await m.keyboard.press("Escape");
+    const r = await m.evaluate(() => {
+      const dock = document.querySelector("#dock"), top = document.querySelector("#top");
+      const over = (el) => el.scrollWidth - el.clientWidth;
+      const cut = [...dock.querySelectorAll("button span")].filter(s => s.scrollWidth > s.clientWidth + 1).map(s => s.textContent);
+      return { n: dock.querySelectorAll("button").length, more: !!dock.querySelector("button.more"), dockOver: over(dock), topOver: over(top), cut,
+        topVisible: [...top.querySelectorAll("button")].filter(b => b.offsetParent).every(b => { const rc = b.getBoundingClientRect(); return rc.right <= innerWidth + 1 && rc.left >= -1; }) };
+    });
+    assert.ok(r.n <= max && r.more, `${vp.width}×${vp.height}: ${r.n} botones`);
+    assert.equal(r.dockOver, 0, "la barra de abajo no se sale"); assert.equal(r.topOver, 0, "la barra de arriba no se sale");
+    assert.ok(r.topVisible, "todos los botones de arriba se ven");
+    assert.deepEqual(r.cut, [], "nombres cortados");
+    // «Más» abre el resto; al elegir una se abre y «Más» queda marcado.
+    await m.locator("#dock button.more").click();
+    await m.locator(".moretabs .moretab", { hasText: "Luces" }).click();
+    await m.waitForFunction(() => window.__lumamap.S.tab === "lights");
+    assert.ok(await m.locator("#dock button.more.on").count(), "«Más» marcado");
+    assert.deepEqual(errs, []);
+    await mctx.close();
+  }
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();

@@ -83,6 +83,15 @@ small{color:var(--dim);font-size:12px;}
 #dock button.on::before{content:"";position:absolute;top:0;left:22%;right:22%;height:3px;border-radius:0 0 3px 3px;background:var(--acc);}
 #dock button:active{background:var(--bg3);}
 #dock .ic{width:26px;height:26px;}
+/* Con «Más» todas caben: cada pestaña ocupa su parte y nada se corta. */
+#dock.fit{overflow:hidden;}
+#dock.fit button{flex:1 1 0;min-width:0;}
+#dock.fit button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.moretabs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;}
+.moretab{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 6px;border-radius:14px;background:var(--bg3);border:1px solid var(--line);font-weight:600;font-size:13px;color:var(--tx);}
+.moretab .ic{width:28px;height:28px;}
+.moretab.on{border-color:var(--acc);color:var(--acc);}
+.moretab.pro span{color:var(--acc);}
 
 /* ---------- tablet / escritorio: panel lateral ---------- */
 @media (min-width:820px) and (orientation:landscape), (min-width:1100px){
@@ -97,6 +106,9 @@ small{color:var(--dim);font-size:12px;}
 }
 @media (max-height:520px) and (orientation:landscape){
   #main{flex-direction:row;}
+  #selbar .btn.icon{width:36px;height:36px;}
+  #viewbar button{width:38px;height:38px;}
+  #top .tb.next span, #top .tb.gifbtn span{display:none;}
   #panel{width:320px;max-height:none;border-top:0;border-left:1px solid var(--line);order:2;}
   #dock button{padding:5px 4px;}
   #dock .ic{width:22px;height:22px;}
@@ -242,11 +254,20 @@ body.projecting #projbar.show{display:flex;}
 /* ---------- teléfonos estrechos ---------- */
 @media (max-width:480px){
   #top{gap:2px;padding-left:4px;padding-right:6px;}
-  .tb{width:42px;height:42px;}
+  .tb{width:40px;height:40px;}
+  /* Lo que ya está en otro sitio no se repite arriba: comandos (☰ y Ctrl+K) y rehacer (Ctrl+Y / ☰). */
+  #top [data-act="palette"], #top [data-act="redo"]{display:none;}
   .sep{display:none;}
   .title{max-width:34vw;font-size:15px;padding:8px 6px;}
   .cta{padding:0 12px;gap:6px;margin-left:2px;}
   #dock button{min-width:60px;font-size:11px;}
+  #dock.fit button{min-width:0;font-size:11px;padding:7px 2px 6px;}
+  /* Botones flotantes del escenario más pequeños: dejan ver la superficie. */
+  #selbar{top:6px;left:6px;padding:3px;gap:3px;border-radius:12px;}
+  #selbar .btn.icon{width:36px;height:36px;}
+  #viewbar{left:6px;bottom:6px;}
+  #viewbar button{width:38px;height:38px;}
+  .sec h3{margin-top:4px;}
 }
 @media (max-width:360px){
   .cta span{display:none;}

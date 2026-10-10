@@ -2330,18 +2330,46 @@ function buildChrome() {
   buildNudge();
 }
 
-/** Pestañas: en modo simple solo las de siempre; el modo profesional añade Control, Luces, 3D, Show… */
+/** Pestañas: en modo simple solo las de siempre; el modo profesional añade Control, Luces, 3D, Show…
+ *  En el móvil no se amontonan: de pie caben 4 + «Más»; tumbado (o en pantallas medianas), 7 + «Más».
+ *  El resto está en «Más» (una hoja con todas, grandes y con su nombre). */
+function dockSlots() {
+  const w = innerWidth, hgt = innerHeight;
+  if (w < 600 && hgt > w) return 5;                 // teléfono de pie
+  if (w < 1000 || hgt < 520) return 8;              // teléfono tumbado o tableta pequeña
+  return Infinity;                                  // escritorio: todas
+}
+const visibleTabs = () => TABS.filter(t => !(t.pro && !S.pro) && t.dock !== false);
 function buildDock() {
   const dock = $("#dock");
   dock.innerHTML = "";
-  for (const t of TABS) {
-    if ((t.pro && !S.pro) || t.dock === false) continue;
+  const tabs = visibleTabs(), slots = dockSlots();
+  const shown = tabs.length > slots ? tabs.slice(0, slots - 1) : tabs;
+  const more = tabs.length > slots ? tabs.slice(slots - 1) : [];
+  for (const t of shown) {
     const b = h("button", { dataset: { tab: t.id }, class: t.pro ? "pro" : "", onclick: () => openTab(t.id) });
     b.innerHTML = icon(t.ic) + `<span>${t.label}</span>`;
     dock.append(b);
   }
+  if (more.length) {
+    const b = h("button", { class: "more", dataset: { more: more.map(t => t.id).join(" ") }, onclick: () => openMoreTabs(more) });
+    b.innerHTML = icon("menu") + "<span>Más</span>";
+    dock.append(b);
+  }
+  dock.classList.toggle("fit", more.length > 0);
   document.body.classList.toggle("pro", !!S.pro);
 }
+/** Hoja «Más»: el resto de pestañas, en rejilla. */
+function openMoreTabs(list) {
+  const grid = h("div", { class: "moretabs" }, ...list.map(t => {
+    const b = h("button", { class: `moretab ${S.tab === t.id ? "on" : ""} ${t.pro ? "pro" : ""}`, onclick: () => { closeDialog(); if (S.tab !== t.id) openTab(t.id); } });
+    b.innerHTML = icon(t.ic) + `<span>${t.label}</span>`;
+    return b;
+  }));
+  dialog({ title: "Más", content: grid, buttons: [] });
+}
+let dockSlotsNow = 0;
+addEventListener("resize", () => { const n = dockSlots(); if (n !== dockSlotsNow) { dockSlotsNow = n; buildDock(); updateChrome(); } });
 function setPro(on) {
   S.pro = !!on;
   try { localStorage.setItem("lumamap:pro", S.pro ? "1" : "0"); } catch {}
@@ -2391,7 +2419,7 @@ function updateChrome() {
   const cta = $("#btnProject");
   cta.classList.toggle("live", !!live);
   cta.innerHTML = icon("project") + `<span>${live ? "EN VIVO" : "Proyectar"}</span>`;
-  document.querySelectorAll("#dock button").forEach(b => b.classList.toggle("on", b.dataset.tab === S.tab));
+  document.querySelectorAll("#dock button").forEach(b => b.classList.toggle("on", b.dataset.tab ? b.dataset.tab === S.tab : !!S.tab && (b.dataset.more || "").split(" ").includes(S.tab)));
   // barra de selección
   const sb = $("#selbar");
   const showSel = s && !s.face3d && S.mode === "edit" && !S.projecting;
