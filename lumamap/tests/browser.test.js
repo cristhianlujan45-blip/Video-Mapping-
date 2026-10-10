@@ -653,10 +653,15 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.locator('#top [data-act="gif"]').click();
   await page.locator(".gifsearch .gifcell:not(.sk)").first().waitFor();
   // Escribir basta (sin pulsar «Buscar»): «fuego» se busca como «fire» en las dos fuentes.
+  // (Si otra prueba dejó «fuego» escrito, escribirlo igual no sería un cambio: se vacía antes.)
+  await page.locator(".gifsearch input[type=search]").fill("");
+  await page.waitForTimeout(600);
   asked.length = 0;
   await page.locator(".gifsearch input[type=search]").fill("fuego");
   for (let t = 0; t < 100 && !(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u))); t++) await page.waitForTimeout(100);
   await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 2, null, { timeout: 15000 });
+  if (!asked.length) console.log("DIAG-GIF2", await page.evaluate(() => JSON.stringify({ val: document.querySelector(".gifsearch input[type=search]")?.value, cells: document.querySelectorAll(".gifsearch .gifcell").length,
+    text: document.querySelector(".gifsearch")?.innerText.slice(0, 300), online: navigator.onLine, desk: !!window.LumaDesktop, native: !!window.LumaNative })));
   assert.ok(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u)), "buscó «fire» en las dos: " + asked.join(" "));
   assert.ok(!/\bnull\b/.test(await page.locator(".gifsearch").textContent()), "sin textos sueltos");
   const fuego = page.locator(".gifcell", { hasText: "Ana" });
