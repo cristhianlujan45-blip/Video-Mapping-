@@ -1,6 +1,7 @@
 // web/js/plugins-bundled.js
 // Plugins que vienen con LumaMap (se pueden apagar en Menú → Plugins). Son datos, como los
 // que instala el usuario: sirven también de ejemplo del formato (ver plugins.js).
+import { VIRAL } from "./plugins-viral.js";
 
 const TUNNEL = `/*{
   "DESCRIPTION": "Túnel de anillos de luz que avanza hacia ti",
@@ -326,4 +327,5 @@ export const BUNDLED = [
       { name: "Contornos de neón con rastro", isf: CAM_EDGES },
     ],
   },
+  ...VIRAL,
 ];
