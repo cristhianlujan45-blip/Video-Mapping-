@@ -29,6 +29,10 @@ import { openCreate3D } from "./panels-create3d.js";
 import { exportOBJ } from "./render3d.js";
 import { warmThumbs } from "./thumbs.js";
 import { startPhoneCams } from "./phonecam.js";
+import { startDeviceNotices, cameraPlugged } from "./phoneusb-ui.js";
+import { openMediaLibrary } from "./panels-library.js";
+import { loadPlugins } from "./plugins.js";
+import { setupQueue, maybeQueue, canConvert, resumePending, cancelJob, IMAGE_CONVERT } from "./convqueue.js";
 import { ParamEngine, describe, applyModList } from "./params.js";
 import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
@@ -84,6 +88,8 @@ const S = {
 
 const history = new History();
 let renderer, pool, comp, link, audio, params, midi, dmx, show, pads;
+// Plugins (incluidos y del usuario): sus efectos y animaciones entran en las bibliotecas antes del primer panel.
+try { loadPlugins(); } catch (e) { console.warn("plugins", e); }
 const app = { S, M, history }; // API para los paneles
 let KEYS = new Map();
 
@@ -123,6 +129,7 @@ function setProject(p, { keepHistory = false } = {}) {
   if (!keepHistory) history.reset(S.project);
   for (const id of M.usedMediaIds(S.project)) pool.ensure(id);
   for (const id of [...pool.items.keys()]) if (!S.project.media.some(m => m.id === id)) pool.remove(id);
+  resumePending();   // conversiones que quedaron a medias
   renderer.meshCache.clear();
   fitView();
   changed({ panel: true });
@@ -767,30 +774,41 @@ async function optimizeIfNeeded(file) {
   }
 }
 
+/** Guarda un archivo en la biblioteca (IndexedDB) y crea su reproductor. id: el de una entrada que ya existe (cola de conversión). */
+async function importOne(file, id = null) {
+  const kind = kindOf(file.type, file.name);
+  if (!kind) throw new Error(`Formato no soportado: ${file.name}`);
+  const rec = { id: id || M.uid("med"), name: file.name, kind, mime: file.type, blob: file, size: file.size };
+  const rt = await createRuntime(rec);
+  rec.kind = rt.kind === "anim" ? "image" : rt.kind;
+  rec.width = rt.width; rec.height = rt.height; rec.duration = rt.duration || 0;
+  rec.thumb = await makeThumb(rt);
+  await Store.putMedia(rec);
+  pool.add(rt);
+  const meta = { id: rec.id, name: rec.name, kind: rt.kind, mime: rec.mime, width: rec.width, height: rec.height, duration: rec.duration, size: rec.size, thumb: rec.thumb };
+  const cur = id && S.project.media.find(m => m.id === id);
+  if (cur) Object.assign(cur, meta); else S.project.media.push(meta);
+  link.send({ t: "media", id: rec.id });
+  return rec;
+}
+
 async function importMediaFiles(files) {
   const added = [];
   for (let file of files) {
-    if (kindOf(file.type, file.name) === "video") file = await optimizeIfNeeded(file);
-    const kind = kindOf(file.type, file.name);
-    if (!kind) { toast(`Formato no soportado: ${file.name}`, "err"); continue; }
+    // Escritorio: lo pesado o en otro formato entra ya y se convierte en segundo plano (convqueue.js).
+    const heavy = kindOf(file.type, file.name) === "video" || IMAGE_CONVERT.test(file.name);
+    if (heavy && canConvert() && app.autoOptimize()) {
+      const q = await maybeQueue(file, { width: S.project.width, height: S.project.height }, () => M.uid("med"));
+      if (q) { added.push(q); toast(`${file.name}: se convierte en segundo plano (ya está en la biblioteca)`); continue; }
+    } else if (kindOf(file.type, file.name) === "video") file = await optimizeIfNeeded(file);
     toast(`Importando ${file.name}…`);
-    const rec = { id: M.uid("med"), name: file.name, kind, mime: file.type, blob: file, size: file.size };
-    try {
-      const rt = await createRuntime(rec);
-      rec.kind = rt.kind === "anim" ? "image" : rt.kind;
-      rec.width = rt.width; rec.height = rt.height; rec.duration = rt.duration || 0;
-      rec.thumb = await makeThumb(rt);
-      await Store.putMedia(rec);
-      pool.add(rt);
-      S.project.media.push({ id: rec.id, name: rec.name, kind: rt.kind, mime: rec.mime, width: rec.width, height: rec.height, duration: rec.duration, size: rec.size, thumb: rec.thumb });
-      link.send({ t: "media", id: rec.id });
-      added.push(rec);
-    } catch (e) {
-      toast(e.message || String(e), "err");
-    }
+    try { added.push(await importOne(file)); }
+    catch (e) { toast(e.message || String(e), "err"); }
   }
   return added;
 }
+setupQueue(app, { finish: (id, file) => importOne(file, id) });
+app.openMediaLibrary = (o) => openMediaLibrary(app, o);
 
 /** Importa y coloca: sobre la superficie seleccionada o en una nueva con la proporción del archivo. */
 A.importMedia = async (target = "auto") => {
@@ -877,6 +895,7 @@ A.removeMedia = async (id) => {
   const used = M.usedMediaIds(S.project).has(id);
   if (!(await confirmDlg("Quitar de la biblioteca", used ? `«${m.name}» se usa en alguna superficie. ¿Quitarlo igualmente?` : `¿Quitar «${m.name}»?`, "Quitar"))) return;
   S.project.media = S.project.media.filter(x => x.id !== id);
+  cancelJob(id);
   for (const sc of S.project.scenes) for (const l of Object.values(sc.looks))
     if (l.source.mediaId === id) { l.source.mediaId = null; l.source.type = "none"; }
   pool.remove(id); renderer.releaseTexture("m:" + id);
@@ -2225,7 +2244,7 @@ function buildDock() {
   const dock = $("#dock");
   dock.innerHTML = "";
   for (const t of TABS) {
-    if (t.pro && !S.pro) continue;
+    if ((t.pro && !S.pro) || t.dock === false) continue;
     const b = h("button", { dataset: { tab: t.id }, class: t.pro ? "pro" : "", onclick: () => openTab(t.id) });
     b.innerHTML = icon(t.ic) + `<span>${t.label}</span>`;
     dock.append(b);
@@ -2823,6 +2842,7 @@ async function connectRemote() {
     onOsc: (m) => oscIn(m.address, m.args),
     // Móviles como cámara (señalización WebRTC y lista de móviles conectados).
     onMessage: (m) => phoneCams.handle(m),
+    onBinary: (b) => phoneCams.frame(b),
   });
   const phoneCams = startPhoneCams(remote);
   remote.connect();
@@ -3022,11 +3042,12 @@ async function init() {
     window.LumaDesktop.onDisplaysChanged(() => checkDisplays(true));
   }
   // Cámara o sensor 3D enchufado: se avisa con su tipo y la pestaña Interactivo lo ofrece.
+  // Con un botón para usarla en lo interactivo; los móviles (Wi-Fi o cable USB) avisan aparte.
   watchCameras((fresh) => {
-    const c = fresh.find(x => x.sensor) || fresh.find(x => x.is3d) || fresh[0];
-    toast(`Conectado: ${cameraName(c)}${c.sensor ? " · úsalo en «Interactivo»" : ""}`);
+    cameraPlugged(app, fresh);
     if (S.tab === "interactive") renderPanel();
   });
+  startDeviceNotices(app);
   // Arrastrar y soltar desde los paneles: la superficie bajo el dedo/ratón recibe lo soltado;
   // en un hueco vacío se crea una superficie nueva ahí mismo.
   const stagePoint = (x, y) => {

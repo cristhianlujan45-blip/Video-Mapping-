@@ -81,7 +81,10 @@ await test("importar una imagen la asigna a la superficie seleccionada", async (
   assert.equal(await page.evaluate(() => window.__lumamap.lookSel().source.type), "media");
 });
 await test("dibujar en la pared guarda trazos y se pueden deshacer", async () => {
-  await page.locator('#dock [data-tab="draw"]').click();
+  // Dibujar está en Añadir (y en Contenido → Dibujo), no repetido en la barra de abajo.
+  await page.evaluate(() => { const a = window.__lumamap; if (a.S.tab !== "add") a.openTab("add"); });
+  await page.locator("#panelBody .tile", { hasText: "Dibujar" }).first().click();
+  await page.waitForFunction(() => window.__lumamap.S.mode === "draw");
   const [x, y] = await toScreen([300, 300]);
   await page.mouse.move(x, y); await page.mouse.down();
   for (let i = 1; i <= 20; i++) await page.mouse.move(x + i * 10, y + Math.sin(i / 3) * 40);
@@ -297,6 +300,21 @@ await test("salida abierta desde el editor: motor compartido (sin decodificar do
   assert.ok(same);
   await popup.waitForFunction(() => /Compartido/.test(document.querySelector("#hud small").textContent) || true);
   } finally { await popup.close().catch(() => {}); }   // una ventana colgada no debe afectar a las pruebas siguientes
+});
+await test("menús sin repetir: Animaciones dentro de Contenido, Dibujar en Añadir, menú por grupos", async () => {
+  const tabs = await page.evaluate(() => [...document.querySelectorAll("#dock button[data-tab]")].map(b => b.dataset.tab));
+  assert.ok(!tabs.includes("anim") && !tabs.includes("draw"), tabs.join(","));
+  assert.deepEqual(tabs.slice(0, 7), ["add", "content", "fx", "shape", "layers", "scenes", "live"]);
+  // Contenido sin superficie elegida: las animaciones (tocar una crea la superficie).
+  const [n0, prevSel] = await page.evaluate(() => { const a = window.__lumamap, prev = a.S.sel; a.select(null); a.openTab(null); a.openTab("content"); return [a.S.project.surfaces.length, prev]; });
+  await page.locator("#panelBody .tile", { hasText: "Hiperespacio" }).first().click();
+  await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0);
+  await page.evaluate((prev) => { const a = window.__lumamap; a.S.project.surfaces.pop(); a.select(prev); a.changed({ panel: true }); a.openTab("menu"); }, prevSel);
+  const sections = await page.locator("#panelBody h3").allTextContents();
+  const text = await page.locator("#panelBody").textContent();
+  for (const t of ["Crear", "Conexiones", "Ayuda y sistema", "Biblioteca de archivos", "GIF animados", "Móvil o cámara para lo interactivo"]) assert.ok(text.includes(t), t + " · " + sections.join("|"));
+  assert.ok(!/\bnull\b/.test(text));
+  await page.evaluate(() => window.__lumamap.openTab(null));
 });
 await test("modo profesional: pestañas nuevas y modo simple intacto", async () => {
   const simpleTabs = await page.locator("#dock button").count();
@@ -759,6 +777,86 @@ await test("móvil como cámara: código QR, el móvil manda su cámara por WebR
   await page.waitForFunction(async () => { const { listPhones } = await import("./js/phonecam.js"); return listPhones().every(p => !p.online); }, null, { timeout: 15000 });
   assert.deepEqual(phoneErrors, [], JSON.stringify(phoneErrors));
   await page.evaluate(() => { const a = window.__lumamap, cal = a.S.project.settings.interactive; cal.camId = ""; a.openTab(null); });
+});
+await test("móvil por cable USB: la página abierta por el cable manda la cámara por el WebSocket, el programa avisa y la usa sola", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.interactive.camId = ""; });
+  // Otro proceso (como otro aparato): en la misma pestaña-proceso el editor le quitaría el hilo.
+  const phoneCtx = await browser.newContext({ permissions: ["camera"] });
+  const phone = await phoneCtx.newPage();
+  const phoneErrors = []; phone.on("pageerror", e => phoneErrors.push(e.message));
+  // Así la abre LumaMap en el móvil con adb (http://localhost por el cable).
+  await phone.goto(base + "phonecam.html?auto=1&usb=1&name=Redmi%20Note%2015%20Pro");
+  await phone.locator("#state.ok", { hasText: "cable USB" }).waitFor({ timeout: 30000 });
+  assert.equal(await phone.locator("#pinrow").isVisible(), false, "por cable no pide el código");
+  // Aviso en el programa y la cámara ya puesta en lo interactivo.
+  await page.locator("#notices .notice", { hasText: "lista (cable USB)" }).waitFor({ timeout: 20000 });
+  // Las fotos siguen llegando (no solo la primera).
+  await page.evaluate(async () => { window.__pf = (await import("./js/phonecam.js")).phoneFrames; });
+  await page.waitForFunction(() => (window.__pf(window.__lumamap.S.project.settings.interactive.camId)?.frames || 0) >= 4, null, { timeout: 60000 });
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, cal = a.S.project.settings.interactive;
+    const { getCamera, listCameras } = await import("./js/sources.js");
+    const cam = await getCamera(cal.camId);
+    for (let i = 0; i < 40 && !cam.el.videoWidth; i++) await new Promise(r => setTimeout(r, 100));
+    // La imagen es la de la cámara (no negra; los primeros fotogramas pueden serlo).
+    const c = Object.assign(document.createElement("canvas"), { width: 64, height: 36 }), g = c.getContext("2d");
+    let sum = 0;
+    const light = (src) => { g.clearRect(0, 0, 64, 36); g.drawImage(src, 0, 0, 64, 36); const d = g.getImageData(0, 0, 64, 36).data; let t = 0; for (let i = 0; i < d.length; i += 4) t += d[i] + d[i + 1] + d[i + 2]; return t; };
+    for (let k = 0; k < 50 && sum / (64 * 36 * 3) <= 5; k++) {
+      if (k) await new Promise(r => setTimeout(r, 100));
+      sum = light(cam.el);
+    }
+    // Lo que llega por el cable: fotos JPEG del móvil, una tras otra.
+    const { phoneFrames } = await import("./js/phonecam.js");
+    const recv = phoneFrames(cal.camId)?.frames || 0;
+    const cs = await listCameras();
+    return { camId: cal.camId, w: cam.el.videoWidth, bright: sum / (64 * 36 * 3), recv, listed: cs.find(c => c.id === cal.camId)?.kindName };
+  });
+  assert.match(r.camId, /^phone:/);
+  assert.ok(r.w >= 320, `imagen del móvil ${r.w}`);
+  assert.ok(r.recv >= 4, `fotos llegadas por el cable: ${r.recv} (enviadas ${await phone.evaluate(() => window.__lumaCamSent())})`);
+  assert.ok(r.bright > 5, `con imagen en la cámara ${r.bright} (recibido ${r.recv})`);
+  assert.equal(r.listed, "Móvil (cable USB)");
+  // Se desenchufa (página cerrada): el programa lo marca desconectado.
+  await phoneCtx.close();
+  await page.waitForFunction(async () => { const { listPhones } = await import("./js/phonecam.js"); return listPhones().every(p => !p.live && !p.online); }, null, { timeout: 15000 });
+  assert.deepEqual(phoneErrors, [], JSON.stringify(phoneErrors));
+  await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.interactive.camId = ""; document.querySelectorAll("#notices .notice").forEach(n => n.remove()); a.openTab(null); });
+});
+await test("plugins: se instala un shader ISF desde el menú, aparece en las animaciones con sus controles y se proyecta", async () => {
+  const fsFile = path.join(os.tmpdir(), "ondas-test.fs");
+  fs.writeFileSync(fsFile, `/*{ "DESCRIPTION": "Ondas de prueba", "CREDIT": "Test", "INPUTS": [
+    { "NAME": "freq", "TYPE": "float", "DEFAULT": 8.0, "MIN": 1.0, "MAX": 30.0, "LABEL": "Frecuencia" },
+    { "NAME": "tint", "TYPE": "color", "DEFAULT": [0.0, 1.0, 0.5, 1.0], "LABEL": "Color" } ] }*/
+void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_FragColor = vec4(tint.rgb * v, 1.0); }`);
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("menu"); });
+  await page.locator("#panelBody .item", { hasText: "Plugins" }).click();
+  await page.locator(".plugins .item", { hasText: "Shaders ISF" }).waitFor();
+  assert.ok(await page.locator(".plugins .item", { hasText: "Fiesta y neón" }).count());
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator(".plugins").getByRole("button", { name: /Instalar plugin/ }).click()]);
+  await chooser.setFiles(fsFile);
+  await page.locator(".plugins .item", { hasText: "Ondas de prueba" }).waitFor();
+  await page.locator("#modal").getByRole("button", { name: "Cerrar" }).click();
+  // Una superficie con el shader (desde el catálogo de animaciones, categoría 🧩).
+  const id = await page.evaluate(() => { const a = window.__lumamap; a.actions.addShape("rect"); a.actions.setSource({ type: "gen" }); a.openTab(null); a.openTab("content"); return a.S.sel; });
+  await page.locator("#panelBody .chip", { hasText: "🧩 Ondas de prueba" }).click();
+  await page.locator("#panelBody .tile", { hasText: "Ondas de prueba" }).first().click();
+  await page.locator("#panelBody .sec", { hasText: "🧩 Ondas de prueba" }).getByText("Frecuencia").waitFor();
+  const src = await page.evaluate((id) => { const a = window.__lumamap; return a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id].source; }, id);
+  assert.equal(src.type, "shader");
+  // Se dibuja de verdad (el compositor lo pinta en su lienzo y no hay errores de compilación).
+  await page.waitForTimeout(800);
+  const drawn = await page.evaluate(async (id) => {
+    const { getShader } = await import("./js/plugins.js"), { ShaderCache } = await import("./js/isf.js");
+    const a = window.__lumamap, sh = getShader(a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id].source.shaderId);
+    const sc = new ShaderCache(), e = sc.draw("x", sh.id, sh.isf, {}, { width: 64, height: 36, time: 1 });
+    const g = Object.assign(document.createElement("canvas"), { width: 64, height: 36 }).getContext("2d"); g.drawImage(e.canvas, 0, 0);
+    const d = g.getImageData(0, 0, 64, 36).data; let s = 0; for (let i = 1; i < d.length; i += 4) s += d[i];
+    return { err: sc.error(sh.id), green: s / (64 * 36) };
+  }, id);
+  assert.equal(drawn.err, ""); assert.ok(drawn.green > 20, "pinta en verde " + drawn.green);
+  await page.evaluate((id) => { const a = window.__lumamap; a.S.project.surfaces = a.S.project.surfaces.filter(s => s.id !== id); a.select(a.S.project.surfaces[0]?.id || null); a.changed({ panel: true }); a.openTab(null); }, id);
+  fs.rmSync(fsFile, { force: true });
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

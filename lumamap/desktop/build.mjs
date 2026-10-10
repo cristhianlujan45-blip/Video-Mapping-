@@ -13,7 +13,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"))
 
 fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
-for (const f of ["main.js", "preload.js", "ai.js", "ollama-pull.js", "shortcuts.js", "net.js", "optimize.js", "dmx-service.mjs", "remote-service.mjs", "updater.ps1"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
+for (const f of ["main.js", "preload.js", "ai.js", "ollama-pull.js", "shortcuts.js", "phoneusb.js", "net.js", "optimize.js", "dmx-service.mjs", "remote-service.mjs", "updater.ps1"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
 // ffmpeg para optimizar videos: se incluye su paquete (con el binario de esta plataforma).
 fs.cpSync(path.join(here, "node_modules", "ffmpeg-static"), path.join(stage, "node_modules", "ffmpeg-static"), { recursive: true });
 // SDK de Claude para el asistente (y lo que necesita al ejecutarse), sin tipos ni mapas de código.

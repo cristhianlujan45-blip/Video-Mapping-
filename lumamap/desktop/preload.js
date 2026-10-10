@@ -31,6 +31,10 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
     return p ? ipcRenderer.invoke("video:optimize", p, target) : Promise.resolve({ action: "keep", reason: "sin ruta" });
   },
   releaseVideo: (url) => ipcRenderer.invoke("video:release", url),
+  /** Cola de conversión (archivos pesados en segundo plano): ruta del archivo, plan rápido y convertir por ruta. */
+  filePath: (file) => { try { return webUtils.getPathForFile(file) || ""; } catch { return ""; } },
+  planMedia: (filePath, target) => ipcRenderer.invoke("video:plan", filePath, target),
+  convertPath: (filePath, target) => ipcRenderer.invoke("video:optimize", filePath, target),
   onVideoProgress: (cb) => ipcRenderer.on("video:progress", (_e, d) => cb(d)),
   /** Métricas reales: CPU/RAM por proceso, GPU, uso de GPU y VRAM (Windows). */
   metrics: () => ipcRenderer.invoke("perf:metrics"),
@@ -42,6 +46,12 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
   remoteInfo: () => ipcRenderer.invoke("remote:info"),
   remoteNewPin: () => ipcRenderer.invoke("remote:newPin"),
   onRemoteReady: (cb) => ipcRenderer.on("remote:ready", () => cb()),
+  /** Móvil Android por cable USB como cámara: estado del vigilante (adb) y reintentar. */
+  phoneUsb: {
+    status: () => ipcRenderer.invoke("phone:status"),
+    retry: () => ipcRenderer.invoke("phone:retry"),
+    onChange: (cb) => { const f = (_e, st) => cb(st); ipcRenderer.on("phone:usb", f); return () => ipcRenderer.removeListener("phone:usb", f); },
+  },
   /** Descargas de internet (buscar GIF): solo https y solo internet. Devuelve { ok, status, type, data }. */
   net: { get: (url, opts) => ipcRenderer.invoke("net:get", url, opts) },
   /** Asistente (Claude): la clave se guarda cifrada en el proceso principal. */

@@ -222,6 +222,29 @@ export function toast(msg, kind = "") {
   toastTimer = setTimeout(() => { el.className = ""; }, kind === "err" ? 5000 : 2600);
 }
 
+/**
+ * Aviso que se queda con botones (cámara conectada, móvil por cable…). Un aviso con el
+ * mismo id sustituye al anterior. actions: [{ label, kind, onClick }] (al pulsar se cierra).
+ * Devuelve una función para cerrarlo.
+ */
+export function notice({ id = "", text, sub = "", actions = [], timeout = 0, kind = "" }) {
+  let box = document.getElementById("notices");
+  if (!box) { box = h("div", { id: "notices", role: "status", "aria-live": "polite" }); document.body.append(box); }
+  if (id) box.querySelector(`[data-id="${CSS.escape(id)}"]`)?.remove();
+  let timer = 0;
+  const close = () => { clearTimeout(timer); el.remove(); };
+  const el = h("div", { class: `notice ${kind}`, "data-id": id },
+    h("div", { class: "ntx" }, h("b", {}, text), ...(sub ? [h("small", {}, sub)] : [])),
+    h("div", { class: "nact" }, ...actions.map(a => h("button", { class: `btn small ${a.kind || ""}`, onclick: () => { close(); a.onClick?.(); } }, a.label)),
+      h("button", { class: "btn small nx", title: "Cerrar", "aria-label": "Cerrar", onclick: close }, "✕")));
+  box.append(el);
+  if (timeout) timer = setTimeout(close, timeout);
+  return close;
+}
+
+/** Cierra el aviso con ese id (si está). */
+export function closeNotice(id) { document.querySelector(`#notices [data-id="${CSS.escape(id)}"]`)?.remove(); }
+
 /** Diálogo modal. content: Node; buttons: [{label, kind, value}] → Promise<value>. */
 export function dialog({ title, content, buttons = [{ label: "Cerrar", value: null }], wide }) {
   return new Promise((resolve) => {

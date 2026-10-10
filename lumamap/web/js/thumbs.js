@@ -1,5 +1,7 @@
 // web/js/thumbs.js — miniaturas reales de los generadores (render en GPU una vez).
 import { Renderer } from "./renderer.js";
+import { ShaderCache } from "./isf.js";
+import { getShader } from "./plugins.js";
 import { GENERATORS, createQuad, createLook, rectCorners, DEFAULT_FX } from "./model.js";
 
 /** Miniaturas del catálogo de animaciones (con su paleta y efecto), bajo demanda. */
@@ -42,8 +44,18 @@ export function genThumb(id) {
 /** Todas las miniaturas de generadores (compatibilidad). */
 export function genThumbs() { return Object.fromEntries(GENERATORS.map(g => [g.id, genThumb(g.id)])); }
 
+let shaderThumbs = null;
 export function animThumb(a) {
   if (animCache.has(a.id)) return animCache.get(a.id);
+  if (a.shader) {   // shader ISF de un plugin: su propia miniatura
+    try {
+      const sh = getShader(a.shader);
+      shaderThumbs ||= new ShaderCache();
+      const e = sh && shaderThumbs.draw("thumb", sh.id, sh.isf, {}, { width: 160, height: 100, time: 2.3 });
+      animCache.set(a.id, e ? e.canvas.toDataURL("image/jpeg", 0.75) : "");
+    } catch { animCache.set(a.id, ""); }
+    return animCache.get(a.id);
+  }
   try {
     if (!ensure()) return RETRY;
     const look = createLook({ type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale });

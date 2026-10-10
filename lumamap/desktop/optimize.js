@@ -17,6 +17,8 @@ function ffmpegPath() {
 }
 
 const GOOD_CODECS = new Set(["h264", "vp8", "vp9"]);
+// Imágenes que el editor no abre (TIFF, Photoshop, EXR, HEIC de iPhone…): se pasan a PNG.
+const IMAGE_CONVERT = /\.(tiff?|tga|psd|exr|dpx|heic|heif|jp2|j2k|pcx|sgi|ppm|pgm|pbm|hdr|dds|qoi)$/i;
 const GOOD_CONTAINERS = new Set([".mp4", ".m4v", ".webm"]);
 
 /** Lee códec, tamaño, fps, duración y bitrate de la salida de `ffmpeg -i`. */
@@ -121,9 +123,29 @@ function run(args, duration, onProgress) {
  * Optimiza un video si hace falta. Devuelve {action, reason, file, info, ms}.
  * file = ruta del archivo a usar (el original si action === "keep").
  */
+/** Qué se hará con un archivo (rápido, sin convertir): { action, reason, info, out: "mp4"|"png"|null }. */
+async function plan(input, target) {
+  const ext = path.extname(input).toLowerCase();
+  const info = await probe(input);
+  if (IMAGE_CONVERT.test(ext)) return info.codec || info.width ? { action: "image", reason: `imagen ${ext.slice(1).toUpperCase()}`, info, out: "png" } : { action: "keep", reason: "imagen no reconocible", info, out: null };
+  const d = decide(info, ext, target);
+  return { ...d, info, out: d.action === "keep" ? null : "mp4" };
+}
+
+/** Imagen en un formato que el editor no abre → PNG (máximo 8K por lado). */
+async function convertImage(input, outDir) {
+  const t0 = Date.now();
+  fs.mkdirSync(outDir, { recursive: true });
+  const ext = path.extname(input);
+  const out = path.join(outDir, `${path.basename(input, ext).replace(/[^\w\-]+/g, "_").slice(0, 60)}-${Date.now().toString(36)}.png`);
+  await run(["-y", "-hide_banner", "-nostats", "-i", input, "-frames:v", "1", "-vf", "scale=w='min(iw,8192)':h='min(ih,8192)':force_original_aspect_ratio=decrease", out], 0);
+  return { action: "image", reason: `imagen ${ext.slice(1).toUpperCase()} convertida a PNG`, file: out, ms: Date.now() - t0, encoder: "png" };
+}
+
 async function optimize(input, target, outDir, onProgress) {
   const t0 = Date.now();
   const ext = path.extname(input).toLowerCase();
+  if (IMAGE_CONVERT.test(ext)) return convertImage(input, outDir);
   const info = await probe(input);
   const plan = decide(info, ext, target);
   if (plan.action === "keep") return { ...plan, file: input, info, ms: Date.now() - t0 };
@@ -151,4 +173,4 @@ async function optimize(input, target, outDir, onProgress) {
   throw lastErr || new Error("No se pudo convertir el video");
 }
 
-module.exports = { optimize, probe, decide, parseProbe, ffmpegPath, usableEncoders, killAll };
+module.exports = { optimize, plan, probe, decide, parseProbe, ffmpegPath, usableEncoders, killAll, IMAGE_CONVERT };

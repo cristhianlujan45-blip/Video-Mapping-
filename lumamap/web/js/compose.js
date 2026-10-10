@@ -7,6 +7,8 @@ import { TextCache, cameraIfReady, getCamera, camKey, cameraLost, offlineImage }
 import { BodyCache } from "./body.js";
 import { Model3DCache } from "./render3d.js";
 import { surfaceAspect } from "./math.js";
+import { ShaderCache } from "./isf.js";
+import { getShader } from "./plugins.js";
 
 export class Compositor {
   /** shared: Compositor de otra ventana (el editor) del que tomar las fuentes. */
@@ -18,6 +20,7 @@ export class Compositor {
     this.texts = new TextCache();
     this.bodies = new BodyCache();
     this.models3d = new Model3DCache();
+    this.shaders = new ShaderCache();
     this.drawVersion = new Map();
     this.cameraWanted = new Set();
   }
@@ -73,6 +76,17 @@ export class Compositor {
         const key = scene.id + ":" + s.id + k;
         const e = this.models3d.get(key, src, aspect, o.time);
         return e ? { id: "o3:" + key, el: e.canvas, key: e.version } : null;
+      }
+      case "shader": {
+        // Shader ISF de un plugin: se dibuja a la medida de la superficie (como mucho 1280×720).
+        const sh = getShader(src.shaderId);
+        if (!sh) return null;
+        const sa = surfaceAspect(s);
+        const hgt = Math.round(Math.max(144, Math.min(720, sa.h || 540)));
+        const wid = Math.round(Math.max(64, Math.min(1280, hgt * sa.aspect)));
+        const key = scene.id + ":" + s.id + k;
+        const e = this.shaders.draw(key, sh.id, sh.isf, src.shaderParams || {}, { width: wid, height: hgt, time: o.time * (src.speed ?? 1) });
+        return e ? { id: "sh:" + key, el: e.canvas, key: e.version } : null;
       }
       case "text": {
         const { aspect } = surfaceAspect(s);

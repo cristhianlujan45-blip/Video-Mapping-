@@ -54,6 +54,7 @@ function wsClient(port, role, extra = {}) {
     }
     if (hs) {
       const { frames, rest } = decodeFrames(buf); buf = Buffer.from(rest);
+      for (const f of frames) if (f.opcode === 2) api.onbin?.(Buffer.from(f.payload));
       for (const f of frames) if (f.opcode === 1) { if (process.env.DBG) console.log(role, "<-", f.payload.toString().slice(0, 120)); api.onmsg?.(JSON.parse(f.payload.toString())); }
     }
   });
@@ -169,6 +170,29 @@ await test("https propio para la cámara del móvil: certificado guardado, misma
   const again = fs.readFileSync(path.join(dir, "lumamap-https.crt"), "utf8");
   const { loadCertificate } = await import("../server/tls.js");
   assert.equal(loadCertificate(dir).cert, again);
+});
+await test("móvil por cable USB: sus imágenes JPEG llegan al motor con su nombre delante (y no a un mando)", async () => {
+  const display = wsClient(port, "display");
+  await nextMsg(display, "__open");
+  const ctl = wsClient(port, "controller");
+  await nextMsg(ctl, "__open");
+  const listed = nextMsg(display, "cameras", (m) => m.cameras.length > 0);
+  const cam = wsClient(port, "camera", { camId: "usb-1", name: "Redmi Note 15 Pro" });
+  await listed;
+  let leaked = false; ctl.onbin = () => { leaked = true; };
+  const got = new Promise(r => { display.onbin = r; });
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), crypto.randomBytes(30000)]);
+  cam.sock.write(encodeFrame(jpeg, { mask: true, opcode: 0x2 }));
+  const b = await got;
+  assert.equal(b[0], 5);
+  assert.equal(b.subarray(1, 6).toString(), "usb-1");
+  assert.deepEqual(b.subarray(6), jpeg);
+  // Un mando no puede mandar imágenes haciéndose pasar por cámara.
+  let fake = false; display.onbin = () => { fake = true; };
+  ctl.sock.write(encodeFrame(jpeg, { mask: true, opcode: 0x2 }));
+  await new Promise(r => setTimeout(r, 200));
+  assert.equal(fake, false); assert.equal(leaked, false);
+  display.sock.end(); ctl.sock.end(); cam.sock.end();
 });
 await test("con código (PIN): una cámara sin el código no entra y el motor no la ve", async () => {
   const s2 = createServer({ port: 0, osc: false, pin: "4321" });

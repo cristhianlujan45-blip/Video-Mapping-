@@ -74,6 +74,10 @@ jobs:
         env:
           SHOTS_DIR: ${{ runner.temp }}/shots
         run: node tests/browser.test.js
+      - name: Todos los efectos, estilos y animaciones (GPU por software)
+        if: success() || failure()
+        working-directory: lumamap
+        run: node tests/effects.browser.test.js
       - name: Tracking real (cámara falsa con una persona → IA → regla)
         if: success() || failure()
         working-directory: lumamap

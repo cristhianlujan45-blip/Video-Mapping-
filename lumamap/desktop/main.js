@@ -252,6 +252,11 @@ ipcMain.handle("output-display", (_e, id) => setOutputDisplay(id));
 ipcMain.handle("fullscreen", (_e, on) => editor?.setFullScreen(!!on));
 
 // Optimización automática de video al importar (ver optimize.js).
+ipcMain.handle("video:plan", async (_e, file, target) => {
+  if (!fs.existsSync(file)) return { action: "missing", reason: "No se encuentra el archivo original" };
+  const r = await require("./optimize.js").plan(file, target || {});
+  return { action: r.action, reason: r.reason, out: r.out, info: r.info };
+});
 ipcMain.handle("video:optimize", async (e, file, target) => {
   const r = await optimize(file, target || {}, OPT_DIR, (pct) => e.sender.send("video:progress", { file, pct }));
   return { action: r.action, reason: r.reason, ms: r.ms, encoder: r.encoder || null, info: r.info,
@@ -500,6 +505,23 @@ ipcMain.handle("remote:info", () => {
 });
 ipcMain.handle("remote:newPin", () => { const st = readSettings(); st.pin = String(Math.floor(1000 + Math.random() * 9000)); writeSettings(st); try { remote.proc?.kill(); } catch {} return st.pin; });
 app.on("before-quit", () => { const p = remote.proc; remote.proc = null; try { p?.kill(); } catch {} });
+
+/* ---------------- Móvil por cable USB como cámara (adb) ---------------- */
+let phoneUsb = null;
+function startPhoneUsb() {
+  const U = require("./phoneusb.js");
+  phoneUsb = U.createPhoneUsb({
+    dataDir: path.join(app.getPath("userData"), "android"),
+    getPort: () => remote.port, getPin: () => remote.pin,
+    send: (st) => { try { editor?.webContents.send("phone:usb", st); } catch {} },
+    log: (k, m) => log(k, m),
+    download: (o) => U.downloadAdb({ ...o, signatureOf: require("./ai.js").signatureOf }),
+  });
+  phoneUsb.start();
+}
+ipcMain.handle("phone:status", () => phoneUsb?.status() || null);
+ipcMain.handle("phone:retry", () => phoneUsb?.retry() || { ok: false });
+app.on("before-quit", () => { try { phoneUsb?.stop(); } catch {} });
 app.on("before-quit", () => { try { dmxProc?.kill(); } catch {} });
 
 ipcMain.handle("video:release", (_e, url) => {
@@ -525,7 +547,7 @@ app.whenReady().then(() => {
     if (p.startsWith("/__opt/")) {
       const f = path.join(OPT_DIR, path.basename(p));
       if (!fs.existsSync(f)) return new Response("404", { status: 404 });
-      return new Response(fs.readFileSync(f), { headers: { "content-type": "video/mp4" } });
+      return new Response(fs.readFileSync(f), { headers: { "content-type": f.endsWith(".png") ? "image/png" : "video/mp4" } });
     }
     if (p === "/" || !p) p = "/index.html";
     const file = path.normalize(path.join(WEB, p));
@@ -569,6 +591,8 @@ app.whenReady().then(() => {
 
   log("app", `LumaMap ${app.getVersion()} · Electron ${process.versions.electron} · ${os.platform()} ${os.release()}`);
   startRemote();
+  // El móvil por cable se vigila en cuanto el servicio del mando está listo (necesita su puerto).
+  setTimeout(startPhoneUsb, 2000);
   createEditor();
 });
 

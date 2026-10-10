@@ -5,6 +5,12 @@ import {
   GENERATORS, ANIM_LIBRARY, ANIM_CATEGORIES, FX_LIBRARY, FX_CATEGORIES, COLORMAPS, RECORD_QUALITIES, BLEND_MODES, BORDER_ANIMS, AUDIO_TARGETS, AUDIO_BANDS,
   DRAW_TOOLS, DRAW_ANIMS, SHAPES, DEFAULT_FX, lookOf, SCREEN_FX, SENSOR_ACTIONS, sensorThreshold,
 } from "./model.js";
+import { openMediaLibrary } from "./panels-library.js";
+import { getShader } from "./plugins.js";
+import { hexToIsf, isfToHex } from "./isf.js";
+import { openPlugins } from "./panels-plugins.js";
+import { openPhoneCam } from "./panels-phonecam.js";
+import { canConvert } from "./convqueue.js";
 import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog, lazyThumb, draggable } from "./ui.js";
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
@@ -26,16 +32,25 @@ import { TRANSITIONS } from "./compose.js";
 
 const animUI = { cat: "Todas", q: "" };
 
+/** Celda de la biblioteca (con «convirtiendo… %» si está en la cola). */
+export function mediaCell(m, { on = false, onClick } = {}) {
+  const p = m.pending;
+  return h("button", { class: `mcell ${on ? "on" : ""} ${p ? "pending" : ""} ${p?.error ? "failed" : ""}`, "data-mid": m.id, onclick: onClick, title: p?.error || p?.reason || m.name },
+    m.thumb ? h("img", { src: m.thumb, alt: "" }) : h("i", { class: "mph" }, m.kind === "video" ? "🎞" : "🖼"),
+    h("span", {}, m.name), h("b", { class: "kind" }, m.kind === "video" ? "VIDEO" : m.kind === "anim" ? "GIF" : "IMG"),
+    p ? h("div", { class: "mprog", style: `--p:${p.pct || 0}`, "data-label": p.error ? "Error" : `${Math.round(100 * (p.pct || 0))} %` }) : null);
+}
+
 export const TABS = [
   { id: "add", label: "Añadir", ic: "plus" },
-  { id: "anim", label: "Animaciones", ic: "wand" },
-  { id: "live", label: "En vivo", ic: "live" },
-  { id: "draw", label: "Dibujar", ic: "pen" },
+  { id: "anim", label: "Animaciones", ic: "wand", dock: false },   // dentro de «Contenido»
+  { id: "draw", label: "Dibujar", ic: "pen", dock: false },        // Añadir → Dibujar / Contenido → Dibujo
   { id: "content", label: "Contenido", ic: "content" },
   { id: "fx", label: "Efectos", ic: "fx" },
   { id: "shape", label: "Forma", ic: "shape" },
   { id: "layers", label: "Capas", ic: "layers" },
   { id: "scenes", label: "Escenas", ic: "scenes" },
+  { id: "live", label: "En vivo", ic: "live" },
   { id: "audio", label: "Audio", ic: "audio" },
   ...INTERACTIVE_TABS, ...DMX_TABS,
   ...SHOW_TABS, ...TABS_3D, ...TRACKING_TABS, ...ASSISTANT_TABS, ...PRO_TABS,
@@ -69,7 +84,7 @@ const add = {
       section("Contenido rápido",
         tiles([
           { id: "media", label: "Video, foto o GIF", ic: "upload" },
-          { id: "draw", label: "Dibujar", ic: "pen" },
+          { id: "draw", label: "Dibujar", ic: "pen", dock: false },        // Añadir → Dibujar / Contenido → Dibujo
           { id: "text", label: "Texto", ic: "text" },
           { id: "camera", label: "Cámara", ic: "camera" },
           { id: "body", label: "Interactivo (cámara)", ic: "body" },
@@ -132,11 +147,34 @@ function applyAnim(app, a) {
   const look = app.lookSel();
   if (!look) return;
   app.edit(() => {
-    Object.assign(look.source, { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale });
+    if (a.shader) Object.assign(look.source, { type: "shader", shaderId: a.shader, shaderParams: {}, speed: 1 });   // shader ISF de un plugin
+    else Object.assign(look.source, { type: "gen", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale });
     if (a.fx) look.fx = { ...DEFAULT_FX(), ...a.fx };
   });
   app.renderPanel();
   toast(a.name);
+}
+
+/** Controles de un shader ISF (los que declara el propio shader). */
+function shaderControls(app, src) {
+  const sh = getShader(src.shaderId);
+  if (!sh) return section("Shader", hint("Este shader es de un plugin que no está instalado o está apagado (Menú → Plugins)."));
+  const P = (src.shaderParams ||= {});
+  const val = (i) => P[i.name] ?? i.def;
+  const ctl = sh.isf.inputs.map(i => {
+    if (i.type === "float") return slider({ label: i.label, min: i.min, max: i.max, step: (i.max - i.min) / 200 || 0.01, value: val(i), def: i.def, fmt: (v) => (+v).toFixed(2), onInput: (v) => app.edit(() => { P[i.name] = v; }) });
+    if (i.type === "long" && i.values) return h("div", {}, h("div", { class: "lbl" }, i.label), segmented({ options: i.values.map((v, k) => [v, i.labels?.[k] ?? String(v)]), value: val(i), small: true, onChange: (v) => app.edit(() => { P[i.name] = v; }) }));
+    if (i.type === "long") return stepper({ label: i.label, value: val(i), min: i.min, max: i.max, onChange: (v) => app.edit(() => { P[i.name] = v; }) });
+    if (i.type === "bool" || i.type === "event") return toggle({ label: i.label, value: !!val(i), onChange: (v) => app.edit(() => { P[i.name] = v; }) });
+    if (i.type === "color") return swatches({ label: i.label, value: isfToHex(val(i)), onChange: (c) => app.edit(() => { P[i.name] = hexToIsf(c); }) });
+    if (i.type === "point2D") { const v = val(i); return h("div", {},
+      slider({ label: i.label + " · horizontal", min: 0, max: 1, value: v[0], def: i.def[0], fmt: pct, onInput: (x) => app.edit(() => { P[i.name] = [x, (P[i.name] ?? i.def)[1]]; }) }),
+      slider({ label: i.label + " · vertical", min: 0, max: 1, value: v[1], def: i.def[1], fmt: pct, onInput: (y) => app.edit(() => { P[i.name] = [(P[i.name] ?? i.def)[0], y]; }) })); }
+    return null;
+  });
+  return section(`🧩 ${sh.name}`, sh.isf.description ? hint(sh.isf.description + (sh.isf.credit ? ` · ${sh.isf.credit}` : "")) : null,
+    slider({ label: "Velocidad", min: 0, max: 4, step: 0.05, value: src.speed ?? 1, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { src.speed = v; }) }),
+    ...ctl);
 }
 
 /** Catálogo: buscador + categorías + miniaturas reales. */
@@ -150,7 +188,8 @@ function animCatalog(app, onPick, { drag = false } = {}) {
     const q = norm(animUI.q.trim());
     const list = ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || a.cat === animUI.cat) && (!q || norm(a.name + " " + a.cat).includes(q)));
     grid.innerHTML = "";
-    const on = cur?.type === "gen" ? list.find(a => a.gen === cur.gen && a.color === cur.color && a.color2 === cur.color2)?.id : null;
+    const on = cur?.type === "gen" ? list.find(a => a.gen === cur.gen && a.color === cur.color && a.color2 === cur.color2)?.id
+      : cur?.type === "shader" ? list.find(a => a.shader === cur.shaderId)?.id : null;
     grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: () => animThumb(a) })), { value: on, cols: 4, onPick: (id) => onPick(ANIM_LIBRARY.find(x => x.id === id)),
       drag: drag ? (it) => { const a = ANIM_LIBRARY.find(x => x.id === it.id); return { label: a.name, apply: (app) => applyAnim(app, a) }; } : null }) : hint("Ninguna animación con ese nombre."));
   };
@@ -268,7 +307,6 @@ const live = {
       segmented({ options: [[0, "Corte"], [0.5, "½ s"], [1, "1 s"], [2, "2 s"], [4, "4 s"], [8, "8 s"]], value: S.liveFade, small: true, onChange: (v) => { S.liveFade = v; } }),
       row(btn({ label: "GO todas", ic: "play", kind: "wide primary", onClick: () => A.goAll() }),
         btn({ label: "Todas al azar", ic: "shuffle", kind: "wide", onClick: () => A.randomAll() })),
-      btn({ label: "Buscar GIF animado y ponerlo en vivo", ic: "gif", kind: "block", onClick: () => A.searchGifs() }),
       h("div", { class: "lbl" }, "Mezcla automática al ritmo (cambia sola cada N golpes)"),
       segmented({ options: [[0, "No"], [4, "4"], [8, "8"], [16, "16"], [32, "32"]], value: S.autoMix || 0, small: true, onChange: (v) => A.setAutoMix(v) }),
       P.surfaces.some(x => x.screen) ? h("div", {}, h("div", { class: "lbl" }, "Ver en el editor"),
@@ -387,13 +425,14 @@ const content = {
   title: (app) => app.surf() ? `Contenido · ${app.surf().name}` : "Contenido",
   render(app) {
     const s = app.surf();
-    if (!s) return needSelection(app);
+    // Sin superficie elegida: las animaciones (al tocar una se crea una superficie a pantalla completa).
+    if (!s) return anim.render(app);
     const A = app.actions, look = app.lookSel(), src = look.source;
     const projs = app.S.project.stage3d.projectors;
     const types = [...SOURCE_TYPES, ...(projs.length && !s.face3d ? [{ id: "projector3d", label: "Proyector 3D", ic: "cube" }] : [])];
     const wrap = h("div", {},
       s.face3d ? hint("Cara de un objeto 3D: su contenido se ve en la ventana 3D y en lo que proyecta cada proyector.") : null,
-      tiles(types.map(t => ({ ...t })), { value: src.type, cols: 4, onPick: (id) => {
+      tiles(types.map(t => ({ ...t })), { value: src.type === "shader" ? "gen" : src.type, cols: 4, onPick: (id) => {
         if (id === "media" && !app.S.project.media.length) return A.importMedia("selected");
         if (id === "projector3d") return A.setSource({ type: id, projectorId: src.projectorId || projs[0].id });
         A.setSource({ type: id });
@@ -406,8 +445,7 @@ const content = {
     if (src.type === "media") {
       const grid = h("div", { class: "mediagrid" });
       for (const m of app.S.project.media) {
-        const cell = h("button", { class: `mcell ${src.mediaId === m.id ? "on" : ""}`, onclick: () => A.setSource({ type: "media", mediaId: m.id }) },
-          h("img", { src: m.thumb || "", alt: "" }), h("span", {}, m.name), h("b", { class: "kind" }, m.kind === "video" ? "VIDEO" : m.kind === "anim" ? "GIF" : "IMG"));
+        const cell = mediaCell(m, { on: src.mediaId === m.id, onClick: () => A.setSource({ type: "media", mediaId: m.id }) });
         draggable(cell, () => ({ label: m.name, img: m.thumb || "", apply: (app) => app.actions.setSource({ type: "media", mediaId: m.id }) }));
         let pressT = 0;
         cell.addEventListener("pointerdown", () => { pressT = setTimeout(() => A.removeMedia(m.id), 700); });
@@ -417,9 +455,9 @@ const content = {
       }
       wrap.append(section("Biblioteca", grid,
         btn({ label: "Importar video, imagen o GIF", ic: "upload", kind: "block primary", onClick: () => A.importMedia("selected") }),
-        btn({ label: "Buscar GIF animado en internet", ic: "gif", kind: "block", onClick: () => A.searchGifs({ mode: "go" }) }),
-        btn({ label: "Crear objeto 3D (carro, casa, logo…)", ic: "cube", kind: "block", onClick: () => A.create3D() }),
-        hint("Mantén pulsado un archivo para quitarlo. Formatos: MP4, WebM, MOV, JPG, PNG, WebP, GIF animado.")));
+        canConvert() ? btn({ label: "Subir archivos pesados (se convierten solos)", ic: "upload", kind: "block", onClick: () => openMediaLibrary(app, { pick: true }) }) : null,
+        hint(canConvert() ? "Mantén pulsado un archivo para quitarlo. Cualquier video (4K, MOV, ProRes, HEVC, AVI, MKV…) o imagen (TIFF, Photoshop, HEIC…): lo pesado entra al momento y se convierte en segundo plano."
+          : "Mantén pulsado un archivo para quitarlo. Formatos: MP4, WebM, MOV, JPG, PNG, WebP, GIF animado.")));
       wrap.append(section("Video",
         app.S.project.media.find(m => m.id === src.mediaId)?.kind === "video" ? h("div", {},
           slider({ label: "Velocidad", min: 0.25, max: 2, step: 0.05, value: look.rate, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { look.rate = v; }), param: `surf/${s.id}/rate` }),
@@ -427,6 +465,10 @@ const content = {
           btn({ label: "Reiniciar videos", ic: "restart", kind: "block", onClick: A.restart })) : null));
     }
 
+    if (src.type === "shader") {
+      wrap.append(shaderControls(app, src));
+      wrap.append(animCatalog(app, (a) => applyAnim(app, a), { drag: true }));
+    }
     if (src.type === "gen") {
       wrap.append(animCatalog(app, (a) => applyAnim(app, a), { drag: true }));
       wrap.append(fold(`Animaciones base (${GENERATORS.length})`, false,
@@ -950,6 +992,12 @@ const menu = {
         item("download", "Exportar archivo .lumamap", A.exportProject, "Incluye videos e imágenes: para copia o para otro equipo"),
         item("upload", "Importar archivo", A.importProject),
         item("screen", `Resolución · ${S.project.width}×${S.project.height}`, A.setResolution))),
+      section("Crear", h("div", { class: "list" },
+        item("folder", "Biblioteca de archivos", () => openMediaLibrary(app), canConvert() ? "Tus videos y fotos · los pesados se convierten solos en segundo plano" : "Tus videos, fotos y GIF"),
+        item("gif", "GIF animados", () => A.searchGifs(), "Se buscan solos mientras escribes"),
+        item("cube", "Crear objeto 3D («hazme un carro»)", () => A.create3D(), "Escribe qué quieres y proyéctalo, también como holograma"),
+        item("body", "Holograma (como Tupac, tul o pirámide)", () => A.hologramWizard(), "Varios proyectores, quita el fondo de la persona solo"),
+        item("plugin", "Plugins", () => openPlugins(app), "Más efectos, animaciones y shaders ISF (como en Resolume)"))),
       section("Show", h("div", { class: "list" },
         item("wand", "Todos los comandos", A.palette, "Busca cualquier acción escribiendo · Ctrl+K"),
         item("camera", S.rec ? "Detener grabación" : "Grabar video de la salida", A.record, "Guarda el show en video (con la música si el micrófono está activo)"),
@@ -966,11 +1014,11 @@ const menu = {
           ? "Convierte solo lo que hace falta (4K, HEVC, ProRes, bitrate alto…) a un H.264 ligero del tamaño de la salida, con la tarjeta gráfica. Lo que ya es ligero entra al instante."
           : "En la app de Windows y Android los videos pesados se convierten solos al importarlos.",
           value: app.autoOptimize(), onChange: (v) => app.setAutoOptimize(v) })),
-      section("Control", h("div", { class: "list" },
+      section("Conexiones", h("div", { class: "list" },
+        item("camera", "Móvil o cámara para lo interactivo", () => openPhoneCam(app), window.LumaDesktop ? "Android por cable USB (se activa solo), o cualquier móvil por Wi-Fi" : "Cualquier móvil por Wi-Fi"),
         item("midi", "Conectar controlador MIDI", () => { A.midi(); if (S.pro) app.openTab("control"); }, S.pro ? "Asigna cualquier control con clic derecho → Aprender" : "Activa el Modo profesional para asignar knobs y faders"),
-        item("cube", "Crear objeto 3D («hazme un carro»)", () => A.create3D(), "Escribe qué quieres y proyéctalo, también como holograma"),
-        item("body", "Holograma (como Tupac, tul o pirámide)", () => A.hologramWizard(), "Varios proyectores, quita el fondo de la persona solo"),
-        item("live", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), "Controla el show desde el teléfono o una mesa OSC"),
+        item("live", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), "Controla el show desde el teléfono o una mesa OSC"))),
+      section("Ayuda y sistema", h("div", { class: "list" },
         item("help", "Ayuda y atajos", () => A.help()),
         item("save", "Copias de seguridad", () => A.backups(), "Se guarda una copia cada 5 minutos · recuperar una anterior"),
         item("gauge", "Prueba de velocidad", () => A.speedTest(), "Mide este equipo y elige la calidad para que todo vaya fluido"),

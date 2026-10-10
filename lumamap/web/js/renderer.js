@@ -369,7 +369,7 @@ vec4 generator3(vec2 uv, vec2 p, float t){
     float h = hash(id);
     float line = h > 0.5 ? smoothstep(0.06, 0.0, abs(f.y - 0.5)) : smoothstep(0.06, 0.0, abs(f.x - 0.5));
     float node = smoothstep(0.14, 0.08, length(f - 0.5)) * step(0.8, hash(id + 4.0));
-    float pulse = smoothstep(0.15, 0.0, abs(fract((h > 0.5 ? f.x : f.y) + h*3.0 - t*0.8) - 0.5) - 0.35);
+    float pulse = smoothstep(0.12, 0.0, abs(fract((h > 0.5 ? f.x : f.y) + h*3.0 - t*0.8) - 0.5));   // chispa que recorre la pista
     return vec4(B*0.08 + A*(line*(0.25 + pulse) + node), 1.0);
   }
   if(u_gen==48){ // Burbujas
@@ -1100,6 +1100,8 @@ void main(){
     float row = floor(vuv.y*24.0), gt = floor(u_time*9.0);
     if(hash(vec2(row, gt)) < u_d2.y*0.6) cuv.x += (hash(vec2(row + 3.0, gt)) - 0.5) * 0.25 * u_d2.y;
   }
+  // Las animaciones dibujan con coordenadas centradas: siguen al desplazamiento, mosaico y glitch.
+  gp = (cuv - 0.5) * vec2(u_aspect, 1.0);
   if(u_pix > 0.0){
     float cells = mix(260.0, 6.0, u_pix);
     vec2 n = vec2(cells*u_aspect, cells);
@@ -1119,9 +1121,29 @@ void main(){
   }
   // ---- fuente ----
   vec4 c = vec4(0.0);
+  vec4 gs[9];
   if(u_src==1) c = sampleTex(cuv);
   else if(u_src==2) c = vec4(u_c1, 1.0);
-  else if(u_src==3) c = generator(fract(cuv), gp, u_gtime);
+  else if(u_src==3){
+    // Una sola llamada al generador (el sombreador ya es grande): los efectos que miran a los
+    // vecinos (separación RGB, desenfoque, contornos, nitidez, relieve) la repiten en este bucle.
+    int gm = (u_c5.x > 0.0 || u_c5.y > 0.0 || u_c5.z > 0.0) ? 3 : (u_blur > 0.0 ? 2 : ((u_rgb > 0.0 || u_d2.z > 0.0) ? 1 : 0));
+    int gn = gm == 0 ? 1 : (gm == 1 ? 3 : 9);
+    vec2 rgbOff = vec2(u_rgb, 0.0) + (cuv - 0.5) * u_d2.z;
+    for(int k=0;k<9;k++){
+      if(k>=gn) break;
+      vec2 o = vec2(0.0);
+      if(gm==1) o = k==1 ? rgbOff : (k==2 ? -rgbOff : vec2(0.0));
+      else if(gm==2 && k>0){ float a = float(k-1)*TAU/8.0; o = vec2(cos(a), sin(a)) * u_blur * 0.012; }
+      else if(gm==3) o = vec2(float(k - (k/3)*3) - 1.0, float(k/3) - 1.0) * vec2(0.004 / u_aspect, 0.004);
+      vec2 q = cuv + o;
+      gs[k] = generator(fract(q), (q - 0.5) * vec2(u_aspect, 1.0), u_gtime);
+    }
+    if(gm==1){ c = gs[0]; c.r = gs[1].r; c.b = gs[2].b; }
+    else if(gm==2){ c = gs[0]*0.2; for(int k=1;k<9;k++) c += gs[k]*0.1; }
+    else if(gm==3) c = gs[4];
+    else c = gs[0];
+  }
   else if(u_src==4){ // cuerpo: R = silueta con la animación, G = contorno, B = estela
     vec4 m = sampleTex(cuv);
     vec4 g = generator(fract(cuv), gp, u_gtime);
@@ -1133,11 +1155,19 @@ void main(){
   if(u_key.x > 0.0) c.a *= smoothstep(u_key.x, u_key.x + u_key.y + 0.001, distance(c.rgb, u_keyCol));
   if(u_key.z > 0.0) c.a *= smoothstep(u_key.z, u_key.z + u_key.w + 0.001, dot(c.rgb, vec3(0.299, 0.587, 0.114)));
   // ---- efectos que miran a los vecinos (vídeo, imagen, cámara, dibujo) ----
-  if(u_src==1 && (u_c5.x > 0.0 || u_c5.y > 0.0 || u_c5.z > 0.0)){
-    vec2 d = u_texel * 1.5 / max(u_fit.xy, vec2(0.05));
-    float tl = lumAt(cuv + vec2(-d.x, -d.y)), tc = lumAt(cuv + vec2(0.0, -d.y)), tr = lumAt(cuv + vec2(d.x, -d.y));
-    float ml = lumAt(cuv + vec2(-d.x, 0.0)), mr = lumAt(cuv + vec2(d.x, 0.0));
-    float bl = lumAt(cuv + vec2(-d.x, d.y)), bc = lumAt(cuv + vec2(0.0, d.y)), br = lumAt(cuv + vec2(d.x, d.y));
+  if((u_src==1 || u_src==3) && (u_c5.x > 0.0 || u_c5.y > 0.0 || u_c5.z > 0.0)){
+    float tl, tc, tr, ml, mr, bl, bc, br;
+    if(u_src==1){
+      vec2 d = u_texel * 1.5 / max(u_fit.xy, vec2(0.05));
+      tl = lumAt(cuv + vec2(-d.x, -d.y)); tc = lumAt(cuv + vec2(0.0, -d.y)); tr = lumAt(cuv + vec2(d.x, -d.y));
+      ml = lumAt(cuv + vec2(-d.x, 0.0)); mr = lumAt(cuv + vec2(d.x, 0.0));
+      bl = lumAt(cuv + vec2(-d.x, d.y)); bc = lumAt(cuv + vec2(0.0, d.y)); br = lumAt(cuv + vec2(d.x, d.y));
+    } else {                          // animación: los vecinos ya calculados en el bucle de arriba
+      vec3 W = vec3(0.299, 0.587, 0.114);
+      tl = dot(gs[0].rgb, W); tc = dot(gs[1].rgb, W); tr = dot(gs[2].rgb, W);
+      ml = dot(gs[3].rgb, W); mr = dot(gs[5].rgb, W);
+      bl = dot(gs[6].rgb, W); bc = dot(gs[7].rgb, W); br = dot(gs[8].rgb, W);
+    }
     if(u_c5.x > 0.0){                 // contornos neón
       float gx = -tl - 2.0*ml - bl + tr + 2.0*mr + br, gy = -tl - 2.0*tc - tr + bl + 2.0*bc + br;
       float e = clamp(length(vec2(gx, gy))*2.0, 0.0, 1.0);
@@ -1514,7 +1544,7 @@ export class Renderer {
     const vw = o.frameRect || [0, 0, cw, ch];
     gl.uniform4f(L.u_frame, vw[0], vw[1], vw[2], vw[3]);
     gl.uniform1f(L.u_pix, fx.pixelate);
-    gl.uniform1f(L.u_blur, srcType === 1 ? fx.blur : 0);
+    gl.uniform1f(L.u_blur, srcType === 1 || srcType === 3 ? fx.blur : 0);
     gl.uniform1f(L.u_noise, fx.noise);
     gl.uniform1i(L.u_inv, fx.invert ? 1 : 0);
     gl.uniform1i(L.u_mirror, MIRROR[fx.mirror] ?? 0);
@@ -1522,7 +1552,9 @@ export class Renderer {
     gl.uniform1f(L.u_wave, fx.wave);
     gl.uniform1f(L.u_zoom, zoom);
     gl.uniform1f(L.u_rot, rot);
-    gl.uniform2f(L.u_scroll, ((fx.scrollX || 0) * o.time) % 1 + shakeX, ((fx.scrollY || 0) * o.time) % 1 + shakeY);
+    // Una animación no se repite al dar la vuelta: se desplaza sin saltos (la imagen sí da la vuelta).
+    const wrap = srcType === 3 ? 1000 : 1;
+    gl.uniform2f(L.u_scroll, ((fx.scrollX || 0) * o.time) % wrap + shakeX, ((fx.scrollY || 0) * o.time) % wrap + shakeY);
     gl.uniform1f(L.u_border, border);
     gl.uniform1f(L.u_glow, fx.borderGlow ?? 0.5);
     gl.uniform3fv(L.u_bcol, hexToRgb(fx.borderColor));

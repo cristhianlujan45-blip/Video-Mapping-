@@ -38,18 +38,90 @@ export function waitPhone(key, ms = 20000) {
   });
 }
 
+/** Imágenes llegadas por cable de un móvil: { frames, width, height } (para comprobarlo). */
+export const phoneFrames = (key) => { const p = phones.get(key); return p ? { frames: p.frames || 0, width: p.fw || 0, height: p.fh || 0 } : null; };
+
 /** Móviles conocidos en esta sesión, como cámaras para las listas. */
 export function listPhones() {
   return [...phones.values()].map(p => ({
-    id: p.key, label: p.name, kind: "phone", kindName: p.online ? "Móvil (Wi-Fi)" : "Móvil (desconectado)",
-    stream: "color", sensor: false, is3d: false, online: p.online, live: !!phoneStream(p.key), state: p.state,
+    id: p.key, label: p.name, kind: "phone", kindName: p.usb ? "Móvil (cable USB)" : p.online ? "Móvil (Wi-Fi)" : "Móvil (desconectado)",
+    stream: "color", sensor: false, is3d: false, online: p.online, live: !!phoneStream(p.key), state: p.state, usb: !!p.usb,
   }));
 }
 
 /** Conecta el receptor al WebSocket del programa (remote.js). */
 export function startPhoneCams(r) {
   remote = r;
-  return { handle, list: listPhones };
+  return { handle, frame: handleFrame, list: listPhones };
+}
+
+/**
+ * Imagen JPEG de un móvil por el WebSocket (móvil por cable USB: ahí WebRTC no llega).
+ * Formato: [largo del id][id][JPEG]. Se pinta en un lienzo y el lienzo se convierte en
+ * una cámara más (captureStream), así el resto del programa no nota la diferencia.
+ */
+export function handleFrame(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8.length < 4) return;
+  const n = u8[0], cam = new TextDecoder().decode(u8.subarray(1, 1 + n));
+  if (!cam) return;
+  const p = entry(cam);
+  p.lastFrame = performance.now();
+  watchUsb();
+  if (p.decoding) return;            // aún pintando la anterior: se salta esta (sin retraso acumulado)
+  p.decoding = true;
+  createImageBitmap(new Blob([u8.subarray(1 + n)], { type: "image/jpeg" })).then((bmp) => {
+    p.frames = (p.frames || 0) + 1; p.fw = bmp.width; p.fh = bmp.height;
+    // Primera imagen por cable (aunque quedara un video viejo por Wi-Fi de este móvil): se cambia a esta.
+    const fresh = !p.usb || !p.stream || !p.stream.getVideoTracks().some(t => t.readyState === "live");
+    if (fresh) {
+      try { p.pc?.close(); } catch {} p.pc = null;
+      for (const t of p.stream?.getTracks() || []) { try { t.stop(); } catch {} }
+      // Cada foto pasa a ser un fotograma de una pista de video de verdad (no depende de que la
+      // página esté pintando). Si el navegador no lo tiene, un lienzo con captureStream.
+      if (typeof MediaStreamTrackGenerator === "function" && typeof VideoFrame === "function") {
+        const gen = new MediaStreamTrackGenerator({ kind: "video" });
+        p.writer = gen.writable.getWriter(); p.canvas = null;
+        p.stream = new MediaStream([gen]);
+      } else {
+        p.writer = null;
+        if (!p.canvas) { p.canvas = document.createElement("canvas"); p.ctx = p.canvas.getContext("2d"); }
+        p.stream = p.canvas.captureStream(30);
+      }
+      p.usb = true; p.online = true;
+      p.state = "recibiendo (cable USB)";
+    }
+    if (p.writer) {
+      const vf = new VideoFrame(bmp, { timestamp: Math.round(performance.now() * 1000) });
+      bmp.close?.();
+      p.writer.write(vf).catch(() => { try { vf.close(); } catch {} });
+    } else {
+      if (p.canvas.width !== bmp.width || p.canvas.height !== bmp.height) { p.canvas.width = bmp.width; p.canvas.height = bmp.height; }
+      p.ctx.drawImage(bmp, 0, 0);
+      bmp.close?.();
+    }
+    if (fresh) {
+      for (const w of waiters.get(p.key) || []) w(p.stream);
+      waiters.delete(p.key);
+      notify(p.key);
+    }
+  }).catch(() => {}).finally(() => { p.decoding = false; });
+}
+// Un móvil por cable que deja de mandar imágenes (página cerrada, cable fuera): se da por desconectado.
+// (El vigilante arranca con la primera imagen por cable: así no queda un temporizador sin móviles.)
+let usbWatch = 0;
+function watchUsb() {
+  if (usbWatch) return;
+  usbWatch = setInterval(() => {
+    const now = performance.now();
+    for (const p of phones.values()) if (p.usb && p.stream && now - (p.lastFrame || 0) > 4000) endUsb(p, "sin imagen");
+  }, 1000);
+}
+function endUsb(p, state) {
+  try { p.writer?.close(); } catch {} p.writer = null;
+  for (const t of p.stream?.getTracks() || []) { try { t.stop(); } catch {} }
+  p.stream = null; p.usb = false; p.state = state;
+  notify(p.key);
 }
 
 /** Mensajes del servidor que son de los móviles. */
@@ -75,10 +147,10 @@ function onList(list) {
     p.online = true; p.clientId = c.id;
     // Un móvil que ya estaba enviando antes de abrir el programa: se le pide la oferta.
     const st = p.pc?.connectionState;
-    if (changed && (!p.pc || st === "failed" || st === "closed")) remote?.send({ type: "rtc", to: c.id, data: { want: "offer" } });
+    if (changed && !p.usb && (!p.pc || st === "failed" || st === "closed")) remote?.send({ type: "rtc", to: c.id, data: { want: "offer" } });
     if (changed) notify(p.key);
   }
-  for (const p of phones.values()) if (p.online && !seen.has(p.key)) { p.online = false; p.state = "desconectado"; notify(p.key); }
+  for (const p of phones.values()) if (p.online && !seen.has(p.key)) { p.online = false; p.state = "desconectado"; if (p.usb) endUsb(p, "desconectado"); else notify(p.key); }
 }
 
 async function onRtc(m) {

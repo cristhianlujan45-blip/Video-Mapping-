@@ -44,11 +44,16 @@ const fakeOllamaDir = fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-ollama-"));
 if (process.platform !== "win32") {
   fs.writeFileSync(path.join(fakeOllamaDir, "ollama"), `#!/bin/sh\nexec "${process.execPath}" "${path.join(here, "fixtures", "fake-ollama.mjs")}" "$@"\n`, { mode: 0o755 });
 }
+// Móvil Android por cable: un «adb» falso (empieza sin ningún móvil enchufado).
+const fakeAdb = path.join(fakeOllamaDir, "adb"), adbState = path.join(fakeOllamaDir, "adb-state.json"), adbLog = path.join(fakeOllamaDir, "adb-log.txt");
+fs.writeFileSync(adbState, JSON.stringify({ devices: [], model: "Redmi Note 15 Pro" })); fs.writeFileSync(adbLog, "");
+if (process.platform !== "win32") fs.writeFileSync(fakeAdb, `#!/bin/sh\nexec "${process.execPath}" "${path.join(here, "fixtures", "fake-adb.mjs")}" "$@"\n`, { mode: 0o755 });
 const app = await _electron.launch({
   executablePath: electronBin, cwd: desktop,
   args: [path.join(desktop, ".stage"), "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
   env: { ...process.env, PATH: fakeOllamaDir + path.delimiter + process.env.PATH, OLLAMA_HOST: "", FAKE_OLLAMA_STUCK: path.join(fakeOllamaDir, "stuck"),
-    LUMAMAP_PULL_STALL_MS: "1000", LUMAMAP_PULL_RETRY_MS: "100", ANTHROPIC_API_KEY: "", LUMAMAP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-e2e-")) },
+    LUMAMAP_PULL_STALL_MS: "1000", LUMAMAP_PULL_RETRY_MS: "100", ANTHROPIC_API_KEY: "",
+    ...(process.platform !== "win32" ? { LUMAMAP_ADB: fakeAdb, FAKE_ADB_STATE: adbState, FAKE_ADB_LOG: adbLog } : {}), LUMAMAP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-e2e-")) },
 });
 const win = await app.firstWindow();
 const errors = [];
@@ -200,6 +205,56 @@ await test("mando remoto: sin PIN no entra; con PIN controla cualquier parámetr
   const st = await new Promise((resolve) => { good.ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === "state") resolve(m.state); }; });
   assert.ok(Array.isArray(st.scenes) && st.lights && "snapshots" in st.lights);
   good.ws.close();
+});
+
+await test("móvil por cable USB: al enchufarlo (con la depuración aceptada) la app abre la cámara en el móvil sola y avisa", async () => {
+  if (process.platform === "win32") return;
+  const info = await win.evaluate(() => window.LumaDesktop.remoteInfo());
+  fs.writeFileSync(adbState, JSON.stringify({ devices: [["8d1c2f3a", "unauthorized"]], model: "Redmi Note 15 Pro" }));
+  await win.locator("#notices .notice", { hasText: "toca «Permitir»" }).waitFor({ timeout: 15000 });
+  fs.writeFileSync(adbState, JSON.stringify({ devices: [["8d1c2f3a", "device"]], model: "Redmi Note 15 Pro" }));
+  await win.locator("#notices .notice", { hasText: "Cámara abierta en el Redmi Note 15 Pro" }).waitFor({ timeout: 15000 });
+  const st = await win.evaluate(() => window.LumaDesktop.phoneUsb.status());
+  assert.deepEqual(st.phones.map(p => [p.serial, p.state]), [["8d1c2f3a", "open"]]);
+  const calls = fs.readFileSync(adbLog, "utf8").trim().split("\n").map(l => JSON.parse(l));
+  assert.ok(calls.some(c => c.join(" ") === `-s 8d1c2f3a reverse tcp:${info.port} tcp:${info.port}`), "el puerto del mando por el cable");
+  const open = calls.find(c => c.includes("am"));
+  assert.equal(open[open.indexOf("-d") + 1], `'http://localhost:${info.port}/phonecam.html?auto=1&usb=1&pin=${info.pin}&name=Redmi%20Note%2015%20Pro'`);
+  // La página que se abre en el móvil existe en esa dirección.
+  const page = await (await fetch(`http://127.0.0.1:${info.port}/phonecam.html`)).text();
+  assert.match(page, /phonecam-send\.js/);
+  // Desenchufado: el aviso se va.
+  fs.writeFileSync(adbState, JSON.stringify({ devices: [] }));
+  await win.locator("#notices .notice", { hasText: "Cámara abierta" }).waitFor({ state: "detached", timeout: 15000 });
+});
+
+await test("archivos pesados: entran al momento en la biblioteca, se convierten en segundo plano y quedan listos (video AVI y foto TIFF)", async () => {
+  const ff = path.join(desktop, "node_modules", "ffmpeg-static", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-heavy-"));
+  const avi = path.join(dir, "pesado.avi"), tif = path.join(dir, "foto.tiff");
+  const { execFileSync } = await import("node:child_process");
+  // Video MPEG-4 Part 2 en AVI (formato viejo que hay que convertir) y una foto TIFF.
+  execFileSync(ff, ["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=4", "-c:v", "mpeg4", "-q:v", "3", avi]);
+  execFileSync(ff, ["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x200:duration=1", "-frames:v", "1", tif]);
+  const n0 = await win.evaluate(() => window.__lumamap.S.project.media.length);
+  const chooser = win.waitForEvent("filechooser");
+  await win.evaluate(() => { window.__lumamap.actions.importMedia("library"); });
+  await (await chooser).setFiles([avi, tif]);
+  // Al momento: los dos en la biblioteca, «convirtiendo».
+  await win.waitForFunction((n0) => { const m = window.__lumamap.S.project.media; return m.length === n0 + 2 && m.slice(n0).every(x => x.pending); }, n0, { timeout: 15000 });
+  await win.locator("#notices .notice", { hasText: "Convirtiendo" }).waitFor({ timeout: 10000 });
+  // Y en segundo plano quedan listos, con miniatura y reproductor.
+  await win.waitForFunction((n0) => window.__lumamap.S.project.media.slice(n0).every(x => !x.pending && x.thumb), n0, { timeout: 120000 });
+  const r = await win.evaluate(async (n0) => {
+    const a = window.__lumamap, ms = a.S.project.media.slice(n0);
+    const { getMedia } = await import("./js/store.js");
+    const recs = await Promise.all(ms.map(m => getMedia(m.id)));
+    return ms.map((m, i) => [m.name, m.kind, m.width, m.height, recs[i]?.blob?.type || ""]);
+  }, n0);
+  assert.deepEqual(r, [["pesado.mp4", "video", 640, 360, "video/mp4"], ["foto.png", "image", 320, 200, "image/png"]]);
+  await win.locator("#notices .notice", { hasText: "Listo" }).first().waitFor({ timeout: 10000 });
+  await win.evaluate((n0) => { const a = window.__lumamap; a.S.project.media.splice(n0); a.changed({ panel: true }); document.querySelectorAll("#notices .notice").forEach(n => n.remove()); }, n0);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test("asistente: sin clave lo dice claro; una clave falsa no se guarda; la clave nunca llega a la página", async () => {

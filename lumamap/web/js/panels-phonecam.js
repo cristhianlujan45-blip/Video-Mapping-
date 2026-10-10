@@ -6,6 +6,7 @@ import { h, row, btn, hint, toast, dialog, closeDialog } from "./ui.js";
 import { qrSvg } from "./qr.js";
 import { phoneUrls, netLabel, listPhones, onPhoneChange } from "./phonecam.js";
 import { calibOf } from "./interactive.js";
+import { usbGuide } from "./phoneusb-ui.js";
 
 /** Pone esta cámara en la proyección interactiva (y en sus superficies). */
 export function useCameraForInteractive(app, id, { sensor = false } = {}) {
@@ -60,10 +61,12 @@ export async function openPhoneCam(app) {
       nets.length > 1 ? h("div", { class: "chips" }, ...nets.map((n, i) => h("button", { class: `chip ${i === pick ? "on" : ""}`, onclick: () => { pick = i; draw(); } }, netLabel(n)))) : null,
       h("p", { class: "pcurl" }, h("code", {}, cur.url), info.pin ? h("span", {}, ` · Código (PIN): `, h("b", {}, info.pin)) : null),
       h("h4", { class: "res-group" }, "Móviles conectados"), live,
-      h("details", { class: "fold" }, h("summary", {}, "Por cable USB"),
+      h("details", { class: "fold", open: !!globalThis.LumaDesktop?.phoneUsb }, h("summary", {}, "Por cable USB (lo más fácil)"),
         h("ul", {},
-          h("li", {}, "Android 14 o más nuevo: conecta el cable, baja la notificación «USB» y elige «Cámara web». El móvil aparece como una cámara más en la lista (sin esta página)."),
-          h("li", {}, "Cualquier móvil: activa «Anclaje de red por USB» (Android) o «Compartir Internet» por cable (iPhone) y usa el código de arriba eligiendo la red «Cable USB»."))),
+          globalThis.LumaDesktop?.phoneUsb ? h("li", {}, h("b", {}, "Android: enchufa el cable y listo. "), "LumaMap abre la cámara en el móvil solo y la usa para lo interactivo. Solo hace falta activar una vez la «Depuración USB» en el móvil. ",
+            h("button", { class: "btn small", onclick: () => usbGuide() }, "Cómo activarla")) : null,
+          h("li", {}, "Android 14 o más nuevo (si el móvil lo trae): baja la notificación «USB» y elige «Cámara web». El móvil aparece como una cámara más en la lista."),
+          h("li", {}, "iPhone: activa «Compartir Internet» por cable y usa el código de arriba eligiendo la red «Cable USB»."))),
       h("details", { class: "fold" }, h("summary", {}, "¿Y la profundidad 3D?"),
         h("p", {}, "Un móvil normal no mide distancias como un sensor 3D (Kinect, RealSense). Para tocar burbujas y los juegos interactivos no hace falta: la IA ve la silueta de cada persona en la imagen del móvil, y el «Modo sensor» aprende la zona vacía y marca lo que entra."),
         h("p", {}, h("b", {}, "Usar el sensor LiDAR del iPhone o el ToF de algunos Android: EN DESARROLLO.")))].filter(Boolean));
