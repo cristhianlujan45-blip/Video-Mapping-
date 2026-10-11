@@ -913,13 +913,14 @@ await test("VJ automático: set desde una frase, mezcla sola al tempo (clips y e
   // Varios golpes después (240 BPM sin micrófono = estructura de tema al tempo): cambió de clip y los colores son los del set.
   const seen = new Set();
   for (let i = 0; i < 40; i++) {
-    const s = await page.evaluate(() => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[a.S.project.surfaces[0].id]; return { gen: (l.next || l).source.gen, c: (l.next || l).source.color, st: a.vjStatus() }; });
-    if (s.gen) seen.add(s.gen + "|" + s.c);
+    const s = await page.evaluate(() => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[a.S.project.surfaces[0].id]; const src = (l.next || l).source; return { type: src.type, sh: src.shaderId, gen: src.gen, c: src.color, st: a.vjStatus() }; });
+    // (los shaders traen sus propios colores: solo las animaciones se recolorean con la paleta)
+    if (s.type === "shader") seen.add("shader:" + s.sh); else if (s.gen) seen.add(s.gen + "|" + s.c);
     if (seen.size >= 2 && i > 10) break;
     await page.waitForTimeout(500);
   }
   assert.ok(seen.size >= 2, "clips usados: " + [...seen].join(" "));
-  assert.ok([...seen].every(x => /#ff1a1a|#ffffff/i.test(x)), "colores del set: " + [...seen].join(" "));
+  assert.ok([...seen].filter(x => !x.startsWith("shader:")).every(x => /#ff1a1a|#ffffff/i.test(x)), "colores del set: " + [...seen].join(" "));
   const st = await page.evaluate(() => window.__lumamap.vjStatus());
   assert.ok(st && st.bpm >= 200 && st.sectionName, JSON.stringify(st));
   const mid = await page.evaluate(() => window.__lumamap.history.undoStack.length);
@@ -1003,26 +1004,28 @@ await test("plugins en 4K: con la composición en 4K el shader se dibuja a 2160 
 });
 await test("comparador antes/después en Efectos: a un lado de la línea el original, al otro con el efecto (y no sale en la proyección)", async () => {
   await page.bringToFront();
+  // Solo se ve esta superficie (otras pruebas dejan rojo en las demás, p. ej. la paleta del VJ).
   const id = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces[0]; a.select(s.id); a.actions.setSource({ type: "color", color: "#ff0000" });
+    window.__hiddenForCompare = a.S.project.surfaces.filter(x => x.id !== s.id && !x.hidden).map(x => x.id);
+    for (const x of a.S.project.surfaces) if (window.__hiddenForCompare.includes(x.id)) x.hidden = true;
     a.edit(() => { a.lookSel().fx.invert = true; }); a.openTab("fx"); return s.id; });
-  // Cuenta píxeles rojos (original) y cian (negativo) en la vista, justo después de dibujarse.
-  // (el lienzo WebGL no guarda el dibujo: a veces se lee vacío, así que se mira en varios fotogramas)
-  const count = () => page.evaluate(async () => {
-    let red = 0, cyan = 0;
-    for (let k = 0; k < 12; k++) {
-      const r = await new Promise(res => requestAnimationFrame(() => {
-        const gl = document.querySelector("#gl"), c = Object.assign(document.createElement("canvas"), { width: gl.width >> 2, height: gl.height >> 2 }), g = c.getContext("2d");
-        g.drawImage(gl, 0, 0, c.width, c.height);
-        const d = g.getImageData(0, 0, c.width, c.height).data; let rd = 0, cy = 0;
-        for (let i = 0; i < d.length; i += 4) { if (d[i] > 200 && d[i + 1] < 60 && d[i + 2] < 60) rd++; if (d[i] < 60 && d[i + 1] > 200 && d[i + 2] > 200) cy++; }
-        res({ rd, cy });
-      }));
-      red = Math.max(red, r.rd); cyan = Math.max(cyan, r.cy);
-    }
-    return { red, cyan };
-  });
+  // Cuenta píxeles rojos (original) y cian (negativo) en una captura de la pantalla (lo que se ve de verdad;
+  // el lienzo WebGL no guarda el dibujo y leerlo directamente a veces da vacío).
+  const count = async () => {
+    const box = await page.locator("#gl").boundingBox();
+    const png = (await page.screenshot({ clip: box })).toString("base64");
+    return page.evaluate(async (b64) => {
+      const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+      const c = Object.assign(document.createElement("canvas"), { width: img.width >> 1, height: img.height >> 1 }), g = c.getContext("2d");
+      g.drawImage(img, 0, 0, c.width, c.height);
+      const d = g.getImageData(0, 0, c.width, c.height).data; let red = 0, cyan = 0;
+      for (let i = 0; i < d.length; i += 4) { if (d[i] > 200 && d[i + 1] < 60 && d[i + 2] < 60) red++; if (d[i] < 60 && d[i + 1] > 200 && d[i + 2] > 200) cyan++; }
+      return { red, cyan };
+    }, png);
+  };
   await page.waitForTimeout(300);
   const off = await count();
+  if (!(off.cyan > 50)) console.log("DIAG-CMP", await page.evaluate((id) => { const a = window.__lumamap, l = a.scene().looks[id], s = a.S.project.surfaces.find(x => x.id === id); return JSON.stringify({ src: l.source.type, color: l.source.color, next: !!l.next, mix: l.mix, hidden: l.hidden, shidden: s.hidden, opacity: l.opacity, alpha: l.fx.opacity, inv: l.fx.invert, screen: s.screen, view: a.S.viewScreen, black: a.S.blackout, master: a.S.master, playing: a.S.playing, fx: Object.fromEntries(Object.entries(l.fx).filter(([k, v]) => v && v !== 1 && k !== "invert")) }); }, id));
   assert.ok(off.cyan > 50 && off.red < 30, "sin comparar: todo con el efecto " + JSON.stringify(off));   // (otras superficies pueden tener algo de rojo)
   await page.locator("#panelBody .fxcompare").getByText("Comparar antes / después").click();
   await page.waitForFunction((id) => window.__lumamap.S.compare?.id === id, id);
@@ -1036,7 +1039,8 @@ await test("comparador antes/después en Efectos: a un lado de la línea el orig
   await page.evaluate(() => window.__lumamap.openTab(null));
   await page.waitForTimeout(300);
   assert.ok((await count()).red <= off.red + 5, "fuera de Efectos no se compara");
-  await page.evaluate(() => { const a = window.__lumamap; a.S.compare = null; a.edit(() => { a.lookSel().fx.invert = false; }); });
+  await page.evaluate(() => { const a = window.__lumamap; a.S.compare = null; a.edit(() => { a.lookSel().fx.invert = false; });
+    for (const x of a.S.project.surfaces) if ((window.__hiddenForCompare || []).includes(x.id)) x.hidden = false; a.changed({ panel: true }); });
 });
 await test("móvil: nada amontonado (de pie 4 + «Más», tumbado 7 + «Más», nada cortado ni fuera de la pantalla)", async () => {
   for (const [vp, max] of [[{ width: 393, height: 852 }, 5], [{ width: 852, height: 393 }, 8]]) {
