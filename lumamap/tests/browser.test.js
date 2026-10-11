@@ -40,7 +40,7 @@ page.on("pageerror", e => errors.push(e.message));
 page.on("console", m => { if (m.type() === "error" && /TypeError|ReferenceError|RangeError|SyntaxError/.test(m.text())) errors.push("consola: " + m.text().slice(0, 300)); });
 // Todos los errores de consola (también los del bucle de la app), para el informe de una prueba que falla.
 const consoleErrs = [];
-page.on("console", m => { if (m.type() === "error") { consoleErrs.push(m.text().slice(0, 400)); if (consoleErrs.length > 200) consoleErrs.shift(); } });
+page.on("console", m => { if (m.type() === "error" || /WebMediaPlayer|too many/i.test(m.text())) { consoleErrs.push(m.text().slice(0, 400)); if (consoleErrs.length > 200) consoleErrs.shift(); } });
 // Si una prueba falla: captura de pantalla y qué hay abierto (diálogo, pestaña), para ver la causa en la CI.
 let shotN = 0;
 setOnFail(async (name) => {
@@ -839,7 +839,8 @@ await test("móvil por cable USB: la página abierta por el cable manda la cáma
     const cs = await listCameras();
     const pf = phoneFrames(cal.camId) || {};
     return { camId: cal.camId, w: cam.el.videoWidth, bright: sum / (64 * 36 * 3), recv, listed: cs.find(c => c.id === cal.camId)?.kindName,
-      diag: JSON.stringify({ fw: pf.width, fh: pf.height, paused: cam.el.paused, rs: cam.el.readyState, h: cam.el.videoHeight, live: cam.el.srcObject?.getVideoTracks?.().map(t => t.readyState) }) };
+      diag: JSON.stringify({ fw: pf.width, fh: pf.height, paused: cam.el.paused, rs: cam.el.readyState, h: cam.el.videoHeight, live: cam.el.srcObject?.getVideoTracks?.().map(t => t.readyState),
+        err: cam.el.error?.message || null, ns: cam.el.networkState, videos: document.querySelectorAll("video").length }) };
   });
   assert.match(r.camId, /^phone:/);
   assert.ok(r.w >= 320, `imagen del móvil ${r.w} ${r.diag}`);
