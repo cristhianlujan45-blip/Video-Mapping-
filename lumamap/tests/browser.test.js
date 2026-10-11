@@ -1002,13 +1002,21 @@ await test("comparador antes/después en Efectos: a un lado de la línea el orig
   const id = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces[0]; a.select(s.id); a.actions.setSource({ type: "color", color: "#ff0000" });
     a.edit(() => { a.lookSel().fx.invert = true; }); a.openTab("fx"); return s.id; });
   // Cuenta píxeles rojos (original) y cian (negativo) en la vista, justo después de dibujarse.
-  const count = () => page.evaluate(() => new Promise(res => requestAnimationFrame(() => {
-    const gl = document.querySelector("#gl"), c = Object.assign(document.createElement("canvas"), { width: gl.width >> 2, height: gl.height >> 2 }), g = c.getContext("2d");
-    g.drawImage(gl, 0, 0, c.width, c.height);
-    const d = g.getImageData(0, 0, c.width, c.height).data; let red = 0, cyan = 0;
-    for (let i = 0; i < d.length; i += 4) { if (d[i] > 200 && d[i + 1] < 60 && d[i + 2] < 60) red++; if (d[i] < 60 && d[i + 1] > 200 && d[i + 2] > 200) cyan++; }
-    res({ red, cyan });
-  })));
+  // (el lienzo WebGL no guarda el dibujo: a veces se lee vacío, así que se mira en varios fotogramas)
+  const count = () => page.evaluate(async () => {
+    let red = 0, cyan = 0;
+    for (let k = 0; k < 12; k++) {
+      const r = await new Promise(res => requestAnimationFrame(() => {
+        const gl = document.querySelector("#gl"), c = Object.assign(document.createElement("canvas"), { width: gl.width >> 2, height: gl.height >> 2 }), g = c.getContext("2d");
+        g.drawImage(gl, 0, 0, c.width, c.height);
+        const d = g.getImageData(0, 0, c.width, c.height).data; let rd = 0, cy = 0;
+        for (let i = 0; i < d.length; i += 4) { if (d[i] > 200 && d[i + 1] < 60 && d[i + 2] < 60) rd++; if (d[i] < 60 && d[i + 1] > 200 && d[i + 2] > 200) cy++; }
+        res({ rd, cy });
+      }));
+      red = Math.max(red, r.rd); cyan = Math.max(cyan, r.cy);
+    }
+    return { red, cyan };
+  });
   await page.waitForTimeout(300);
   const off = await count();
   assert.ok(off.cyan > 50 && off.red < 30, "sin comparar: todo con el efecto " + JSON.stringify(off));   // (otras superficies pueden tener algo de rojo)

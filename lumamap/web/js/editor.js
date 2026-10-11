@@ -2858,11 +2858,11 @@ function tick(now) {
   pads?.poll();
   // Modulaciones del motor de parámetros (audio, tracking, mezclas): solo en el render.
   // «Animar al ritmo»: cada LFO mueve su parámetro con el tempo (como modulación).
-  lfoClock.tick(S.clock, S.levels?.bpm || S.project.settings.bpm || 120, S.project.settings.lfos, (l, w) => {
+  lfoClock.tick(now / 1000, S.levels?.bpm || S.project.settings.bpm || 120, S.project.settings.lfos, (l, w) => {
     const d = describe(app, l.param);
     if (!d || d.kind === "trigger") return;
     params.modulateExt("lfo:" + l.id, l.param, d.kind === "bool" ? (w >= 0.5 ? 1 : 0) : d.min + (d.max - d.min) * w, "lfo");
-  });
+  }, S.playing);
   deckTick();
   S.mods = params.modList(now);
   const RP = applyModList(S.project, S.master, S.mods);

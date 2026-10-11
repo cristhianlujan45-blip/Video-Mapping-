@@ -39,14 +39,16 @@ export function shapeAt(shape, cycles) {
 
 /**
  * Reloj de golpes que sigue el tempo (si el tempo cambia, la fase no salta) y aplica los LFO.
+ * timeSec es tiempo real (no el reloj de la app, que se frena si van pocos fotogramas): el ritmo
+ * no se retrasa en un equipo lento. Con playing = false el reloj se para.
  * apply(lfo, value01) recibe cada uno ya mezclado en su rango.
  */
 export function createLfoClock() {
   let beat = 0, last = null;
   return {
     get beat() { return beat; },
-    tick(timeSec, bpm, lfos, apply) {
-      if (last !== null && timeSec >= last) beat += (timeSec - last) * Math.max(20, Math.min(300, bpm || 120)) / 60;
+    tick(timeSec, bpm, lfos, apply, playing = true) {
+      if (playing && last !== null && timeSec >= last) beat += Math.min(2, timeSec - last) * Math.max(20, Math.min(300, bpm || 120)) / 60;
       last = timeSec;
       for (const l of lfos) {
         if (!l.on) continue;
