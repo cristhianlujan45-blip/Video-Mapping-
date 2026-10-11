@@ -58,7 +58,9 @@ await test("pestañas del modo simple: cada una abre al momento", async () => {
   await page.getByText("Cubo 3D").click().catch(() => {});
   await page.waitForTimeout(500);
   // El 3D carga su motor aparte (three.js, bajo demanda): no entra en esta medida.
-  const tabs = await page.evaluate(() => [...document.querySelectorAll("#dock button[data-tab]")].map(b => b.dataset.tab).filter(t => t !== "3d"));
+  // Las de la barra y las que van en «Más» (en el móvil de pie la barra lleva 4 + «Más»).
+  const tabs = await page.evaluate(() => [...document.querySelectorAll("#dock button[data-tab]")].map(b => b.dataset.tab)
+    .concat((document.querySelector("#dock button.more")?.dataset.more || "").split(" ").filter(Boolean)).filter(t => t !== "3d"));
   assert.ok(tabs.length >= 5, "pestañas: " + tabs.join(","));
   let worst = 0, worstTab = "";
   for (const t of tabs) {

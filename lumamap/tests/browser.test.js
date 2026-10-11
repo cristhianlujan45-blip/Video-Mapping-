@@ -179,7 +179,7 @@ await test("pestaña Animaciones: sin selección crea una superficie a pantalla 
 await test("biblioteca de efectos: aplicar «Contorno neón» y combinar «Espejo selfie»", async () => {
   await page.evaluate(() => window.__lumamap.openTab("fx"));
   await page.locator(".fxlib .chip", { hasText: "Contorno neón" }).first().click();
-  await page.evaluate(() => { document.querySelectorAll(".toggle input")[0].click(); });   // Combinar
+  await page.evaluate(() => { [...document.querySelectorAll("#panelBody .toggle")].find(t => /Combinar con el efecto actual/.test(t.textContent)).querySelector("input").click(); });   // Combinar
   await page.locator(".fxlib .chip", { hasText: "Espejo selfie" }).first().click();
   const fx = await page.evaluate(() => window.__lumamap.lookSel().fx);
   assert.equal(fx.edges, 1); assert.equal(fx.flipX, true);
