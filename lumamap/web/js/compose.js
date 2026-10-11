@@ -10,6 +10,12 @@ import { surfaceAspect } from "./math.js";
 import { ShaderCache, spectrumFromLevels } from "./isf.js";
 import { getShader, onPluginsChange } from "./plugins.js";
 import { DEFAULT_FX } from "./model.js";
+const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
+/** Alto máximo de los shaders de plugins: lo elegido en Calidad, o 4K en PC y 1080p en móvil. */
+export function shaderCap(project) {
+  const r = project?.settings?.output?.shaderRes;
+  return [720, 1080, 1440, 2160].includes(+r) ? +r : (MOBILE ? 1080 : 2160);
+}
 const NEUTRAL_FX = DEFAULT_FX();
 
 export class Compositor {
@@ -82,12 +88,13 @@ export class Compositor {
         return e ? { id: "o3:" + key, el: e.canvas, key: e.version } : null;
       }
       case "shader": {
-        // Shader ISF de un plugin: se dibuja a la medida de la superficie (como mucho 1280×720).
+        // Shader ISF de un plugin: se dibuja a la medida de la superficie, hasta 4K (Calidad de la salida).
         const sh = getShader(src.shaderId);
         if (!sh) return null;
         const sa = surfaceAspect(s);
-        const hgt = Math.round(Math.max(144, Math.min(720, sa.h || 540)));
-        const wid = Math.round(Math.max(64, Math.min(1280, hgt * sa.aspect)));
+        const cap = shaderCap(this.project);
+        const hgt = Math.round(Math.max(144, Math.min(cap, sa.h || 540)));
+        const wid = Math.round(Math.max(64, Math.min(4096, hgt * sa.aspect)));
         const key = scene.id + ":" + s.id + k;
         if (!k) this.shaders.adopt(key, key + ":B", sh.id);
         // Entradas del shader: la cámara (o un video de la biblioteca) y el sonido.
@@ -150,6 +157,7 @@ export class Compositor {
    */
   frame(project, o) {
     if (!this.shared) this.frameNo = (this.frameNo || 0) + 1;   // las salidas compartidas siguen el fotograma del editor
+    this.project = project;
     this.r.begin(o.clear || [0, 0, 0, 1]);
     if (o.blackout) return;
     for (const s of project.surfaces) {
@@ -189,6 +197,7 @@ export class Compositor {
  * (píxeles del lienzo, y desde arriba).
  */
 Compositor.prototype.drawFaces = function (project, o, tiles) {
+  this.project = project;
   if (!this.shared) this.frameNo = (this.frameNo || 0) + 1;
   const gl = this.r.gl, H = this.r.canvas.height;
   this.r.begin([0, 0, 0, 1]);

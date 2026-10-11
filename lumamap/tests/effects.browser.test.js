@@ -55,6 +55,8 @@ const r = await page.evaluate(async () => {
     out.glErr |= gl.getError();
   }
   for (const [id, label] of STYLES) { const l = M.createLook(img); l.fx = { ...M.DEFAULT_FX(), style: id }; const a = shot(l, 1.3); out.styles.push({ name: label, d: diff(a, baseImg), mean: mean(a) }); }
+  // Resolución del estilo HD/4K: más celdas → la imagen cambia (y sigue viéndose).
+  out.detail = ["ascii", "pixeldither", "oro"].map(id => { const l = M.createLook(img); l.fx = { ...M.DEFAULT_FX(), style: id, styleSize: 0.8 }; const a = shot(l, 1.3); l.fx.styleDetail = 4; const b = shot(l, 1.3); return { id, d: diff(a, b), mean: mean(b) }; });
   for (const G of M.GENERATORS) {
     const l = M.createLook({ type: "gen", gen: G.id, color: "#00e5ff", color2: "#ff00aa" });
     let s = 0, m = 0, dt = 0, prev = null;
@@ -102,6 +104,10 @@ await test(`${r.fx.length} efectos de la biblioteca cambian una imagen (y ningun
 });
 await test("los mismos efectos también funcionan sobre una animación (desplazar, mosaico, desenfoque, RGB, contornos…)", () => {
   const bad = r.fxAnim.filter(x => !NEUTRAL.has(x.name) && !COLOR_DEPENDENT.test(x.name) && x.d < 1).map(x => `${x.name} (${x.d.toFixed(1)})`);
+  assert.deepEqual(bad, []);
+});
+await test("estilos en HD/4K: más detalle (más celdas) sin quedar en negro", () => {
+  const bad = r.detail.filter(x => x.d < 1 || x.mean < 2).map(x => `${x.id} (${x.d.toFixed(1)})`);
   assert.deepEqual(bad, []);
 });
 await test(`${r.styles.length - 1} estilos de imagen (ASCII, dither, Game Boy…) se ven`, () => {

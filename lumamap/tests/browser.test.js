@@ -968,6 +968,28 @@ await test("como Resolume: mesa de clips (lanzar casilla y columna, al golpe y a
   await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.deck.cells = {}; a.S.project.settings.deck.quantize = "off"; a.actions.setBpm(120); a.S.liveFade = 0.3; a.openTab(null); });
   await page.keyboard.press("Escape");
 });
+await test("plugins en 4K: con la composición en 4K el shader se dibuja a 2160 líneas (o a lo que se elija en Calidad)", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, P = a.S.project, M = await import("./js/model.js");
+    const old = { w: P.width, h: P.height, res: P.settings.output.shaderRes };
+    P.width = 3840; P.height = 2160;
+    const s = M.createQuad({ name: "4K", corners: M.rectCorners(0, 0, 3840, 2160) });
+    M.addSurface(P, s, { type: "shader", shaderId: "fiesta-neon/0", speed: 1 });
+    const { getShader } = await import("./js/plugins.js");
+    const sid = getShader("fiesta-neon/0") ? "fiesta-neon/0" : (await import("./js/model.js")).ANIM_LIBRARY.find(x => x.shader && !x.shader.startsWith("virales-camara"))?.shader;
+    M.lookOf(a.scene(), s.id).source.shaderId = sid;
+    a.changed();
+    const sizeOf = async () => { for (let i = 0; i < 60; i++) { await new Promise(r => setTimeout(r, 100)); const e = a.compositor().shaders.out.get(a.scene().id + ":" + s.id); if (e?.canvas.height > 0) return [e.canvas.width, e.canvas.height]; } return null; };
+    const auto = await sizeOf();
+    P.settings.output.shaderRes = 1080; a.changed();
+    await new Promise(r => setTimeout(r, 400));
+    const hd = await sizeOf();
+    P.surfaces = P.surfaces.filter(x => x.id !== s.id); P.width = old.w; P.height = old.h; P.settings.output.shaderRes = old.res; a.changed({ panel: true });
+    return { auto, hd };
+  });
+  assert.deepEqual(r.auto, [3840, 2160], "auto en el PC: 4K");
+  assert.deepEqual(r.hd, [1920, 1080], "elegido 1080p");
+});
 await test("comparador antes/después en Efectos: a un lado de la línea el original, al otro con el efecto (y no sale en la proyección)", async () => {
   await page.bringToFront();
   const id = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces[0]; a.select(s.id); a.actions.setSource({ type: "color", color: "#ff0000" });

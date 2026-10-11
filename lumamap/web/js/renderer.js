@@ -1572,7 +1572,9 @@ export class Renderer {
     gl.uniform3fv(L.u_keyCol, hexToRgb(fx.keyColor || "#00ff00"));
     gl.uniform2f(L.u_flip, fx.flipX ? 1 : 0, fx.flipY ? 1 : 0);
     const sti = STYLE_INDEX[fx.style] || 0;
-    gl.uniform4f(L.u_sty, sti, 14 + (1 - (fx.styleSize ?? 0.5)) * 110, fx.styleGlow ?? 0.5, 0);
+    // Detalle HD/4K: más celdas (letras, puntos, píxeles más finos) para salidas grandes.
+    const det = Math.max(1, Math.min(4, +fx.styleDetail || 1));
+    gl.uniform4f(L.u_sty, sti, (14 + (1 - (fx.styleSize ?? 0.5)) * 110) * det, fx.styleGlow ?? 0.5, 0);
     gl.uniform3fv(L.u_styCol, hexToRgb(fx.styleColor || STYLES[sti]?.[2] || "#39ff6a"));
     gl.uniform2f(L.u_texel, srcType === 1 ? 1 / Math.max(1, o.tex.w) : 0, srcType === 1 ? 1 / Math.max(1, o.tex.h) : 0);
 

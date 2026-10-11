@@ -658,6 +658,9 @@ const fx = {
           draggable(b, () => ({ label: name, apply: (app) => app.edit(() => { const l = app.lookSel(); if (l) { l.fx.style = id; l.fx.styleColor = ""; } }) })); return b; })),
         (f.style || "none") !== "none" ? h("div", {},
           sl("styleSize", (v) => v < 0.34 ? "Pequeño" : v < 0.67 ? "Medio" : "Grande"),
+          h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Resolución del estilo")),
+          segmented({ options: [["1", "Normal"], ["2", "HD ×2"], ["4", "4K ×4"]], value: String(f.styleDetail || 1), small: true, onChange: (v) => app.edit(() => { f.styleDetail = +v; }) }),
+          hint("HD y 4K ponen más letras, puntos y píxeles (más finos). Se nota sobre todo con la composición en 4K (Proyector → Calidad)."),
           sl("styleGlow", pct),
           swatches({ label: "Color (Matrix, números, dither)", value: f.styleColor || STYLES.find(x => x[0] === f.style)?.[2] || "#39ff6a", palette: ["#39ff6a", "#3dffb0", "#ffffff", "#ff4fd8", "#c6ff1a", "#ffb000", "#00e5ff", "#ff3b3b"], onChange: set("styleColor") })) : null),
       fold("Borde neón (líneas sobre el contorno)", f.border > 0,
@@ -989,7 +992,10 @@ const output = {
       segmented({ options: [[24, "24"], [25, "25"], [30, "30"], [50, "50"], [60, "60"], [120, "Máx."]], value: O.fps, small: true, onChange: setO("fps") }),
       h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Calidad de render")),
       segmented({ options: [[0.5, "Rápida ½"], [0.75, "Media"], [1, "Alta"], [1.5, "Ultra 1.5×"], [2, "Súper 2×"]], value: O.renderScale, small: true, onChange: setO("renderScale") }),
-      hint("Ultra y Súper suavizan los bordes (supermuestreo); Rápida ayuda en equipos lentos.")));
+      hint("Ultra y Súper suavizan los bordes (supermuestreo); Rápida ayuda en equipos lentos."),
+      h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Resolución de los plugins (shaders)")),
+      segmented({ options: [["auto", "Auto"], ["720", "720p"], ["1080", "1080p"], ["1440", "2K"], ["2160", "4K"]], value: String(O.shaderRes || "auto"), small: true, onChange: (v) => setO("shaderRes")(v === "auto" ? "auto" : +v) }),
+      hint("Auto: hasta 4K en el PC y 1080p en el móvil (para que vaya fluido). Nunca más que la composición.")));
     wrap.append(fold("Color del proyector", false,
       slider({ label: "Brillo", min: 0, max: 2, value: O.brightness, def: 1, fmt: pct, onInput: setO("brightness") }),
       slider({ label: "Contraste", min: 0, max: 2, value: O.contrast, def: 1, fmt: pct, onInput: setO("contrast") }),

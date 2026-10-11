@@ -368,7 +368,7 @@ export const DEFAULT_FX = () => ({
   duotone: 0, duoA: "#1a0033", duoB: "#00e5ff",
   vignette: 0, scanlines: 0, halftone: 0, edges: 0, sharpen: 0, emboss: 0,
   // Estilos de imagen (ASCII, semitonos, dither, Game Boy, térmica… ver renderer.js STYLES)
-  style: "none", styleSize: 0.5, styleGlow: 0.5, styleColor: "",
+  style: "none", styleSize: 0.5, styleGlow: 0.5, styleColor: "", styleDetail: 1,   // detalle: 1 normal · 2 HD · 4 4K (celdas ×N)
   // Cámara y recortes
   flipX: false, flipY: false, chromaKey: 0, keyColor: "#00ff00", keySoft: 0.1, lumaKey: 0, lumaSoft: 0.05,
 });
@@ -770,6 +770,7 @@ export function defaultSettings() {
     // orientación del proyector y bordes suaves para unir varios proyectores.
     output: {
       fps: 60, renderScale: 1,
+      shaderRes: "auto",   // resolución de los shaders de plugins: auto (4K en PC, 1080p en móvil) · 720 · 1080 · 1440 · 2160
       brightness: 1, contrast: 1, saturation: 1,
       flipH: false, flipV: false, rotate: 0,
       softEdge: { left: 0, right: 0, top: 0, bottom: 0, curve: 2.2 },
