@@ -62,7 +62,10 @@ await page.waitForTimeout(800);
 await page.getByText("Cubo 3D").click();
 // Sin tarjeta gráfica (SwiftShader) la vista previa a resolución completa va a ~5 fps y cada clic
 // de Playwright espera fotogramas: calidad «baja» como la app elige sola en estos equipos (salida igual).
-await page.evaluate(() => window.__lumamap.actions.applyQuality("low"));
+// Y vista previa a ¼: a ½ el dibujo por software ocupa los 4 núcleos de la CI (~10 fps) y deja sin CPU
+// a todo lo demás (el servidor de la prueba tardó >30 s en servir la página en un equipo lento);
+// a ¼ va a sus 30 fps con CPU de sobra. La salida y lo que comprueban las pruebas no cambian.
+await page.evaluate(() => { const a = window.__lumamap.actions; a.applyQuality("low"); a.setPreview({ scale: 0.25 }); });
 await page.waitForTimeout(300);
 
 const toScreen = (p) => page.evaluate(([x, y]) => {
