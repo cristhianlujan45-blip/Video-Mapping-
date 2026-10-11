@@ -73,10 +73,20 @@ jobs:
           npm i --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
       # Cada paso se ejecuta aunque falle el anterior: así se ve todo lo que falla de una vez.
-      - name: Pruebas en el navegador
+      # La batería del navegador en dos tandas, cada una con su navegador limpio (en un solo
+      # navegador de 35 minutos la máquina de la CI se satura y las últimas pruebas fallan por tiempo).
+      - name: Pruebas en el navegador (1/2)
         working-directory: lumamap
         env:
           SHOTS_DIR: ${{ runner.temp }}/shots
+          PART: "1"
+        run: node tests/browser.test.js
+      - name: Pruebas en el navegador (2/2 · móviles, plugins, VJ y lo de Resolume)
+        if: success() || failure()
+        working-directory: lumamap
+        env:
+          SHOTS_DIR: ${{ runner.temp }}/shots
+          PART: "2"
         run: node tests/browser.test.js
       - name: Todos los efectos, estilos y animaciones (GPU por software)
         if: success() || failure()

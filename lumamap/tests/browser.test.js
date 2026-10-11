@@ -2,7 +2,9 @@
 // Requiere Playwright: `npm i -D playwright && npx playwright install chromium`
 // (o PLAYWRIGHT_MODULE=/ruta/a/playwright/index.mjs). Ejecuta: npm run test:browser
 import { createServer, startHttps } from "../server/index.js";
-import { test, report, setOnFail } from "./harness.js";
+import { test, report, setOnFail, setParts } from "./harness.js";
+// Tanda 2 (PART=2): móviles, plugins, VJ y lo de Resolume; la tanda 1 (PART=1) es el resto.
+setParts(/^(móvil como cámara|móvil por cable|plugins:|VJ automático|como Resolume|plugins en 4K|comparador|móvil: nada amontonado)/);
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
@@ -29,12 +31,8 @@ await new Promise(r => srv.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${srv.address().port}/`;
 // https propio (cámara del móvil): en el primer puerto libre desde uno al azar.
 const httpsPort = await startHttps({ want: 20000 + Math.floor(Math.random() * 20000), dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-tls-")), host: "127.0.0.1" });
-// Igual que la app de escritorio (desktop/main.js): una ventana tapada sigue dibujando y sus videos
-// (cámaras) no se pausan; si no, el editor se congela cuando la ventana del «móvil» queda delante.
 const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
-  "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
-  "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
-  "--disable-features=BackgroundVideoTrackOptimization,BackgroundVideoPauseOptimization"] });
+  "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera", "midi"] });
 const page = await ctx.newPage();
 const errors = [];

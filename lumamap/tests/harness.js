@@ -4,8 +4,14 @@ let pass = 0, fail = 0, onFail = null;
 export function setOnFail(fn) { onFail = fn; }
 // ONLY=texto (expresión regular) ejecuta solo las pruebas cuyo nombre coincide.
 const only = process.env.ONLY ? new RegExp(process.env.ONLY, "i") : null;
+// PART=1 / PART=2: la batería larga en dos tandas, cada una con su navegador limpio (ver browser.test.js).
+let partRe = null;
+export function setParts(re) { partRe = re; }
+const ALWAYS = /^sin errores de JavaScript$/;
 export async function test(name, fn) {
   if (only && !only.test(name)) return;
+  const part = process.env.PART;
+  if (partRe && part && !ALWAYS.test(name) && (part === "2") !== partRe.test(name)) return;
   try { await fn(); pass++; console.log("  ✓ " + name); }
   catch (e) {
     // El mensaje entero (las diferencias de deepEqual ocupan varias líneas) y dónde falló.
