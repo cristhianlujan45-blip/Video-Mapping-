@@ -3253,17 +3253,51 @@ async function welcome() {
   else openTab("add");
 }
 
+/** Nombre de la tarjeta gráfica (para el informe de un error de GPU). */
+function gpuName() {
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2") || document.createElement("canvas").getContext("webgl");
+    const ext = gl?.getExtension("WEBGL_debug_renderer_info");
+    return gl ? String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) : "sin WebGL";
+  } catch { return "desconocida"; }
+}
+/**
+ * La tarjeta no pudo con el motor de dibujo. En la app de escritorio se prueba sola el siguiente
+ * modo gráfico (otro motor ANGLE) y se reinicia; si ya no quedan, o en el móvil/navegador, se
+ * explica qué pasa con el detalle para copiarlo.
+ */
+async function gpuFailed(title, detail) {
+  const G = window.LumaDesktop?.gpu;
+  const st = G ? await G.status().catch(() => null) : null;
+  const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  if (st?.next) {
+    document.body.innerHTML = `<div class="fatal"><div><h1>Ajustando la tarjeta gráfica…</h1><p>Con el modo gráfico «${esc(st.name)}» tu tarjeta no pudo preparar el dibujo. LumaMap se reinicia sola con el modo «${esc(st.next)}».</p></div></div>`;
+    G.fallback(`${title}: ${detail}`.slice(0, 400));
+    return;
+  }
+  const info = `${title}\n${detail}\nTarjeta: ${gpuName()}${st ? `\nModo gráfico: ${st.name}` : ""}\nNavegador: ${navigator.userAgent}`;
+  document.body.innerHTML = `<div class="fatal"><div><h1>${esc(title)}</h1>
+    <p>${esc(detail)}</p><p><small>Tarjeta: ${esc(gpuName())}${st ? ` · modo gráfico: ${esc(st.name)}` : ""}</small></p>
+    <p>${G ? "Se probaron todos los modos gráficos. Actualiza el controlador de la tarjeta gráfica (NVIDIA, AMD o Intel) y vuelve a abrir LumaMap." : "Actualiza «Android System WebView» y Chrome desde la Play Store, reinicia el móvil y vuelve a abrir LumaMap."}</p>
+    <p><button class="btn primary" id="gpuCopy">Copiar el detalle del error</button> <button class="btn" id="gpuRetry">Reintentar</button>${G && st?.mode !== "normal" ? ' <button class="btn" id="gpuReset">Volver al modo gráfico normal</button>' : ""}</p></div></div>`;
+  document.getElementById("gpuCopy").onclick = (ev) => { navigator.clipboard?.writeText(info).then(() => { ev.target.textContent = "✓ Copiado"; }).catch(() => window.prompt("Detalle del error", info)); };
+  document.getElementById("gpuRetry").onclick = () => location.reload();
+  document.getElementById("gpuReset")?.addEventListener("click", () => G.reset());
+}
+
 async function init() {
   if (!webgl2Supported()) {
-    document.body.innerHTML = `<div class="fatal"><div><h1>WebGL2 no disponible</h1><p>Actualiza Chrome / Android System WebView o activa la aceleración por hardware.</p></div></div>`;
+    gpuFailed("WebGL2 no disponible", "Este dispositivo o su controlador no ofrece WebGL2 (la aceleración por hardware puede estar desactivada).");
     return;
   }
   try {
     renderer = new Renderer($("#gl"));
   } catch (e) {
-    document.body.innerHTML = `<div class="fatal"><div><h1>Error de GPU</h1><p>${e.message}</p></div></div>`;
+    gpuFailed("Error de GPU", e.message || String(e));
     return;
   }
+  // Si la app tuvo que cambiar de modo gráfico, se dice (y se puede volver al normal desde aquí).
+  window.LumaDesktop?.gpu?.status().then((st) => { if (st && st.mode !== "normal") setTimeout(() => toast(`Modo gráfico compatible activo (${st.name}): tu tarjeta no pudo con el normal.`), 2500); }).catch(() => {});
   pool = new MediaPool();
   pool.setPlaying(true);
   comp = new Compositor(renderer, pool);

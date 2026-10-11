@@ -38,6 +38,17 @@ if (process.env.LUMAMAP_USER_DATA) app.setPath("userData", process.env.LUMAMAP_U
 // Portátiles con dos GPU: usar la dedicada (la integrada solo si no hay otra).
 app.commandLine.appendSwitch("force_high_performance_gpu");
 
+// Modo gráfico: el motor de dibujo (un sombreador grande) se traduce para la tarjeta con ANGLE.
+// Si con el motor normal la tarjeta/controlador no puede (pantalla «Error de GPU»), la app prueba
+// sola otros motores y se reinicia: OpenGL, Vulkan, Direct3D 9 y, al final, por software.
+const ANGLE_MODES = process.platform === "win32" ? ["", "gl", "vulkan", "d3d9", "swiftshader"] : ["", "gl", "swiftshader"];
+const ANGLE_NAMES = { "": "normal", gl: "OpenGL", vulkan: "Vulkan", d3d9: "Direct3D 9", swiftshader: "por software (lento)" };
+const gpuMode = (() => { const m = readSettings().angle; return ANGLE_MODES.includes(m) ? m : ""; })();
+if (gpuMode) {
+  app.commandLine.appendSwitch("use-angle", gpuMode);
+  if (gpuMode === "swiftshader") app.commandLine.appendSwitch("enable-unsafe-swiftshader");
+}
+
 // Solo una instancia: si se abre otra vez, se enfoca la existente.
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -502,6 +513,25 @@ ipcMain.handle("remote:info", () => {
     for (const a of addrs || []) if ((a.family === "IPv4" || a.family === 4) && !a.internal) urls.push({ name, ip: a.address, url: `http://${a.address}:${remote.port}/controller.html`,
       cam: remote.httpsPort ? `https://${a.address}:${remote.httpsPort}/phonecam.html` : "" });
   return { port: remote.port, oscPort: remote.oscPort, httpsPort: remote.httpsPort, pin: remote.pin, urls, error: remote.error };
+});
+// Modo gráfico (ver ANGLE_MODES arriba).
+ipcMain.handle("gpu:status", () => {
+  const i = ANGLE_MODES.indexOf(gpuMode);
+  return { mode: gpuMode || "normal", name: ANGLE_NAMES[gpuMode], next: ANGLE_MODES[i + 1] !== undefined ? ANGLE_NAMES[ANGLE_MODES[i + 1]] : null, reason: readSettings().angleReason || "" };
+});
+ipcMain.handle("gpu:fallback", (_e, reason) => {
+  const next = ANGLE_MODES[ANGLE_MODES.indexOf(gpuMode) + 1];
+  if (next === undefined) return { ok: false };
+  const st = readSettings(); st.angle = next; st.angleReason = String(reason || "").slice(0, 400); writeSettings(st);
+  log("warn", `GPU: el modo gráfico «${ANGLE_NAMES[gpuMode]}» falló (${String(reason || "").slice(0, 200)}); se reinicia con «${ANGLE_NAMES[next]}»`);
+  setTimeout(() => { app.relaunch(); app.exit(0); }, 600);
+  return { ok: true, next: ANGLE_NAMES[next] };
+});
+ipcMain.handle("gpu:reset", () => {
+  const st = readSettings(); delete st.angle; delete st.angleReason; writeSettings(st);
+  log("info", "GPU: vuelta al modo gráfico normal");
+  setTimeout(() => { app.relaunch(); app.exit(0); }, 300);
+  return { ok: true };
 });
 ipcMain.handle("remote:newPin", () => { const st = readSettings(); st.pin = String(Math.floor(1000 + Math.random() * 9000)); writeSettings(st); try { remote.proc?.kill(); } catch {} return st.pin; });
 app.on("before-quit", () => { const p = remote.proc; remote.proc = null; try { p?.kill(); } catch {} });

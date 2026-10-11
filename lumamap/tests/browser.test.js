@@ -1080,6 +1080,25 @@ await test("móvil: nada amontonado (de pie 4 + «Más», tumbado 7 + «Más», 
     await mctx.close();
   }
 });
+await test("si la tarjeta gráfica no puede con el dibujo: pantalla clara con el detalle para copiar (y Reintentar)", async () => {
+  const gctx = await browser.newContext({ viewport: { width: 1000, height: 700 } });
+  // Simula un controlador que no logra enlazar el sombreador principal.
+  await gctx.addInitScript(() => {
+    const orig = WebGL2RenderingContext.prototype.getProgramParameter;
+    WebGL2RenderingContext.prototype.getProgramParameter = function (p, k) { return k === this.LINK_STATUS ? false : orig.call(this, p, k); };
+    WebGL2RenderingContext.prototype.getProgramInfoLog = function () { return "simulado: too many registers"; };
+  });
+  const g = await gctx.newPage();
+  try {
+    await g.goto(base);
+    await g.locator(".fatal h1", { hasText: "Error de GPU" }).waitFor({ timeout: 20000 });
+    const txt = await g.locator(".fatal").textContent();
+    assert.match(txt, /simulado: too many registers/);
+    assert.match(txt, /Tarjeta:/);
+    assert.match(txt, /Android System WebView/, "en el navegador/móvil dice qué actualizar");
+    assert.ok(await g.locator("#gpuCopy").count() && await g.locator("#gpuRetry").count());
+  } finally { await gctx.close(); }
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();

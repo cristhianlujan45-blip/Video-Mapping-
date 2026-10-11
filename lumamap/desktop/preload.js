@@ -55,6 +55,12 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
   /** Descargas de internet (buscar GIF): solo https y solo internet. Devuelve { ok, status, type, data }. */
   net: { get: (url, opts) => ipcRenderer.invoke("net:get", url, opts) },
   /** Plugins FFGL de Resolume (.dll): cada uno corre en su propio proceso (ffglhost). */
+  /** Modo gráfico (motor ANGLE): estado, probar el siguiente si la tarjeta falla, volver al normal. */
+  gpu: {
+    status: () => ipcRenderer.invoke("gpu:status"),
+    fallback: (reason) => ipcRenderer.invoke("gpu:fallback", reason),
+    reset: () => ipcRenderer.invoke("gpu:reset"),
+  },
   ffgl: {
     status: () => ipcRenderer.invoke("ffgl:status"),
     scan: () => ipcRenderer.invoke("ffgl:scan"),

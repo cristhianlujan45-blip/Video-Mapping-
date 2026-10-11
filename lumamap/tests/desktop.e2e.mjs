@@ -164,6 +164,12 @@ await test("métricas reales de rendimiento (CPU, RAM, GPU)", async () => {
   assert.ok(m.cores > 0 && m.ram > 0 && m.procs.length >= 3);
 });
 
+await test("modo gráfico: arranca en el normal y, si la tarjeta fallara, sabe a cuál pasar", async () => {
+  const st = await win.evaluate(() => window.LumaDesktop.gpu.status());
+  assert.equal(st.mode, "normal"); assert.equal(st.name, "normal");
+  assert.ok(st.next, "hay un modo compatible al que pasar: " + JSON.stringify(st));
+});
+
 await test("OSC por UDP: /lumamap/param/... fija un parámetro y OSC LEARN asigna una dirección", async () => {
   const info = await win.evaluate(() => window.LumaDesktop.remoteInfo());
   assert.ok(info.port > 0 && info.oscPort > 0, JSON.stringify(info));
