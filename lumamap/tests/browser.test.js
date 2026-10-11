@@ -29,8 +29,12 @@ await new Promise(r => srv.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${srv.address().port}/`;
 // https propio (cámara del móvil): en el primer puerto libre desde uno al azar.
 const httpsPort = await startHttps({ want: 20000 + Math.floor(Math.random() * 20000), dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-tls-")), host: "127.0.0.1" });
+// Igual que la app de escritorio (desktop/main.js): una ventana tapada sigue dibujando y sus videos
+// (cámaras) no se pausan; si no, el editor se congela cuando la ventana del «móvil» queda delante.
 const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
-  "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
+  "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
+  "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+  "--disable-features=BackgroundVideoTrackOptimization,BackgroundVideoPauseOptimization"] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera", "midi"] });
 const page = await ctx.newPage();
 const errors = [];
@@ -1068,7 +1072,9 @@ await test("móvil: nada amontonado (de pie 4 + «Más», tumbado 7 + «Más», 
     assert.ok(r.topVisible, "todos los botones de arriba se ven");
     assert.deepEqual(r.cut, [], "nombres cortados");
     // «Más» abre el resto; al elegir una se abre y «Más» queda marcado.
-    await m.locator("#dock button.more").click();
+    // (la barra se vuelve a montar al cambiar de tamaño: se pulsa en cuanto se ve, sin esperar a que «esté quieta»)
+    await m.locator("#dock button.more").waitFor();
+    await m.evaluate(() => document.querySelector("#dock button.more").click());
     await m.locator(".moretabs .moretab", { hasText: "Luces" }).click();
     await m.waitForFunction(() => window.__lumamap.S.tab === "lights");
     assert.ok(await m.locator("#dock button.more.on").count(), "«Más» marcado");
