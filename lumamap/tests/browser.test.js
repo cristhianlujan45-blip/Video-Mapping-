@@ -655,11 +655,11 @@ await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al 
 await test("GIF animados: botón de arriba, busca solo al escribir (en español), dos fuentes gratis a la vez, entra en vivo o como capa", async () => {
   const gif = fs.readFileSync(new URL("./fixtures/anim.gif", import.meta.url));
   const asked = [];
-  await page.route("https://api.openverse.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+  await page.route("https://api.openverse.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*", "cache-control": "no-store" },
     body: JSON.stringify({ page_count: 1, results: [{ id: "g1", title: "Fuego animado", url: "https://upload.example.org/fuego.gif", thumbnail: "https://upload.example.org/fuego.gif", creator: "Ana", license: "by", license_version: "4.0" }] }) }); });
-  await page.route("https://commons.wikimedia.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+  await page.route("https://commons.wikimedia.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*", "cache-control": "no-store" },
     body: JSON.stringify({ query: { pages: { "5": { pageid: 5, index: 1, title: "File:Llamas.gif", imageinfo: [{ url: "https://upload.example.org/llamas.gif", thumburl: "https://upload.example.org/llamas.gif", mime: "image/gif", size: 9000, metadata: [{ name: "frameCount", value: 8 }], extmetadata: { Artist: { value: "Luis" }, LicenseShortName: { value: "CC0" } } }] } } } }) }); });
-  await page.route("https://upload.example.org/**", (r) => r.fulfill({ status: 200, contentType: "image/gif", headers: { "access-control-allow-origin": "*" }, body: gif }));
+  await page.route("https://upload.example.org/**", (r) => r.fulfill({ status: 200, contentType: "image/gif", headers: { "access-control-allow-origin": "*", "cache-control": "no-store" }, body: gif }));
   await page.bringToFront();
   const id = await page.evaluate(() => { const a = window.__lumamap; a.S.liveFade = 0.3; a.openTab(null); return a.S.project.surfaces[0].id; });
   await page.evaluate((id) => window.__lumamap.select(id), id);
