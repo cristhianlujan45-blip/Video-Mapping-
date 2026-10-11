@@ -233,6 +233,8 @@ export function getCamera(key = "default") {
     const v = document.createElement("video");
     v.muted = true; v.playsInline = true; v.setAttribute("playsinline", "");
     v.srcObject = stream;
+    // Si aún no hay imagen, play() puede fallar: se reintenta al llegar el primer fotograma.
+    v.addEventListener("loadeddata", () => { if (v.paused) v.play().catch(() => {}); });
     await v.play().catch(() => {});
     const cam = { el: v, stream, key, source: () => v, frameKey: () => v.currentTime, kind: "camera" };
     cams.set(key, cam);
@@ -246,7 +248,10 @@ export function getCamera(key = "default") {
 }
 export function cameraIfReady(key = "default") {
   if (dropStale(key)) { getCamera(key).catch(() => {}); return null; }
-  return cams.get(key) || null;
+  const c = cams.get(key) || null;
+  // Un video de cámara que se quedó en pausa (play() falló al abrir, pestaña en segundo plano…) vuelve a andar.
+  if (c && c.el.paused && !c.retrying) { c.retrying = true; c.el.play().catch(() => {}).finally(() => { c.retrying = false; }); }
+  return c;
 }
 const lost = new Map();      // clave -> cuándo se perdió
 /** ¿Esta cámara se desconectó (y aún no ha vuelto)? */

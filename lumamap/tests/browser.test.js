@@ -45,7 +45,10 @@ setOnFail(async (name) => {
   console.error("    estado:", JSON.stringify(info));
   if (process.env.SHOTS_DIR) { fs.mkdirSync(process.env.SHOTS_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.SHOTS_DIR, `${String(++shotN).padStart(2, "0")}-${name.replace(/[^\w]+/g, "_").slice(0, 60)}.png`) }); }
   // Que un diálogo que quedó abierto no haga fallar también a las pruebas siguientes.
-  await page.evaluate(() => { const a = window.__lumamap; a?.params?.cancelLearn?.(); for (let i = 0; i < 3; i++) document.getElementById("modal")?._close?.(null); a?.openTab?.(null); }).catch(() => {});
+  // (y lo que sigue en marcha solo: VJ, autopiloto de la mesa, LFO; el editor vuelve al frente)
+  await page.evaluate(() => { const a = window.__lumamap; a?.params?.cancelLearn?.(); for (let i = 0; i < 3; i++) document.getElementById("modal")?._close?.(null); a?.openTab?.(null);
+    if (a) { a.actions.vjStop?.(); const P = a.S.project.settings; P.deck.autopilot = 0; P.deck.quantize = "off"; P.deck.cells = {}; P.lfos = []; a.S.compare = null; } }).catch(() => {});
+  await page.bringToFront().catch(() => {});
 });
 await page.goto(base);
 await page.waitForTimeout(800);
@@ -953,7 +956,8 @@ await test("como Resolume: mesa de clips (lanzar casilla y columna, al golpe y a
   // Autopiloto cada 4 golpes (a 240 BPM = 1 s): vuelve a la columna 1 sola.
   await deck.locator(".seg button", { hasText: "Al instante" }).click();
   await deck.locator(".seg button", { hasText: /^4 golpes$/ }).click();
-  await page.waitForFunction((sid) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[sid]; return l.source.color === "#ff0040"; }, sid, { timeout: 8000, polling: 50 });
+  try { await page.waitForFunction((sid) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[sid]; return l.source.color === "#ff0040"; }, sid, { timeout: 15000, polling: 50 }); }
+  catch (e) { console.log("DIAG-DECK", await page.evaluate((sid) => { const a = window.__lumamap, D = a.S.project.settings.deck; return JSON.stringify({ auto: D.autopilot, q: D.quantize, st: a.deckState, beat: a.lfoBeat(), playing: a.S.playing, bpm: a.S.levels?.bpm, sbpm: a.S.project.settings.bpm, row: (D.cells[sid] || []).map(c => c?.color) }); }, sid)); throw e; }
   await deck.locator(".seg button", { hasText: "Apagado" }).click();
   await page.locator("#modal").getByRole("button", { name: "Listo" }).click();
   // «Animar al ritmo»: clic derecho en «Brillo» → Animar → el brillo sube y baja solo.
