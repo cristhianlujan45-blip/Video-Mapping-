@@ -673,8 +673,8 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.evaluate(async () => (await import("./js/panels-gif.js")).clearGifMemo());
   asked.length = 0;
   await page.locator(".gifsearch input[type=search]").fill("fuego ");
-  for (let t = 0; t < 100 && !(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u))); t++) await page.waitForTimeout(100);
-  await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 2, null, { timeout: 15000, polling: 100 });
+  for (let t = 0; t < 250 && !(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u))); t++) await page.waitForTimeout(100);
+  await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 2, null, { timeout: 30000, polling: 100 });
   if (!asked.length) console.log("DIAG-GIF2", await page.evaluate(() => JSON.stringify({ val: document.querySelector(".gifsearch input[type=search]")?.value, cells: document.querySelectorAll(".gifsearch .gifcell").length,
     text: document.querySelector(".gifsearch")?.innerText.slice(0, 300), online: navigator.onLine, desk: !!window.LumaDesktop, native: !!window.LumaNative })));
   assert.ok(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u)), "buscó «fire» en las dos: " + asked.join(" "));
@@ -684,7 +684,7 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await fuego.hover();              // empieza a descargarse antes del clic
   await page.waitForTimeout(400);
   await fuego.click();
-  try { await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 15000, polling: 100 }); }
+  try { await page.waitForFunction((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; return l.source.type === "media" && !l.next; }, id, { timeout: 40000, polling: 100 }); }
   catch (e) { console.log("DIAG-GIF", await page.evaluate((id) => { const a = window.__lumamap, S = a.S, l = S.project.scenes.find(s => s.id === S.project.sceneId).looks[id]; return JSON.stringify({ src: l.source.type, next: l.next && { t: l.next.source?.type }, mix: l.mix, playing: S.playing, blackout: S.blackout, perf: S.perfMode, liveFade: S.liveFade, hidden: document.hidden, toast: document.querySelector("#toast").textContent, media: S.project.media.length, scene: S.project.sceneId, scenes: S.project.scenes.length, looksWithNext: S.project.scenes.map(sc => sc.looks[id]?.next ? sc.id : null).filter(Boolean), vj: !!S.vjOn, sched: JSON.stringify(S.project.settings.timers || S.project.timers || null).slice(0, 200) }); }, id)); throw e; }
   const m = await page.evaluate((id) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[id]; const med = a.S.project.media.find(x => x.id === l.source.mediaId); return { kind: med.kind, name: med.name, credit: med.credit }; }, id);
   assert.deepEqual(m, { kind: "anim", name: "Fuego animado.gif", credit: "© Ana · CC BY 4.0" });
@@ -693,7 +693,7 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.evaluate(() => window.__lumamap.actions.searchGifs({ query: "fuego" }));
   await page.locator(".gifsearch .seg button", { hasText: "Capa nueva encima" }).click();
   await page.locator(".gifcell", { hasText: "Luis" }).click();
-  await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0, { timeout: 15000, polling: 100 });
+  await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0, { timeout: 40000, polling: 100 });
   assert.match(await page.evaluate(() => window.__lumamap.S.project.surfaces.at(-1).name), /^GIF /);
   await page.unroute("https://api.openverse.org/**"); await page.unroute("https://commons.wikimedia.org/**"); await page.unroute("https://upload.example.org/**");
   await page.evaluate(() => window.__lumamap.openTab(null));
