@@ -96,11 +96,14 @@ await test("dibujar en la pared guarda trazos y se pueden deshacer", async () =>
 await test("la ventana de salida recibe el proyecto del editor", async () => {
   const out = await ctx.newPage();
   out.on("pageerror", e => errors.push("salida: " + e.message));
-  await out.goto(base + "output.html");
-  // (la ventana de salida carga sus módulos y compila el sombreador: en una CI lenta tarda más de 5 s)
-  await out.waitForFunction(() => /Cubo 3D/.test(document.querySelector("#hud small")?.textContent || ""), null, { timeout: 20000 });
-  await out.close();
-  await page.bringToFront();   // una pestaña de atrás deja de pintar y sus temporizadores van lentos
+  try {
+    await out.goto(base + "output.html");
+    // (la ventana de salida carga sus módulos y compila el sombreador: en una CI lenta tarda más de 5 s)
+    await out.waitForFunction(() => /Cubo 3D/.test(document.querySelector("#hud small")?.textContent || ""), null, { timeout: 20000 });
+  } finally {
+    await out.close().catch(() => {});
+    await page.bringToFront();   // una pestaña de atrás deja de pintar y sus temporizadores van lentos
+  }
 });
 await test("paleta de comandos (Ctrl+K) y copiar/pegar", async () => {
   await page.keyboard.press("Escape");
