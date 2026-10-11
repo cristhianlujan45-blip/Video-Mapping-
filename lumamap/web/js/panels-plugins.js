@@ -1,8 +1,10 @@
 // web/js/panels-plugins.js
 // «🧩 Plugins»: los que vienen con LumaMap y los que instalas (archivo .json de plugin o
 // shader ISF .fs). Encender/apagar, quitar e instalar. Ver el formato en plugins.js.
+// Abajo, los plugins FFGL de Resolume (.dll; solo app de Windows, ver panels-ffgl.js).
 import { h, btn, hint, toggle, dialog, toast, confirmDlg } from "./ui.js";
 import { listPlugins, installPlugin, setPluginEnabled, removePlugin } from "./plugins.js";
+import { ffglSection } from "./panels-ffgl.js";
 
 const EXAMPLE = `{
   "lumamap-plugin": 1,
@@ -55,5 +57,6 @@ export async function openPlugins(app) {
     input.click();
   };
   draw();
-  await dialog({ title: "🧩 Plugins", content: body, wide: true, buttons: [{ label: "Cerrar", value: null }] });
+  // Los FFGL van aparte: no se vuelven a buscar cada vez que se enciende o quita un plugin de arriba.
+  await dialog({ title: "🧩 Plugins", content: h("div", { class: "plugins" }, body, ffglSection(app)), wide: true, buttons: [{ label: "Cerrar", value: null }] });
 }

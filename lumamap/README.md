@@ -33,13 +33,16 @@ Comparado función por función con Resolume Arena 7. Lo que faltaba se ha añad
 | Advanced Output: slices, warping, máscaras, edge blending, varias pantallas | Superficies con esquinas/rejilla, máscaras, bordes suaves, 4 pantallas | ✅ |
 | Efectos y fuentes (generadores) | 137 efectos + 18 estilos + 92 animaciones + shaders ISF (plugins virales, cámara reactiva, nube de puntos…) | ✅ |
 | Shaders ISF (los que acepta Wire) | ISF completo: controles, cámara/video, sonido (FFT y onda), varias pasadas con memoria | ✅ |
-| Plugins FFGL (.dll de Resolume/Juicebar) | Ver «Plugins FFGL» abajo | ver abajo |
+| Plugins FFGL (.dll de Resolume/Juicebar) | **En la app de Windows**: fuentes y efectos FFGL 2.x y 1.5/1.6 de 64 bits (☰ → Plugins → «Plugins FFGL de Resolume») | ✅ nuevo (Windows) |
 | Crossfader A/B, transiciones | Mezclador A/B por superficie (fader y GO) + 8 transiciones de escena | ✅ |
 | Grabar la salida, BPM, tap tempo, MIDI clock, timecode | Igual | ✅ |
 | Audio-reactivo | Bandas, golpe, FFT para shaders, VJ automático que reconoce las partes del tema | ✅ (más que Resolume) |
 | Spout / Syphon / NDI | No | EN DESARROLLO |
 | Códec DXV (reversa perfecta) | La reversa va fotograma a fotograma; más fluida con videos cortos o convertidos | parcial |
 | Wire (editor de nodos) | No (se usan shaders ISF hechos en Wire/ISF) | no previsto |
+
+**Plugins FFGL de Resolume (.dll)** — solo en la app de Windows. LumaMap busca solo en las carpetas de Resolume (Documentos\Resolume Arena\Extra Effects / Extra Sources) y en las que añadas, prueba cada .dll y te dice cuáles cargan. «Usar en la superficie seleccionada» y en Contenido aparecen sus controles (números, interruptores, listas, texto, disparos); los efectos procesan un video/foto de la biblioteca o la cámara. Cada plugin corre en su propio proceso (`ffglhost.exe`): si uno se cuelga o se cae, LumaMap sigue y lo reinicia. Límites honestos: hasta 960×540 a 30 fps por plugin (la imagen viaja entre procesos), los de 32 bits no cargan (se avisa), los parámetros de audio (FFT) de un plugin: EN DESARROLLO. En Android no es posible (los .dll son programas de Windows); allí funcionan los shaders ISF.
+
 
 ## Modo simple y modo profesional
 

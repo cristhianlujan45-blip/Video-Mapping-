@@ -9,6 +9,7 @@ import { openMediaLibrary } from "./panels-library.js";
 import { getShader } from "./plugins.js";
 import { hexToIsf, isfToHex } from "./isf.js";
 import { openPlugins } from "./panels-plugins.js";
+import { ffglControls } from "./panels-ffgl.js";
 import { vjSection } from "./panels-vj.js";
 import { deckSection } from "./panels-deck.js";
 import { openPhoneCam } from "./panels-phonecam.js";
@@ -483,6 +484,7 @@ const content = {
           btn({ label: "Reiniciar videos", ic: "restart", kind: "block", onClick: A.restart })) : null));
     }
 
+    if (src.type === "ffgl") wrap.append(ffglControls(app, src));   // plugin FFGL de Resolume (Menú → Plugins)
     if (src.type === "shader") {
       wrap.append(shaderControls(app, src));
       wrap.append(animCatalog(app, (a) => applyAnim(app, a), { drag: true }));

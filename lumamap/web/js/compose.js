@@ -9,6 +9,7 @@ import { Model3DCache } from "./render3d.js";
 import { surfaceAspect } from "./math.js";
 import { ShaderCache, spectrumFromLevels } from "./isf.js";
 import { getShader, onPluginsChange } from "./plugins.js";
+import { FFGLCache } from "./ffgl.js";
 import { DEFAULT_FX } from "./model.js";
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
 /** Alto máximo de los shaders de plugins: lo elegido en Calidad, o 4K en PC y 1080p en móvil. */
@@ -31,6 +32,7 @@ export class Compositor {
     this.shaders = new ShaderCache();
     // Un plugin reinstalado o actualizado: se recompila (no se queda el programa viejo o el error).
     this.offPlugins = onPluginsChange(() => { for (const id of [...this.shaders.progs.keys()]) this.shaders.forget(id); });
+    this.ffgl = new FFGLCache();
     this.drawVersion = new Map();
     this.cameraWanted = new Set();
   }
@@ -112,6 +114,22 @@ export class Compositor {
         const e = this.shaders.draw(key, sh.id, sh.isf, src.shaderParams || {}, { width: wid, height: hgt, time: o.time * (src.speed ?? 1), images, audio });
         return e ? { id: "sh:" + key, el: e.canvas, key: e.version } : null;
       }
+      case "ffgl": {
+        // Plugin FFGL de Resolume (solo app de Windows): lo dibuja su propio proceso, como mucho
+        // 960×540 a 30 fps. Los efectos procesan la imagen elegida (un video de la biblioteca o la cámara).
+        let input = null;
+        const b = src.ffglInput;
+        if (b?.kind === "media") { const rt = this.pool?.get(b.id); if (rt) input = rt.source(o.time); else this.pool?.ensure(b.id); }
+        else if (b?.kind === "camera") {
+          const ck = b.camId || "default";
+          const cam = cameraIfReady(ck);
+          if (cam) input = cam.el;
+          else if (!this.cameraWanted.has(ck)) { this.cameraWanted.add(ck); getCamera(ck).catch(e => console.warn(e)).finally(() => setTimeout(() => this.cameraWanted.delete(ck), 3000)); }
+        }
+        const key = scene.id + ":" + s.id + k;
+        const e = this.ffgl.get(key, src, { aspect: surfaceAspect(s).aspect, time: o.time * (src.speed ?? 1), bpm: o.levels?.bpm, phase: o.levels?.phase, input });
+        return e ? { id: "ff:" + key, el: e.canvas, key: e.version } : null;
+      }
       case "text": {
         const { aspect } = surfaceAspect(s);
         const key = scene.id + ":" + s.id + k;
@@ -149,7 +167,7 @@ export class Compositor {
   }
 
   /** Lienzos temporales (captura, grabación): suelta el contexto de shaders y el aviso de plugins. */
-  dispose() { this.offPlugins?.(); this.shaders.dispose(); }
+  dispose() { this.offPlugins?.(); this.shaders.dispose(); for (const k of [...this.ffgl.map.keys()]) this.ffgl.drop(k); }
 
   /**
    * Dibuja un fotograma.

@@ -851,6 +851,9 @@ void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_Fr
   await page.locator(".plugins .item", { hasText: "Shaders ISF v" }).waitFor();
   assert.ok(await page.locator(".plugins .item", { hasText: "Cámara reactiva al audio" }).count());
   assert.ok(await page.locator(".plugins .item", { hasText: "Fiesta y neón" }).count());
+  // Plugins FFGL de Resolume (.dll): en el navegador/Android se dice claro que son de la app de Windows (sin botón falso).
+  assert.match(await page.locator(".plugins .ffgl").textContent(), /solo en la app de Windows/);
+  assert.equal(await page.locator(".plugins .ffgl button").count(), 0);
   const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator(".plugins").getByRole("button", { name: /Instalar plugin/ }).click()]);
   await chooser.setFiles(fsFile);
   await page.locator(".plugins .item", { hasText: "Ondas de prueba" }).waitFor();

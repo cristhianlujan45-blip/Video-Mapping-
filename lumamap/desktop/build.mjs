@@ -13,7 +13,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"))
 
 fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
-for (const f of ["main.js", "preload.js", "ai.js", "ollama-pull.js", "shortcuts.js", "phoneusb.js", "net.js", "optimize.js", "dmx-service.mjs", "remote-service.mjs", "updater.ps1"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
+for (const f of ["main.js", "preload.js", "ai.js", "ollama-pull.js", "shortcuts.js", "phoneusb.js", "net.js", "optimize.js", "ffglhost.js", "dmx-service.mjs", "remote-service.mjs", "updater.ps1"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
 // ffmpeg para optimizar videos: se incluye su paquete (con el binario de esta plataforma).
 fs.cpSync(path.join(here, "node_modules", "ffmpeg-static"), path.join(stage, "node_modules", "ffmpeg-static"), { recursive: true });
 // SDK de Claude para el asistente (y lo que necesita al ejecutarse), sin tipos ni mapas de código.
@@ -27,6 +27,22 @@ if (!process.argv.includes("--stage") && targetPlatform !== process.platform) {
   for (const f of ["ffmpeg", "ffmpeg.exe"]) fs.rmSync(path.join(dir, f), { force: true });
   execFileSync(process.execPath, [path.join(dir, "install.js")], { cwd: dir, stdio: "inherit",
     env: { ...process.env, npm_config_platform: targetPlatform, npm_config_arch: "x64" } });
+}
+// Anfitrión de plugins FFGL de Resolume (ffgl/ffglhost.exe, fuera del .asar para poder ejecutarlo).
+// Se compila aquí si falta (y hay compilador); el instalador de Windows no se hace sin él.
+{
+  const exe = targetPlatform === "win32" ? "ffglhost.exe" : "ffglhost";
+  const built = path.join(here, "ffgl", "bin", exe);
+  if (targetPlatform === process.platform && (targetPlatform === "win32" || targetPlatform === "linux")) {
+    try { (await import("./ffgl/build.mjs")).buildFFGL({ target: targetPlatform, hostOnly: true }); }
+    catch (e) { console.warn("Plugins FFGL: no se pudo compilar el anfitrión:", e.message); }
+  }
+  if (fs.existsSync(built)) {
+    fs.mkdirSync(path.join(stage, "ffgl"), { recursive: true });
+    fs.copyFileSync(built, path.join(stage, "ffgl", exe));
+  } else if (targetPlatform === "win32" && !process.argv.includes("--stage")) {
+    throw new Error("Falta ffgl/bin/ffglhost.exe: compílalo con «node ffgl/build.mjs --host-only» (Visual Studio C++)");
+  } else console.warn("Plugins FFGL: sin anfitrión para " + targetPlatform + " (la app lo dirá en el panel Plugins)");
 }
 fs.cpSync(path.join(here, "..", "web"), path.join(stage, "web"), { recursive: true });
 // Los servicios (Node) importan módulos de web/js: son ES modules.
@@ -55,7 +71,7 @@ if (process.argv[2] === "installer") {
       directories: { app: stage, output: path.join(here, "dist") },
       electronVersion: pkg.devDependencies.electron.replace(/^[^\d]*/, ""),
       asar: true,
-      asarUnpack: ["**/node_modules/ffmpeg-static/**"],   // el binario de ffmpeg debe poder ejecutarse
+      asarUnpack: ["**/node_modules/ffmpeg-static/**", "ffgl/**"],   // ffmpeg y el anfitrión FFGL deben poder ejecutarse
       npmRebuild: false,
       publish: null, // sin autoactualización: no se generan archivos de canal
       artifactName: "LumaMap-Setup.${ext}",   // nombre fijo: el enlace de descarga y el actualizador no cambian
@@ -90,7 +106,7 @@ const out = path.join(here, "dist");
 const [appDir] = await packager({
   dir: stage, out, platform, arch, electronVersion, overwrite: true,
   name: "LumaMap", executableName: "LumaMap", appVersion: pkg.version,
-  appCopyright: "MIT", prune: false, asar: { unpack: "**/node_modules/ffmpeg-static/**" },
+  appCopyright: "MIT", prune: false, asar: { unpack: "**/node_modules/ffmpeg-static/**", unpackDir: "ffgl" },
 });
 const label = { win32: "Windows", darwin: "macOS", linux: "Linux" }[platform] || platform;
 const zipFile = path.join(out, `LumaMap-${pkg.version}-${label}-${arch}.zip`);

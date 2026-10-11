@@ -2,7 +2,7 @@
 // Sirve la app web desde un protocolo propio seguro (app://) para que funcionen
 // los módulos ES, IndexedDB, micrófono y cámara, y abre la ventana de salida
 // directamente a pantalla completa en el proyector (segunda pantalla).
-const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain, net, utilityProcess, MessageChannelMain, powerSaveBlocker } = require("electron");
+const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain, net, utilityProcess, MessageChannelMain, powerSaveBlocker, dialog } = require("electron");
 const { spawn, execFile: execFileCb } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -523,6 +523,72 @@ ipcMain.handle("phone:status", () => phoneUsb?.status() || null);
 ipcMain.handle("phone:retry", () => phoneUsb?.retry() || { ok: false });
 app.on("before-quit", () => { try { phoneUsb?.stop(); } catch {} });
 app.on("before-quit", () => { try { dmxProc?.kill(); } catch {} });
+
+/* ---------------- Plugins FFGL de Resolume (.dll) ---------------- */
+// Cada plugin abierto corre en su propio proceso (ffglhost.exe): si se cuelga o se cae, la app
+// sigue. Solo se cargan plugins de las carpetas de Resolume encontradas o de las que añade el usuario.
+const FFGL = require("./ffglhost.js");
+const ffglCache = new Map();          // resultados de la búsqueda (por ruta, tamaño y fecha)
+const ffglInst = new Map();           // id → { plugin, wc }
+let ffglNext = 1;
+const ffglHooked = new WeakSet();     // ventanas que ya cierran sus plugins al cerrarse
+function ffglDirs() {
+  const st = readSettings();
+  const auto = FFGL.defaultDirs({ documents: app.getPath("documents") });
+  const user = (st.ffglDirs || []).filter(d => typeof d === "string" && fs.existsSync(d) && !auto.includes(d));
+  return { auto, user };
+}
+ipcMain.handle("ffgl:status", () => ({ host: !!FFGL.findHost(), platform: process.platform, ext: FFGL.PLUGIN_EXT, ...ffglDirs() }));
+ipcMain.handle("ffgl:scan", async () => {
+  const d = ffglDirs();
+  const t = Date.now();
+  const list = await FFGL.scanPlugins([...d.auto, ...d.user], { cache: ffglCache });
+  log("ffgl", `Búsqueda de plugins: ${list.filter(r => r.ok).length} de ${list.length} cargan (${Date.now() - t} ms)`);
+  return { ...d, plugins: list };
+});
+ipcMain.handle("ffgl:addFolder", async () => {
+  const r = await dialog.showOpenDialog(editor, { title: "Carpeta con plugins FFGL (.dll)", properties: ["openDirectory"] });
+  if (r.canceled || !r.filePaths[0]) return ffglDirs();
+  const st = readSettings();
+  st.ffglDirs = [...new Set([...(st.ffglDirs || []), r.filePaths[0]])];
+  writeSettings(st);
+  return ffglDirs();
+});
+ipcMain.handle("ffgl:removeFolder", (_e, dir) => {
+  const st = readSettings();
+  st.ffglDirs = (st.ffglDirs || []).filter(d => d !== dir);
+  writeSettings(st);
+  return ffglDirs();
+});
+ipcMain.handle("ffgl:open", async (e, file) => {
+  const d = ffglDirs();
+  if (typeof file !== "string" || !FFGL.insideDirs(file, [...d.auto, ...d.user])) throw new Error("Solo se cargan plugins de las carpetas de plugins (Menú → Plugins → Plugins FFGL)");
+  const mine = [...ffglInst.values()].filter(x => x.wc === e.sender).length;
+  if (mine >= 16) throw new Error("Demasiados plugins FFGL abiertos a la vez (máximo 16)");
+  const plugin = await FFGL.openPlugin(file, { onExit: (p) => { if (!p.closed) log("ffgl", `${path.basename(file)}: ${p.conn?.dead?.reason || "el proceso terminó"}`); } });
+  const id = ffglNext++;
+  ffglInst.set(id, { plugin, wc: e.sender });
+  if (!ffglHooked.has(e.sender)) {
+    const wc = e.sender;
+    ffglHooked.add(wc);
+    wc.once("destroyed", () => { for (const [k, x] of ffglInst) if (x.wc === wc) { ffglInst.delete(k); x.plugin.close(); } });
+  }
+  log("ffgl", `Abierto ${plugin.info.name} (${plugin.info.type}, FFGL ${plugin.info.apiMajor}.${plugin.info.apiMinor}) · ${plugin.info.gl.renderer}`);
+  return { id, info: plugin.info };
+});
+ipcMain.handle("ffgl:render", async (_e, id, req = {}) => {
+  const x = ffglInst.get(id);
+  if (!x) throw new Error("Ese plugin ya está cerrado");
+  const input = req.input ? Buffer.from(req.input.buffer, req.input.byteOffset, req.input.byteLength) : undefined;
+  const fr = await x.plugin.render({ width: req.width, height: req.height, time: req.time, bpm: req.bpm, barPhase: req.barPhase, params: req.params, input });
+  return { width: fr.width, height: fr.height, data: fr.data };
+});
+ipcMain.handle("ffgl:close", async (_e, id) => {
+  const x = ffglInst.get(id);
+  ffglInst.delete(id);
+  await x?.plugin.close();
+});
+app.on("before-quit", () => { for (const x of ffglInst.values()) x.plugin.close(); ffglInst.clear(); });
 
 ipcMain.handle("video:release", (_e, url) => {
   try { fs.rmSync(path.join(OPT_DIR, path.basename(decodeURIComponent(new URL(url).pathname))), { force: true }); } catch {}

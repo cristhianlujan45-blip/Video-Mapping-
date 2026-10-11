@@ -54,6 +54,17 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
   },
   /** Descargas de internet (buscar GIF): solo https y solo internet. Devuelve { ok, status, type, data }. */
   net: { get: (url, opts) => ipcRenderer.invoke("net:get", url, opts) },
+  /** Plugins FFGL de Resolume (.dll): cada uno corre en su propio proceso (ffglhost). */
+  ffgl: {
+    status: () => ipcRenderer.invoke("ffgl:status"),
+    scan: () => ipcRenderer.invoke("ffgl:scan"),
+    addFolder: () => ipcRenderer.invoke("ffgl:addFolder"),
+    removeFolder: (dir) => ipcRenderer.invoke("ffgl:removeFolder", dir),
+    open: (file) => ipcRenderer.invoke("ffgl:open", file),
+    /** req: { width, height, time, bpm, barPhase, params, input? (RGBA) } → { width, height, data (RGBA) }. */
+    render: (id, req) => ipcRenderer.invoke("ffgl:render", id, req),
+    close: (id) => ipcRenderer.invoke("ffgl:close", id),
+  },
   /** Asistente (Claude): la clave se guarda cifrada en el proceso principal. */
   ai: {
     status: () => ipcRenderer.invoke("ai:status"),

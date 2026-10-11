@@ -28,6 +28,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # OpenGL por software (OSMesa): las pruebas de plugins FFGL dibujan de verdad.
+      - name: OpenGL por software para las pruebas FFGL
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libosmesa6
+
       - name: LumaMap tests (motor, modelo, audio, servidor)
         working-directory: lumamap
         run: npm test
@@ -117,6 +121,19 @@ jobs:
           npm ci --no-audit --no-fund
           npm version "2.3.${{ github.run_number }}" --no-git-tag-version --allow-same-version
           npm run installer:win
+
+      # Plugins FFGL de Resolume: el anfitrión de Windows de verdad (el que va en el instalador)
+      # con plugins FFGL compilados aquí; sin tarjeta gráfica, con el OpenGL por software de Mesa.
+      - name: Plugins FFGL de Resolume (anfitrión real de Windows)
+        working-directory: lumamap
+        shell: pwsh
+        run: |
+          $rel = Invoke-RestMethod -Headers @{ "User-Agent" = "lumamap-ci" } https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest
+          $asset = $rel.assets | Where-Object { $_.name -like "*release-msvc.7z" } | Select-Object -First 1
+          Invoke-WebRequest $asset.browser_download_url -OutFile mesa.7z
+          7z x mesa.7z -omesa | Out-Null
+          $env:FFGL_GL_DIR = (Resolve-Path mesa\x64).Path
+          node tests/ffgl.test.js
 
       # Prueba real del ciclo de vida: instalar, abrir, actualizar con la app
       # abierta, rollback, volver a la anterior, reparar, desinstalar (conserva
