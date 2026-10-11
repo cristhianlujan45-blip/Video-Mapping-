@@ -137,8 +137,11 @@ jobs:
       - name: Plugins FFGL de Resolume (anfitrión real de Windows)
         working-directory: lumamap
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $rel = Invoke-RestMethod -Headers @{ "User-Agent" = "lumamap-ci" } https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest
+          # Con el token de la CI: sin él, la API de GitHub corta a los 60 pedidos por hora y equipo.
+          $rel = Invoke-RestMethod -Headers @{ "User-Agent" = "lumamap-ci"; "Authorization" = "Bearer $env:GH_TOKEN" } https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest
           $asset = $rel.assets | Where-Object { $_.name -like "*release-msvc.7z" } | Select-Object -First 1
           Invoke-WebRequest $asset.browser_download_url -OutFile mesa.7z
           7z x mesa.7z -omesa | Out-Null
@@ -186,6 +189,8 @@ jobs:
         working-directory: lumamap/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # La firma ad hoc no usa ningún secreto: también en los pull request (si no, la app sale sin firmar).
+          CSC_FOR_PULL_REQUEST: "true"
         run: |
           npm ci --no-audit --no-fund
           npm version "2.3.${{ github.run_number }}" --no-git-tag-version --allow-same-version
