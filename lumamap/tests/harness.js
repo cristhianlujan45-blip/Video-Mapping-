@@ -8,7 +8,9 @@ export async function test(name, fn) {
   if (only && !only.test(name)) return;
   try { await fn(); pass++; console.log("  ✓ " + name); }
   catch (e) {
-    fail++; console.error("  ✗ " + name + "\n    " + (e.stack || e.message).split("\n").slice(0, 3).join("\n    "));
+    // El mensaje entero (las diferencias de deepEqual ocupan varias líneas) y dónde falló.
+    const at = String(e.stack || "").split("\n").find(l => /^\s+at /.test(l)) || "";
+    fail++; console.error("  ✗ " + name + "\n    " + (String(e.message || e).split("\n").slice(0, 14).join("\n    ") + (at ? "\n    " + at.trim() : "")));
     try { await onFail?.(name, e); } catch {}
   }
 }

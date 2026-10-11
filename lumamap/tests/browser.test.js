@@ -837,7 +837,7 @@ await test("móvil por cable USB: la página abierta por el cable manda la cáma
   assert.ok(r.w >= 320, `imagen del móvil ${r.w} ${r.diag}`);
   assert.ok(r.recv >= 4, `fotos llegadas por el cable: ${r.recv} (enviadas ${await phone.evaluate(() => window.__lumaCamSent())})`);
   assert.ok(r.bright > 5, `con imagen en la cámara ${r.bright} (recibido ${r.recv})`);
-  assert.equal(r.listed, "Móvil (cable USB)");
+  assert.equal(r.listed, "Móvil (cable USB)", "en la lista de cámaras como: " + r.listed);
   // Se desenchufa (página cerrada): el programa lo marca desconectado.
   await phoneCtx.close();
   await page.waitForFunction(async () => { const { listPhones } = await import("./js/phonecam.js"); return listPhones().every(p => !p.live && !p.online); }, null, { timeout: 15000 });
