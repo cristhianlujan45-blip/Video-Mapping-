@@ -38,11 +38,16 @@ page.on("pageerror", e => errors.push(e.message));
 // El bucle de la app atrapa los errores para que el show nunca se pare (console.error):
 // aquí cuentan igual, así un efecto que falla en cada fotograma no pasa desapercibido.
 page.on("console", m => { if (m.type() === "error" && /TypeError|ReferenceError|RangeError|SyntaxError/.test(m.text())) errors.push("consola: " + m.text().slice(0, 300)); });
+// Todos los errores de consola (también los del bucle de la app), para el informe de una prueba que falla.
+const consoleErrs = [];
+page.on("console", m => { if (m.type() === "error") { consoleErrs.push(m.text().slice(0, 400)); if (consoleErrs.length > 200) consoleErrs.shift(); } });
 // Si una prueba falla: captura de pantalla y qué hay abierto (diálogo, pestaña), para ver la causa en la CI.
 let shotN = 0;
 setOnFail(async (name) => {
   const info = await page.evaluate(() => ({ tab: window.__lumamap?.S.tab, dialog: document.querySelector("#modal.show h2")?.textContent || "", toast: document.querySelector(".toast")?.textContent || "" })).catch(() => ({}));
   console.error("    estado:", JSON.stringify(info));
+  const recent = [...new Set(consoleErrs.slice(-40))].slice(-5);
+  if (recent.length) console.error("    últimos errores de consola:\n      " + recent.join("\n      "));
   if (process.env.SHOTS_DIR) { fs.mkdirSync(process.env.SHOTS_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.SHOTS_DIR, `${String(++shotN).padStart(2, "0")}-${name.replace(/[^\w]+/g, "_").slice(0, 60)}.png`) }); }
   // Que un diálogo que quedó abierto no haga fallar también a las pruebas siguientes.
   // (y lo que sigue en marcha solo: VJ, autopiloto de la mesa, LFO; el editor vuelve al frente)
