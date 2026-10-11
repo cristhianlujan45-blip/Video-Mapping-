@@ -249,7 +249,9 @@ export function closeNotice(id) { document.querySelector(`#notices [data-id="${C
 export function dialog({ title, content, buttons = [{ label: "Cerrar", value: null }], wide }) {
   return new Promise((resolve) => {
     const root = document.getElementById("modal");
-    const close = (v) => { root.classList.remove("show"); root.innerHTML = ""; resolve(v); };
+    // Una ventana que sustituye a otra: la anterior termina (si no, su espera y sus relojes quedan colgados).
+    if (root._close && root.classList.contains("show")) root._close(null);
+    const close = (v) => { root.classList.remove("show"); root.innerHTML = ""; root._close = null; resolve(v); };
     const box = h("div", { class: `dlg ${wide ? "wide" : ""}` },
       h("div", { class: "dlg-head" }, h("h2", {}, title), btn({ ic: "close", kind: "icon", onClick: () => close(null) })),
       h("div", { class: "dlg-body" }, content),

@@ -8,7 +8,7 @@ import { BodyCache } from "./body.js";
 import { Model3DCache } from "./render3d.js";
 import { surfaceAspect } from "./math.js";
 import { ShaderCache, spectrumFromLevels } from "./isf.js";
-import { getShader } from "./plugins.js";
+import { getShader, onPluginsChange } from "./plugins.js";
 import { DEFAULT_FX } from "./model.js";
 const NEUTRAL_FX = DEFAULT_FX();
 
@@ -23,6 +23,8 @@ export class Compositor {
     this.bodies = new BodyCache();
     this.models3d = new Model3DCache();
     this.shaders = new ShaderCache();
+    // Un plugin reinstalado o actualizado: se recompila (no se queda el programa viejo o el error).
+    this.offPlugins = onPluginsChange(() => { for (const id of [...this.shaders.progs.keys()]) this.shaders.forget(id); });
     this.drawVersion = new Map();
     this.cameraWanted = new Set();
   }
@@ -87,6 +89,7 @@ export class Compositor {
         const hgt = Math.round(Math.max(144, Math.min(720, sa.h || 540)));
         const wid = Math.round(Math.max(64, Math.min(1280, hgt * sa.aspect)));
         const key = scene.id + ":" + s.id + k;
+        if (!k) this.shaders.adopt(key, key + ":B", sh.id);
         // Entradas del shader: la cámara (o un video de la biblioteca) y el sonido.
         const images = {};
         for (const inp of sh.isf.inputs) {
@@ -137,6 +140,9 @@ export class Compositor {
     const f = this.shared ? this.shared.sharedSource(scene, s, look, o, k) : this.sharedSource(scene, s, look, o, k);
     return f ? this.r.texture(f.id, f.el, f.key) : null;
   }
+
+  /** Lienzos temporales (captura, grabación): suelta el contexto de shaders y el aviso de plugins. */
+  dispose() { this.offPlugins?.(); this.shaders.dispose(); }
 
   /**
    * Dibuja un fotograma.

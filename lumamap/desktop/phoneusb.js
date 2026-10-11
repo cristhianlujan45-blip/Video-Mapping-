@@ -148,7 +148,7 @@ async function downloadAdb({ dataDir, onProgress = () => {}, log = () => {}, fet
  */
 function createPhoneUsb({ dataDir, getPort, getPin = () => "", send = () => {}, log = () => {}, platform = process.platform,
   scanUsb, adbPath, download, every = 3000 } = {}) {
-  let adb = adbPath || null, timer = null, busy = false, downloading = null, adbState = "missing", progress = null, lastJson = "";
+  let adb = adbPath || null, timer = null, busy = false, downloading = null, adbState = "missing", progress = null, lastJson = "", fails = 0, retryAt = 0;
   const opened = new Map();    // serie -> { state, model, error }
   let plugged = [];
   const scan = scanUsb || (async () => {
@@ -168,11 +168,14 @@ function createPhoneUsb({ dataDir, getPort, getPin = () => "", send = () => {}, 
     adb = findAdb({ dataDir });
     if (adb) return adb;
     if (!download) return null;
+    // Tras un fallo (sin internet, firma mala…) se espera antes de volver a bajarlo: 1, 2, 4… hasta 15 min.
+    if (!downloading && Date.now() < retryAt) return null;
     if (!downloading) {
       adbState = "downloading"; progress = null; emit();
       downloading = download({ dataDir, onProgress: (p) => { progress = p; emit(); }, log }).then((r) => {
         downloading = null;
-        if (r.ok) { adb = r.adb; adbState = "ok"; } else { adbState = "error"; log("warn", "adb: " + r.error); }
+        if (r.ok) { adb = r.adb; adbState = "ok"; fails = 0; retryAt = 0; }
+        else { adbState = "error"; fails++; retryAt = Date.now() + Math.min(15 * 60e3, 60e3 * 2 ** (fails - 1)); log("warn", "adb: " + r.error); }
         progress = null; emit();
       });
     }
@@ -201,7 +204,7 @@ function createPhoneUsb({ dataDir, getPort, getPin = () => "", send = () => {}, 
     let r = await adbRun([...s, ...view, "-p", "com.android.chrome"]);
     if (r.err || /Error|does not exist|unable to resolve/i.test(r.out + r.errOut)) r = await adbRun([...s, ...view]);
     if (r.err || /^Error/m.test(r.out + r.errOut)) { p.state = "error"; p.error = (r.errOut || r.out || r.err?.message || "").trim().slice(0, 200); emit(); return { ok: false, error: p.error }; }
-    p.state = "open"; emit();
+    p.state = "open"; p.pin = pin; p.port = port; emit();
     log("info", `Móvil por USB: cámara abierta en ${p.model || serial}`);
     return { ok: true };
   }
@@ -224,7 +227,9 @@ function createPhoneUsb({ dataDir, getPort, getPin = () => "", send = () => {}, 
       for (const d of devs) {
         const p = opened.get(d.serial);
         // Recién enchufado (o recién aceptado en el móvil): se abre la cámara. Si falló, se reintenta cada 15 s.
-        if (d.state === "device") { if (!p || p.state === "unauthorized" || (p.state === "error" && Date.now() - (p.at || 0) > 15000)) await connect(d.serial); }
+        // Si cambió el PIN o el puerto del mando (servicio reiniciado), se vuelve a abrir con los nuevos.
+        const changedCfg = p?.state === "open" && (p.pin !== getPin() || p.port !== getPort());
+        if (d.state === "device") { if (!p || changedCfg || p.state === "unauthorized" || (p.state === "error" && Date.now() - (p.at || 0) > 15000)) await connect(d.serial); }
         else if (d.state === "unauthorized" || d.state === "authorizing") opened.set(d.serial, { ...(p || {}), model: p?.model || d.model, state: "unauthorized" });
       }
       emit();
@@ -243,7 +248,7 @@ function createPhoneUsb({ dataDir, getPort, getPin = () => "", send = () => {}, 
     },
     tick, connect,
     /** Volver a abrir la cámara en todos los móviles conectados (botón «Reintentar»). */
-    async retry() { for (const [k, p] of opened) if (p.state !== "unauthorized") await connect(k); emit(); return { ok: true }; },
+    async retry() { retryAt = 0; for (const [k, p] of opened) if (p.state !== "unauthorized") await connect(k); emit(); return { ok: true }; },
     status: () => JSON.parse(lastJson || "null"),
   };
 }

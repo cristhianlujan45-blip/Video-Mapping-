@@ -3,6 +3,7 @@
 // animados (ImageDecoder), cámara en vivo y textos. Lo usan el editor y la
 // salida; cada ventana carga sus propios elementos desde IndexedDB.
 import { getMedia } from "./store.js";
+import { stepTransport, isPlain } from "./transport.js";
 import { isPhoneKey, phoneStream, waitPhone, listPhones, onPhoneChange } from "./phonecam.js";
 
 export const ACCEPT = "image/*,video/*,.gif,.webp,.mp4,.webm,.mov,.mkv,.m4v,.avi,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf";
@@ -38,6 +39,11 @@ async function decodeAnimated(blob) {
   } catch { return null; }
 }
 
+function disposeRuntime(rt) {
+  if (rt.el && rt.el.pause) { rt.el.pause(); rt.el.removeAttribute("src"); rt.el.load?.(); }
+  rt.dispose?.();
+  if (rt.url) URL.revokeObjectURL(rt.url);
+}
 /** Runtime de un medio: {id, kind, el, width, height, source(t), frameKey(t)} */
 export async function createRuntime(rec) {
   const url = URL.createObjectURL(rec.blob);
@@ -113,6 +119,8 @@ export class MediaPool {
       const rec = await getMedia(id);
       if (!rec) return null;
       const rt = await createRuntime(rec);
+      // Mientras se preparaba, otro camino (p. ej. al terminar una conversión) ya lo añadió: se usa ese.
+      if (this.items.has(id)) { disposeRuntime(rt); return this.items.get(id); }
       this.items.set(id, rt);
       if (rt.kind === "video" && this.playing) rt.el.play().catch(() => {});
       this.onChange();
@@ -121,13 +129,16 @@ export class MediaPool {
     this.pending.set(id, p);
     return p;
   }
-  add(rt) { this.items.set(rt.id, rt); if (rt.kind === "video" && this.playing) rt.el.play().catch(() => {}); }
+  add(rt) {
+    const old = this.items.get(rt.id);
+    if (old && old !== rt) disposeRuntime(old);   // no deja un video viejo decodificando a escondidas
+    this.items.set(rt.id, rt);
+    if (rt.kind === "video" && this.playing) rt.el.play().catch(() => {});
+  }
   remove(id) {
     const rt = this.items.get(id);
     if (!rt) return;
-    if (rt.el && rt.el.pause) { rt.el.pause(); rt.el.removeAttribute("src"); rt.el.load?.(); }
-    rt.dispose?.();
-    URL.revokeObjectURL(rt.url);
+    disposeRuntime(rt);
     this.items.delete(id);
   }
   videos() { return [...this.items.values()].filter(r => r.kind === "video"); }
@@ -142,14 +153,31 @@ export class MediaPool {
     for (const l of looks) {
       if (l.source.type !== "media") continue;
       vol.set(l.source.mediaId, Math.max(vol.get(l.source.mediaId) || 0, l.volume || 0));
-      rate.set(l.source.mediaId, l.rate || 1);
+      if (isPlain(l.play)) rate.set(l.source.mediaId, l.rate || 1);   // con transporte, la velocidad la pone transport()
     }
     for (const r of this.videos()) {
       const v = muted ? 0 : (vol.get(r.id) || 0);
       r.el.muted = v <= 0;
       if (v > 0) r.el.volume = Math.min(1, v);
-      const rr = rate.get(r.id) || 1;
+      if (!rate.has(r.id)) continue;
+      const rr = rate.get(r.id);
       if (r.el.playbackRate !== rr) r.el.playbackRate = rr;
+    }
+  }
+  /** Bucle / una vez / reversa / ida y vuelta, entrada-salida y al tempo (transport.js). */
+  transport(looks, dt, bpm, playing) {
+    const ctl = new Map();
+    for (const l of looks) if (l.source.type === "media" && !ctl.has(l.source.mediaId)) ctl.set(l.source.mediaId, l);
+    for (const r of this.videos()) {
+      const l = ctl.get(r.id), v = r.el;
+      if (!l || isPlain(l.play)) { if (r.tp) { r.tp = null; v.loop = true; if (playing && v.paused) v.play().catch(() => {}); } continue; }
+      r.tp = r.tp || {};
+      v.loop = false;
+      if (!playing) continue;
+      const s = stepTransport(r.tp, l.play, v.currentTime, v.duration, Math.min(dt, 0.1), l.rate || 1, bpm);
+      if (s.native) { if (v.playbackRate !== s.rate) v.playbackRate = s.rate; if (v.paused) v.play().catch(() => {}); }
+      else if (!v.paused) v.pause();
+      if (s.seek != null && Math.abs(v.currentTime - s.seek) > 1 / 120 && !v.seeking) { try { v.currentTime = s.seek; } catch {} }
     }
   }
   clear() { for (const id of [...this.items.keys()]) this.remove(id); }
@@ -173,7 +201,24 @@ export function setCameraFacing(f) {
   stopCamera("default");
 }
 /** Video de una cámara (se abre una vez y se comparte). */
+/**
+ * ¿Sigue valiendo la cámara abierta? Una pista parada con stop() no avisa con «ended», y el
+ * móvil puede cambiar de pista (Wi-Fi → cable): entonces hay que volver a abrirla.
+ */
+function stale(key, c) {
+  if (!c.stream.getVideoTracks().some(t => t.readyState === "live")) return true;
+  if (isPhoneKey(key)) { const cur = phoneStream(key); return !!cur && cur !== c.stream; }
+  return false;
+}
+function dropStale(key) {
+  const c = cams.get(key);
+  if (!c || !stale(key, c)) return false;
+  cams.delete(key);
+  try { c.el.pause(); c.el.srcObject = null; } catch {}
+  return true;
+}
 export function getCamera(key = "default") {
+  dropStale(key);
   if (cams.has(key)) return Promise.resolve(cams.get(key));
   if (opening.has(key)) return opening.get(key);
   const p = (async () => {
@@ -199,7 +244,10 @@ export function getCamera(key = "default") {
   opening.set(key, p);
   return p;
 }
-export function cameraIfReady(key = "default") { return cams.get(key) || null; }
+export function cameraIfReady(key = "default") {
+  if (dropStale(key)) { getCamera(key).catch(() => {}); return null; }
+  return cams.get(key) || null;
+}
 const lost = new Map();      // clave -> cuándo se perdió
 /** ¿Esta cámara se desconectó (y aún no ha vuelto)? */
 export const cameraLost = (key = "default") => lost.has(key);

@@ -10,8 +10,10 @@ import { getShader } from "./plugins.js";
 import { hexToIsf, isfToHex } from "./isf.js";
 import { openPlugins } from "./panels-plugins.js";
 import { vjSection } from "./panels-vj.js";
+import { deckSection } from "./panels-deck.js";
 import { openPhoneCam } from "./panels-phonecam.js";
 import { canConvert } from "./convqueue.js";
+import { PLAY_MODES, SYNC_BEATS, DEFAULT_PLAY } from "./transport.js";
 import { h, section, row, btn, slider, segmented, toggle, swatches, stepper, tiles, hint, toast, dialog, closeDialog, lazyThumb, draggable } from "./ui.js";
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
@@ -314,6 +316,7 @@ const live = {
     const A = app.actions, S = app.S, P = S.project;
     const wrap = h("div", {});
     if (!P.surfaces.length) return needSelection(app, "Añade superficies (una por pantalla o zona) y aquí podrás poner una animación distinta en cada una y mezclarlas en vivo.");
+    wrap.append(deckSection(app));
     wrap.append(vjSection(app));
     wrap.append(section("Todas las pantallas",
       hint("Cada superficie tiene AHORA (lo que se ve) y SIGUIENTE (lo que preparas). Pulsa GO para fundir, o mueve el fader a mano."),
@@ -476,6 +479,7 @@ const content = {
         app.S.project.media.find(m => m.id === src.mediaId)?.kind === "video" ? h("div", {},
           slider({ label: "Velocidad", min: 0.25, max: 2, step: 0.05, value: look.rate, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => app.edit(() => { look.rate = v; }), param: `surf/${s.id}/rate` }),
           slider({ label: "Volumen", min: 0, max: 1, value: look.volume, def: 0, fmt: pct, onInput: (v) => app.edit(() => { look.volume = v; }), param: `surf/${s.id}/volume` }),
+          transportControls(app, look, src.mediaId),
           btn({ label: "Reiniciar videos", ic: "restart", kind: "block", onClick: A.restart })) : null));
     }
 
@@ -568,6 +572,23 @@ const content = {
     return wrap;
   },
 };
+
+/** Transporte del video (como en Resolume): modo, al tempo y tramo de entrada/salida. */
+function transportControls(app, look, mediaId) {
+  const p = look.play || (look.play = DEFAULT_PLAY());
+  const set = (k) => (v) => { app.edit(() => { p[k] = v; if (p.in > p.out - 0.01) { if (k === "in") p.out = Math.min(1, p.in + 0.01); else p.in = Math.max(0, p.out - 0.01); } }); };
+  const dur = app.S.project.media.find(m => m.id === mediaId)?.duration || 0;
+  const tfmt = (v) => dur ? `${(v * dur).toFixed(1)} s` : Math.round(v * 100) + "%";
+  return h("div", { class: "transport" },
+    h("div", { class: "lbl" }, "Reproducción"),
+    segmented({ options: PLAY_MODES, value: p.mode, small: true, onChange: (v) => { set("mode")(v); app.renderPanel(); } }),
+    h("div", { class: "lbl" }, "Al tempo: el tramo dura (golpes)"),
+    segmented({ options: SYNC_BEATS.map(([v, l]) => [String(v), l]), value: String(p.beats), small: true, onChange: (v) => { set("beats")(+v); app.renderPanel(); } }),
+    slider({ label: "Entrada", min: 0, max: 1, step: 0.005, value: p.in, def: 0, fmt: tfmt, onInput: set("in") }),
+    slider({ label: "Salida", min: 0, max: 1, step: 0.005, value: p.out, def: 1, fmt: tfmt, onInput: set("out") }),
+    p.mode === "reverse" || p.mode === "pingpong" ? hint("Hacia atrás va fotograma a fotograma: más fluido con videos cortos o convertidos con «Subir archivos pesados».") : null,
+    btn({ label: "⏮ Desde la entrada", kind: "block", onClick: () => app.actions.restartMedia(mediaId) }));
+}
 
 /* ---------------------------------------------------------------- Efectos */
 const fxUI = { cat: "Todas", q: "", combine: false };

@@ -18,6 +18,29 @@ cualquier navegador moderno.
 4. **Proyectar** → pantalla externa (HDMI/USB-C), ventana de salida o pantalla
    completa en el mismo dispositivo (para modo espejo o Chromecast).
 
+## LumaMap frente a Resolume
+
+Comparado función por función con Resolume Arena 7. Lo que faltaba se ha añadido pensado para que sea fácil (un toque, sin menús escondidos):
+
+| Resolume | LumaMap | Estado |
+|---|---|---|
+| Cuadrícula de clips (capas × columnas), lanzar clip o columna | **🎛 Mesa de clips** (En vivo): filas = superficies, columnas numeradas; tocar casilla o «▶ columna» | ✅ nuevo |
+| Lanzamiento cuantizado al BPM | «Lanzar: al instante / al golpe / al compás» (la casilla parpadea en naranja mientras espera) | ✅ nuevo |
+| Autopilot | Autopiloto cada 4–64 golpes, en orden o al azar (salta columnas vacías) | ✅ nuevo |
+| Envelopes / LFO en cualquier parámetro | **〰 Animar al ritmo**: clic derecho (o mantener pulsado) en cualquier deslizador → onda, triángulo, sierra, pulso o azar, cada ¼–32 golpes, con rango | ✅ nuevo |
+| Transporte de clip: velocidad, dirección, bucle/una vez/ping-pong, in/out, BPM sync | Panel del video: bucle, una vez, reversa, ida y vuelta, entrada/salida y «al tempo: el tramo dura N golpes» | ✅ nuevo |
+| Mapeo MIDI/OSC/DMX, Learn | Igual (también teclado, mandos y móvil); columnas de la mesa y autopiloto asignables | ✅ |
+| Advanced Output: slices, warping, máscaras, edge blending, varias pantallas | Superficies con esquinas/rejilla, máscaras, bordes suaves, 4 pantallas | ✅ |
+| Efectos y fuentes (generadores) | 137 efectos + 18 estilos + 92 animaciones + shaders ISF (plugins virales, cámara reactiva, nube de puntos…) | ✅ |
+| Shaders ISF (los que acepta Wire) | ISF completo: controles, cámara/video, sonido (FFT y onda), varias pasadas con memoria | ✅ |
+| Plugins FFGL (.dll de Resolume/Juicebar) | Ver «Plugins FFGL» abajo | ver abajo |
+| Crossfader A/B, transiciones | Mezclador A/B por superficie (fader y GO) + 8 transiciones de escena | ✅ |
+| Grabar la salida, BPM, tap tempo, MIDI clock, timecode | Igual | ✅ |
+| Audio-reactivo | Bandas, golpe, FFT para shaders, VJ automático que reconoce las partes del tema | ✅ (más que Resolume) |
+| Spout / Syphon / NDI | No | EN DESARROLLO |
+| Códec DXV (reversa perfecta) | La reversa va fotograma a fotograma; más fluida con videos cortos o convertidos | parcial |
+| Wire (editor de nodos) | No (se usan shaders ISF hechos en Wire/ISF) | no previsto |
+
 ## Modo simple y modo profesional
 
 Por defecto LumaMap se usa como siempre (modo simple). En **☰ → Modo

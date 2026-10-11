@@ -281,7 +281,7 @@ export class ShaderCache {
     // Si la última pasada fue a una imagen con nombre, se ve esa.
     const lastT = passes[passes.length - 1].target;
     if (lastT) this.blitTarget(e, lastT, width, height);
-    e.last = time; e.frame++;
+    e.last = time; e.frame++; e.stamp = performance.now();
     if (e.canvas.width !== width || e.canvas.height !== height) { e.canvas.width = width; e.canvas.height = height; }
     e.ctx.drawImage(c, 0, 0);
     e.version++;
@@ -314,6 +314,32 @@ export class ShaderCache {
   }
   dropTarget(t) { const gl = this.gl; for (const x of t.tex) gl.deleteTexture(x); for (const f of t.fb) gl.deleteFramebuffer(f); }
   dropTargets(e) { for (const t of e.targets.values()) this.dropTarget(t); e.targets.clear(); }
+  /** Quita una salida entera (texturas de entrada y memoria de pasadas). */
+  dropEntry(key) {
+    const e = this.out.get(key);
+    if (!e) return;
+    this.dropTargets(e);
+    if (this.gl) for (const t of e.tex.values()) this.gl.deleteTexture(t.tex);
+    this.out.delete(key);
+  }
+  /**
+   * La cubierta B (lo que entra en vivo) pasa a ser la A: su memoria (estelas, feedback) sigue
+   * igual en vez de empezar de cero o recuperar fotogramas viejos de la A.
+   */
+  adopt(keyA, keyB, id) {
+    const a = this.out.get(keyA), b = this.out.get(keyB);
+    // (si la A con este mismo shader se está dibujando ahora, es un fundido entre dos: no se toca)
+    if (!b || b.id !== id || (a && a.id === id && performance.now() - (a.stamp || 0) < 250)) return;
+    if (a) this.dropEntry(keyA);
+    this.out.set(keyA, b); this.out.delete(keyB);
+  }
+  /** Libera el contexto WebGL propio (lienzos temporales: capturas, grabación). */
+  dispose() {
+    for (const k of [...this.out.keys()]) this.dropEntry(k);
+    for (const id of [...this.progs.keys()]) this.forget(id);
+    this.gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    this.gl = null;
+  }
 }
 
 /** «#rrggbb» ↔ color ISF [r,g,b,a] (0-1). */

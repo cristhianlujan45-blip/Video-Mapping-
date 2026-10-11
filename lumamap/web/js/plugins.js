@@ -74,8 +74,14 @@ export function validatePlugin(p) {
 export function pluginFromFile(text, fileName = "") {
   const t = String(text || "");
   if (/\.(fs|frag|isf|glsl)$/i.test(fileName) || /^\s*\/\*\s*\{/.test(t)) {
-    const isf = parseISF(t, fileName.replace(/\.[^.]+$/, "") || "Shader");
-    return validatePlugin({ "lumamap-plugin": 1, id: "isf-" + (isf.name || fileName).toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30), name: isf.name, author: isf.credit,
+    const base = fileName.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "");
+    const isf = parseISF(t, base || "Shader");
+    // El id sale del nombre del archivo (reinstalar el mismo archivo lo actualiza). Sin nombre de archivo,
+    // del nombre del shader más una huella del texto: dos shaders con la misma descripción no se pisan.
+    let hsh = 0; for (let i = 0; i < t.length; i++) hsh = (hsh * 31 + t.charCodeAt(i)) | 0;
+    const slug = (x) => String(x).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+    const id = "isf-" + (base ? slug(base) : slug(isf.name).slice(0, 30) + "-" + (hsh >>> 0).toString(36));
+    return validatePlugin({ "lumamap-plugin": 1, id, name: base && !/"NAME"\s*:/.test(t) ? base : isf.name, author: isf.credit,
       description: isf.description || "Shader ISF", shaders: [{ name: isf.name, isf: t }] });
   }
   let j;

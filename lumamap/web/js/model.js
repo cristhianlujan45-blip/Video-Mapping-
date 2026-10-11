@@ -7,6 +7,9 @@
 // El mapeo se ajusta una sola vez y cada escena cambia solo el contenido,
 // como en los media servers profesionales. Funciona en navegador y en Node.
 import { gridFromCorners, regularPolygon, starPolygon } from "./math.js";
+import { normalizeLfos } from "./lfo.js";
+import { defaultDeck, normalizeDeck } from "./deck.js";
+import { DEFAULT_PLAY, normalizePlay } from "./transport.js";
 
 export const VERSION = 2;
 
@@ -391,6 +394,7 @@ export function createLook(source = {}) {
     fit: "stretch",       // stretch | cover | contain
     opacity: 1, blend: "normal", hidden: false,
     volume: 0, rate: 1,
+    play: DEFAULT_PLAY(),   // transporte del video: bucle/una vez/reversa/ida y vuelta, entrada-salida, al tempo
     fx: DEFAULT_FX(),
     audio: { enabled: false, band: "bass", target: "brightness", amount: 1 },
   };
@@ -757,6 +761,10 @@ export function defaultSettings() {
     transitionMs: 800, autoAdvance: false, loopScenes: true, bpm: 120,
     // VJ automático: estilo, intensidad, «cada pantalla distinta», recolorear y el set de clips.
     vj: { style: "techno", intensity: 0.7, variety: false, recolor: true, palette: null, clips: [] },
+    // «Animar al ritmo»: parámetros que suben y bajan solos con el tempo (lfo.js).
+    lfos: [],
+    // Mesa de clips (como la cuadrícula de Resolume): filas = superficies (deck.js).
+    deck: defaultDeck(),
     react: { enabled: false, amount: 1, pulse: true, zoom: true, color: true, motion: true, flash: false, sceneBeats: 0 },
     // Salida (como el «Advanced Output» de los media servers): calidad, color,
     // orientación del proyector y bordes suaves para unir varios proyectores.
@@ -1003,6 +1011,8 @@ export function normalizeProject(json) {
     tracking: normalizeTracking(st.tracking),
     interactive: normalizeInteractive(st.interactive),
     vj: { ...D.vj, ...(st.vj || {}), clips: Array.isArray(st.vj?.clips) ? st.vj.clips.slice(0, 300) : [] },
+    lfos: normalizeLfos(st.lfos),
+    deck: normalizeDeck(st.deck),
   };
   json.stage3d = normalizeStage3d(json.stage3d);
   if (!json.scenes.length) json.scenes.push(createScene());
@@ -1021,7 +1031,7 @@ export function normalizeProject(json) {
       const l = sc.looks[id];
       const base = createLook();
       sc.looks[id] = { ...base, ...l, source: { ...base.source, ...(l.source || {}) },
-        fx: { ...base.fx, ...(l.fx || {}) }, audio: { ...base.audio, ...(l.audio || {}) } };
+        fx: { ...base.fx, ...(l.fx || {}) }, audio: { ...base.audio, ...(l.audio || {}) }, play: normalizePlay(l.play) };
       const n = sc.looks[id].next;
       sc.looks[id].next = n && n.source ? { source: { ...base.source, ...n.source }, fx: n.fx ? { ...base.fx, ...n.fx } : null, fit: n.fit || null } : null;
     }

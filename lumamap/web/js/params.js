@@ -66,7 +66,7 @@ export const MERGES = [["override", "Sustituir"], ["add", "Sumar"], ["multiply",
 export const REL_KINDS = [["twos", "Complemento a 2 (1…63 / 127…65)"], ["offset", "Desplazado (65+ / 63-)"], ["sign", "Signo y magnitud (bit 64)"]];
 export const MODIFIERS = [["", "Ninguno"], ["shift", "SHIFT"], ["alt", "ALT"], ["ctrl", "CTRL"]];
 /** Fuentes continuas: su efecto es una modulación que caduca si dejan de llegar datos. */
-const CONTINUOUS = new Set(["audio", "tracking", "timeline"]);
+const CONTINUOUS = new Set(["audio", "tracking", "timeline", "lfo"]);
 const MOD_TTL = 500;
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

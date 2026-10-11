@@ -174,6 +174,12 @@ function tick() {
   if (st.guides) drawGuides(octx, project, { sx: 1, sy: 1, tx: 0, ty: 0 }, { selectedId: st.sel, pointIdx: st.point, scale: W / 1280 });
   // Bordes suaves: los generales de la salida y los propios de esta pantalla (proyectores unidos).
   drawSoftEdge(octx, sc.edge ? { ...oc.softEdge, left: Math.max(oc.softEdge?.left || 0, sc.edge.left || 0), right: Math.max(oc.softEdge?.right || 0, sc.edge.right || 0) } : oc.softEdge, 0, 0, W, H);
-  if (pool) pool.applyLookAudio(sceneLayers(project, null, now).flatMap(l => Object.values(l.scene.looks)), st.muted);
+  if (pool) {
+    const looks = sceneLayers(project, null, now).flatMap(l => Object.values(l.scene.looks));
+    pool.applyLookAudio(looks, st.muted);
+    pool.transport(looks, Math.min(0.1, (now - (lastTick || now)) / 1000), project.settings?.bpm || 120, st.playing);
+  }
+  lastTick = now;
 }
+let lastTick = 0;
 tick();

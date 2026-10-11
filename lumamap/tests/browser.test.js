@@ -919,6 +919,55 @@ await test("VJ automático: set desde una frase, mezcla sola al tempo (clips y e
   assert.deepEqual(after, { strobe: 0, rgb: 0, kal: 0, audio: false, on: false });
   await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(120); a.S.project.settings.vj.clips = []; a.S.project.settings.vj.palette = null; a.openTab(null); });
 });
+await test("como Resolume: mesa de clips (lanzar casilla y columna, al golpe y autopiloto) y «Animar al ritmo» en cualquier deslizador", async () => {
+  await page.bringToFront();
+  await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(240); a.S.liveFade = 0; if (!a.S.playing) a.actions.togglePlay(); a.openTab(null); a.openTab("live"); });
+  await page.locator("#panelBody").getByRole("button", { name: /Abrir la mesa/ }).click();
+  const deck = page.locator(".deck");
+  await deck.locator(".dcell").first().waitFor();
+  const sid = await deck.locator(".dcell").first().getAttribute("data-sid");
+  // Casilla vacía → elegir un color; pasa sola a la siguiente → otro color.
+  await deck.locator(`.dcell[data-sid="${sid}"][data-col="0"]`).click();
+  await deck.locator(".seg button", { hasText: "Color" }).click();
+  await deck.locator('.chip.swatch[title="#ff0040"]').click();
+  await deck.locator('.chip.swatch[title="#00e5ff"]').click();
+  const cells = await page.evaluate((sid) => window.__lumamap.S.project.settings.deck.cells[sid].map(c => c && c.color), sid);
+  assert.deepEqual(cells.slice(0, 2), ["#ff0040", "#00e5ff"]);
+  const look = () => page.evaluate((sid) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[sid]; return { type: l.source.type, color: l.source.color, next: !!l.next }; }, sid);
+  // Tocar la casilla 1 la lanza (al instante).
+  await deck.locator(`.dcell[data-sid="${sid}"][data-col="0"]`).click();
+  await page.waitForFunction((sid) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[sid]; return l.source.type === "color" && l.source.color === "#ff0040" && !l.next; }, sid, { timeout: 5000, polling: 50 });
+  await deck.locator(`.dcell.live[data-sid="${sid}"][data-col="0"]`).waitFor({ timeout: 3000 });
+  // Al compás: espera (naranja) y entra en el siguiente compás.
+  await deck.locator(".seg button", { hasText: "Al compás (4)" }).click();
+  await deck.locator(".colbtn", { hasText: "▶ 2" }).click();
+  assert.equal((await look()).color, "#ff0040", "aún no: espera al compás");
+  await page.waitForFunction((sid) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[sid]; return l.source.color === "#00e5ff"; }, sid, { timeout: 8000, polling: 50 });
+  // Autopiloto cada 4 golpes (a 240 BPM = 1 s): vuelve a la columna 1 sola.
+  await deck.locator(".seg button", { hasText: "Al instante" }).click();
+  await deck.locator(".seg button", { hasText: /^4 golpes$/ }).click();
+  await page.waitForFunction((sid) => { const a = window.__lumamap, l = a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[sid]; return l.source.color === "#ff0040"; }, sid, { timeout: 8000, polling: 50 });
+  await deck.locator(".seg button", { hasText: "Apagado" }).click();
+  await page.locator("#modal").getByRole("button", { name: "Listo" }).click();
+  // «Animar al ritmo»: clic derecho en «Brillo» → Animar → el brillo sube y baja solo.
+  await page.evaluate((sid) => { const a = window.__lumamap; a.select(sid); a.openTab("fx"); }, sid);
+  const bri = page.locator('#panelBody [data-param$="/fx/brightness"]').first();
+  await bri.click({ button: "right" });
+  await page.locator("#modal .lfoed").getByRole("button", { name: /Animar al ritmo/ }).click();
+  await page.locator("#modal .lfoed .chip", { hasText: /^1$/ }).click();
+  const lf = await page.evaluate(() => window.__lumamap.S.project.settings.lfos.map(l => ({ param: l.param, beats: l.beats })));
+  assert.equal(lf.length, 1); assert.match(lf[0].param, /\/fx\/brightness$/); assert.equal(lf[0].beats, 1);
+  const vals = [];
+  for (let i = 0; i < 12; i++) { vals.push(await page.evaluate(() => (window.__lumamap.S.mods || []).find(m => /fx\/brightness$/.test(m.id))?.value)); await page.waitForTimeout(40); }
+  assert.ok(vals.every(v => typeof v === "number"), "modula: " + vals.join(","));
+  assert.ok(Math.max(...vals) - Math.min(...vals) > 0.2, "sube y baja: " + vals.map(v => v.toFixed(2)).join(","));
+  const saved = await page.evaluate((sid) => { const a = window.__lumamap; return a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[sid].fx.brightness; }, sid);
+  assert.equal(saved, 1, "no toca el valor guardado");
+  await page.locator("#modal .lfoed").getByRole("button", { name: "Quitar" }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.settings.lfos.length), 0);
+  await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.deck.cells = {}; a.S.project.settings.deck.quantize = "off"; a.actions.setBpm(120); a.S.liveFade = 0.3; a.openTab(null); });
+  await page.keyboard.press("Escape");
+});
 await test("comparador antes/después en Efectos: a un lado de la línea el original, al otro con el efecto (y no sale en la proyección)", async () => {
   await page.bringToFront();
   const id = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces[0]; a.select(s.id); a.actions.setSource({ type: "color", color: "#ff0000" });
@@ -933,19 +982,19 @@ await test("comparador antes/después en Efectos: a un lado de la línea el orig
   })));
   await page.waitForTimeout(300);
   const off = await count();
-  assert.ok(off.cyan > 50 && off.red === 0, "sin comparar: todo con el efecto " + JSON.stringify(off));
+  assert.ok(off.cyan > 50 && off.red < 30, "sin comparar: todo con el efecto " + JSON.stringify(off));   // (otras superficies pueden tener algo de rojo)
   await page.locator("#panelBody .fxcompare").getByText("Comparar antes / después").click();
   await page.waitForFunction((id) => window.__lumamap.S.compare?.id === id, id);
   // La línea en el centro de la superficie.
   await page.evaluate(() => { const a = window.__lumamap, s = a.surf(), xs = s.corners ? s.corners.map(p => p.x) : s.points.map(p => p.x); a.S.compare.x = (Math.min(...xs) + Math.max(...xs)) / 2 / a.S.project.width; });
   await page.waitForTimeout(300);
   const on = await count();
-  assert.ok(on.red > 20 && on.cyan > 20, "con la línea: original y con efecto " + JSON.stringify(on));
+  assert.ok(on.red > off.red + 30 && on.cyan > 20, "con la línea: original y con efecto " + JSON.stringify({ off, on }));
   assert.ok(await page.locator("#panelBody .fxcompare input[type=range]").count(), "control de la línea");
   // Al salir de Efectos deja de comparar.
   await page.evaluate(() => window.__lumamap.openTab(null));
   await page.waitForTimeout(300);
-  assert.equal((await count()).red, 0, "fuera de Efectos no se compara");
+  assert.ok((await count()).red <= off.red + 5, "fuera de Efectos no se compara");
   await page.evaluate(() => { const a = window.__lumamap; a.S.compare = null; a.edit(() => { a.lookSel().fx.invert = false; }); });
 });
 await test("móvil: nada amontonado (de pie 4 + «Más», tumbado 7 + «Más», nada cortado ni fuera de la pantalla)", async () => {

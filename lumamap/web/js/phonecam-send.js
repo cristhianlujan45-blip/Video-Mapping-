@@ -96,14 +96,17 @@ async function makeOffer() {
 }
 
 /** Fotos JPEG seguidas por el WebSocket (~24 por segundo, sin acumular retraso). */
+let encWorker = null;
 function startFrames() {
   clearTimeout(frameTimer);
   state(USB ? "✓ Enviando la cámara por el cable USB. Deja esta página abierta." : "✓ Enviando la cámara al programa. Deja esta página abierta.", "ok");
   // El JPEG se codifica en un hilo aparte (phonecam-enc.js): en la página, Chrome espera a que
   // esté libre para codificar y, con la cámara en marcha, puede tardar un segundo por foto.
   const video = $("preview");
-  let worker = null, since = 0, mc = null, mctx = null;
-  try { if (typeof OffscreenCanvas === "function") worker = new Worker("js/phonecam-enc.js"); } catch {}
+  let since = 0, mc = null, mctx = null;
+  // Un solo hilo de codificar para toda la página (cada reconexión no debe abrir otro).
+  try { if (!encWorker && typeof OffscreenCanvas === "function") encWorker = new Worker("js/phonecam-enc.js"); } catch {}
+  const worker = encWorker;
   const cv = document.createElement("canvas"), ctx = cv.getContext("2d");
   const encodeHere = () => new Promise(r => cv.toBlob(r, "image/jpeg", 0.72)).then(b => b?.arrayBuffer());
   const encodeWorker = (bitmap) => new Promise((resolve) => {
@@ -160,6 +163,7 @@ function stop(user = true) {
   try { pc?.close(); } catch {} pc = null;
   try { ws?.close(); } catch {} ws = null;
   stream?.getTracks().forEach(t => t.stop()); stream = null;
+  try { encWorker?.terminate(); } catch {} encWorker = null;
   try { wake?.release(); } catch {}
   $("go").textContent = "▶ Empezar"; $("go").className = "go";
   if (user) state("Parado. Pulsa «Empezar» para volver a enviar.");

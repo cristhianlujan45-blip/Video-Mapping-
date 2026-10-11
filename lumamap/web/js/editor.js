@@ -13,7 +13,7 @@ import { Link, nativeBridge } from "./link.js";
 import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge, ROT_OFF } from "./overlay.js";
 import { roundPt, newStrokeId, hitStroke } from "./drawing.js";
 import { icon } from "./icons.js";
-import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles, hint, setDropTarget } from "./ui.js";
+import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles, hint, setDropTarget, slider } from "./ui.js";
 import { PANELS, TABS, showHelp } from "./panels.js";
 import { buildCommands, keymap, keyOf, openPalette, openContextMenu, closeContextMenu } from "./commands.js";
 import {
@@ -33,9 +33,12 @@ import { createVJ, VJ_STYLES } from "./autovj.js";
 import { spectrum256 } from "./isf.js";
 import { startDeviceNotices, cameraPlugged } from "./phoneusb-ui.js";
 import { openMediaLibrary } from "./panels-library.js";
-import { loadPlugins } from "./plugins.js";
+import { openDeck } from "./panels-deck.js";
+import { loadPlugins, getShader } from "./plugins.js";
+import { createLfoClock, newLfo, LFO_SHAPES, LFO_BEATS } from "./lfo.js";
+import { quantizeAt, nextCol } from "./deck.js";
 import { setupQueue, maybeQueue, canConvert, resumePending, cancelJob, IMAGE_CONVERT } from "./convqueue.js";
-import { ParamEngine, describe, applyModList } from "./params.js";
+import { ParamEngine, describe, applyModList, registerParams } from "./params.js";
 import { DmxEngine } from "./dmx.js";
 import { ShowEngine, parseTc, fmtTc } from "./show.js";
 import { ensure3d, handle3dKey, closeWorkspace } from "./panels-3d.js";
@@ -219,6 +222,35 @@ A.learn = async (id) => {
   else params.cancelLearn();
 };
 /** Menú de un control: aprender, ver y quitar sus asignaciones. */
+/* ---- «Animar al ritmo» (LFO al tempo) ---- */
+const lfoClock = createLfoClock();
+app.lfoBeat = () => lfoClock.beat;
+function lfoEditor(d) {
+  const box = h("div", { class: "lfoed" });
+  const lfos = () => S.project.settings.lfos;
+  const save = () => { changed(); commitSoon(); };
+  const chips = (opts, val, set) => h("div", { class: "chips" }, ...opts.map(([v, label]) => h("button", { class: `chip ${val === v ? "on" : ""}`, onclick: () => { set(v); save(); draw(); } }, label)));
+  const draw = () => {
+    const l = lfos().find(x => x.param === d.id);
+    if (!l) {
+      box.replaceChildren(btn({ label: "〰 Animar al ritmo", kind: "block", title: "Sube y baja solo con el tempo (como un LFO)", onClick: () => { lfos().push(newLfo(d.id)); save(); draw(); } }));
+      return;
+    }
+    const pct = (v) => Math.round(v * 100) + "%";
+    box.replaceChildren(
+      h("div", { class: "lbl" }, "〰 Animar al ritmo"),
+      chips(LFO_SHAPES, l.shape, (v) => { l.shape = v; }),
+      h("div", { class: "lbl" }, "Un ciclo cada (golpes)"),
+      chips(LFO_BEATS, l.beats, (v) => { l.beats = v; }),
+      d.kind === "float" ? slider({ label: "Desde", min: 0, max: 1, step: 0.01, value: l.lo, def: 0, fmt: pct, onInput: (v) => { l.lo = v; save(); } }) : null,
+      d.kind === "float" ? slider({ label: "Hasta", min: 0, max: 1, step: 0.01, value: l.hi, def: 1, fmt: pct, onInput: (v) => { l.hi = v; save(); } }) : null,
+      h("div", { class: "row" },
+        btn({ label: l.on ? "⏸ Pausar" : "▶ Seguir", onClick: () => { l.on = !l.on; save(); draw(); } }),
+        btn({ label: "Quitar", kind: "danger", onClick: () => { S.project.settings.lfos = lfos().filter(x => x !== l); save(); draw(); } })));
+  };
+  draw();
+  return box;
+}
 async function paramMenu(id) {
   const d = describe(app, id);
   if (!d) return;
@@ -228,7 +260,7 @@ async function paramMenu(id) {
   const list = h("div", { class: "list" });
   for (const m of maps) list.append(h("div", { class: "item" }, h("span", {}, mappingLabel(m), h("small", {}, ` · ${m.mode}${m.bank ? " · banco " + m.bank : ""}`)),
     btn({ ic: "trash", kind: "icon", title: "Quitar", onClick: () => { C.mappings.splice(C.mappings.indexOf(m), 1); params.dropMods(m.id); app.paramMappingsChanged(); closeDialog(); } })));
-  const r = await dialog({ title: d.name, content: h("div", {}, maps.length ? list : hint("Sin control físico asignado.")),
+  const r = await dialog({ title: d.name, content: h("div", {}, maps.length ? list : hint("Sin control físico asignado."), d.kind !== "trigger" ? lfoEditor(d) : null),
     buttons: [{ label: "Panel Control", value: "panel" }, { label: "Aprender…", kind: "primary", value: "learn" }] });
   if (r === "learn") A.learn(id);
   if (r === "panel") { setPro(true); openTab("control"); }
@@ -240,13 +272,23 @@ document.addEventListener("contextmenu", (e) => {
   paramMenu(el.dataset.param);
 }, true);
 
+/**
+ * Deshacer/rehacer cambia lo que hiciste, no el estado de los archivos: un video que ya terminó de
+ * convertirse sigue listo (si no, volvería a «Convirtiendo…» para siempre).
+ */
+function restoreProject(p) {
+  const ready = new Map(S.project.media.filter(m => !m.pending).map(m => [m.id, m]));
+  const next = M.normalizeProject(p);
+  for (const m of next.media) if (m.pending && ready.has(m.id)) { Object.assign(m, ready.get(m.id)); delete m.pending; }
+  S.project = next;
+}
 A.undo = () => {
   const p = history.undo();
-  if (p) { S.project = M.normalizeProject(p); fixSelection(); changed({ panel: true }); toast("Deshecho"); }
+  if (p) { restoreProject(p); fixSelection(); changed({ panel: true }); toast("Deshecho"); }
 };
 A.redo = () => {
   const p = history.redo();
-  if (p) { S.project = M.normalizeProject(p); fixSelection(); changed({ panel: true }); toast("Rehecho"); }
+  if (p) { restoreProject(p); fixSelection(); changed({ panel: true }); toast("Rehecho"); }
 };
 function fixSelection() {
   if (S.sel && !surf()) S.sel = null;
@@ -264,7 +306,7 @@ A.restart = () => { pool.restart(); S.clock = 0; S.sceneStart = 0; link.send({ t
 /** Un video concreto desde el principio (reglas interactivas: «al entrar alguien, empieza el video»). */
 A.restartMedia = (id) => {
   const rt = pool.items.get(id);
-  if (rt?.el && rt.kind === "video") { try { rt.el.currentTime = 0; } catch {} if (S.playing) rt.el.play().catch(() => {}); }
+  if (rt?.el && rt.kind === "video") { rt.tp = null; try { rt.el.currentTime = 0; } catch {} if (S.playing) rt.el.play().catch(() => {}); }
   else pool.ensure(id);
   link.send({ t: "restartMedia", id });
 };
@@ -484,6 +526,7 @@ const lookOfId = (id) => M.lookOf(scene(), id);
 const takeTimers = new Map();
 /** Prepara lo siguiente que entrará en una superficie. */
 A.setNext = (id, next) => {
+  clearTimeout(takeTimers.get(id)); takeTimers.delete(id);   // un GO a medias no debe meter lo nuevo de golpe
   const l = lookOfId(id);
   l.next = { source: { ...M.DEFAULT_SOURCE(), ...next.source }, fx: next.fx ? { ...M.DEFAULT_FX(), ...next.fx } : null, fit: next.fit || null };
   l.mix = 0; l.fade = null;
@@ -502,6 +545,7 @@ A.take = (id, l = lookOfId(id)) => {
 A.setMix = (id, v) => {
   const l = lookOfId(id);
   if (!l.next) return;
+  clearTimeout(takeTimers.get(id)); takeTimers.delete(id);
   l.fade = null; l.mix = v;
   if (v >= 0.999) A.take(id); else changed();
 };
@@ -542,15 +586,101 @@ A.toggleSurfaceBlack = (id) => {
   l.hidden = !l.hidden;
   changed({ panel: true }); commit();
 };
+/* ---- Mesa de clips (deck.js): lanzar clips por superficie o por columnas, al ritmo ---- */
+const deckState = { playing: {}, pending: [], autoAt: null, col: -1 };   // superficie → columna sonando; lanzamientos en espera
+app.deckState = deckState;
+function deckSource(c) {
+  if (c.kind === "media") return { type: "media", mediaId: c.mediaId };
+  if (c.kind === "shader") return { type: "shader", shaderId: c.shaderId, shaderParams: { ...(c.params || {}) }, speed: 1 };
+  if (c.kind === "color") return { type: "color", color: c.color };
+  return { type: "gen", gen: c.gen, color: c.color, color2: c.color2, speed: c.speed ?? 1, scale: c.scale ?? 1 };
+}
+/** Lanza ya una casilla: entra con el fundido en vivo (sin llenar el deshacer: en directo se lanza mucho). */
+function deckFire(sid, col) {
+  const clip = S.project.settings.deck.cells[sid]?.[col];
+  const l = S.project.surfaces.some(s => s.id === sid) && lookOfId(sid);
+  if (!clip || !l) return false;
+  if (clip.kind === "media" && !S.project.media.some(m => m.id === clip.mediaId && !m.pending)) return false;
+  if (l.next) vjTake(sid);
+  l.next = { source: { ...M.DEFAULT_SOURCE(), ...deckSource(clip) }, fx: clip.fx ? { ...M.DEFAULT_FX(), ...clip.fx } : null, fit: clip.kind === "media" ? "cover" : null };
+  l.mix = 0; l.fade = null;
+  if (clip.kind === "media") A.restartMedia(clip.mediaId);   // como en Resolume: el clip empieza desde su entrada
+  clearTimeout(takeTimers.get(sid));
+  const dur = S.playing ? S.liveFade : 0;
+  if (!dur) vjTake(sid);
+  else { l.fade = { t0: S.clock, dur }; takeTimers.set(sid, setTimeout(() => vjTake(sid, l), dur * 1000 + 30)); }
+  deckState.playing[sid] = col;
+  changed();
+  return true;
+}
+/** Lanza una casilla (al instante o en el siguiente golpe/compás según la mesa). */
+A.deckLaunch = (sid, col) => {
+  const D = S.project.settings.deck;
+  if (!D.cells[sid]?.[col]) return false;
+  if (D.quantize === "off" || !S.playing) return deckFire(sid, col);
+  deckState.pending = deckState.pending.filter(p => p.sid !== sid);
+  deckState.pending.push({ sid, col, at: quantizeAt(lfoClock.beat, D.quantize) });
+  return true;
+};
+/** Lanza toda una columna (cada superficie con su casilla). */
+A.deckLaunchCol = (col) => {
+  const D = S.project.settings.deck;
+  let n = 0;
+  for (const s of S.project.surfaces) if (D.cells[s.id]?.[col] && A.deckLaunch(s.id, col)) n++;
+  if (n) { deckState.col = col; deckState.autoAt = null; }
+  return n;
+};
+function deckTick() {
+  const beat = lfoClock.beat, D = S.project.settings.deck;
+  if (deckState.pending.length) {
+    const due = deckState.pending.filter(p => beat >= p.at);
+    deckState.pending = deckState.pending.filter(p => beat < p.at);
+    for (const p of due) deckFire(p.sid, p.col);
+  }
+  // Autopiloto: cada N golpes, la siguiente columna con algo (o una al azar).
+  if (D.autopilot && S.playing) {
+    if (deckState.autoAt === null) deckState.autoAt = beat + D.autopilot;
+    else if (beat >= deckState.autoAt) {
+      deckState.autoAt = beat + D.autopilot;
+      const rows = S.project.surfaces.map(s => s.id), c = nextCol(D, rows, deckState.col);
+      if (c >= 0) { for (const sid of rows) if (D.cells[sid]?.[c]) deckFire(sid, c); deckState.col = c; }
+    }
+  } else deckState.autoAt = null;
+}
+app.openDeck = () => openDeck(app);
+// MIDI/OSC/teclado: lanzar columnas o casillas y el autopiloto.
+registerParams("deck", (app, id, p) => {
+  const D = S.project.settings.deck, mk = (o) => ({ id, group: "Mesa de clips", min: 0, max: 1, def: 0, ...o });
+  if (p[1] === "col" && +p[2] >= 0 && +p[2] < D.cols) return mk({ name: `Mesa · columna ${+p[2] + 1}`, kind: "trigger", set: () => A.deckLaunchCol(+p[2]) });
+  if (p[1] === "next") return mk({ name: "Mesa · columna siguiente", kind: "trigger", set: () => { const c = nextCol(D, S.project.surfaces.map(s => s.id), deckState.col); if (c >= 0) A.deckLaunchCol(c); } });
+  if (p[1] === "autopilot") return mk({ name: "Mesa · autopiloto", kind: "bool", get: () => !!D.autopilot, set: (v) => { D.autopilot = v ? (D.autopilot || 16) : 0; changed({ panel: true }); } });
+  return null;
+}, (app) => [{ group: "Mesa de clips", items: [...Array.from({ length: S.project.settings.deck.cols }, (_, i) => "deck/col/" + i), "deck/next", "deck/autopilot"].map(id => describe(app, id)).filter(Boolean).map(d => ({ id: d.id, name: d.name, kind: d.kind })) }]);
+
 /* ---- VJ automático (autovj.js decide; aquí se aplica sin llenar el historial) ---- */
 let vj = null;
-const vjBase = new Map();      // superficie → { fx propio del clip, audio original }
+const vjBase = new Map();      // «escena:superficie» → { escena, superficie, fx propio del clip, audio original }
+const vjKey = (sid) => S.project.sceneId + ":" + sid;
+/** Proyecto para guardar: con el VJ en marcha, cada pantalla con sus efectos y audio propios (no los del VJ). */
+function savable() {
+  if (!vjBase.size) return S.project;
+  const P = JSON.parse(JSON.stringify(S.project));
+  for (const b of vjBase.values()) {
+    const l = P.scenes.find(sc => sc.id === b.scene)?.looks[b.sid];
+    if (!l) continue;
+    if (l.next) { const n = deckB(l); l.source = n.source; l.fit = n.fit; l.next = null; l.mix = 0; l.fade = null; }
+    l.fx = { ...b.fx }; l.audio = { ...b.orig.audio };
+  }
+  return P;
+}
 const VJ_SKIP = new Set(["body", "camera", "text", "drawing", "model3d", "projector3d"]);
 /** Clips del set (o, si está vacío, todo el catálogo de animaciones menos las de calibrar). */
 function vjClips() {
   const V = S.project.settings.vj;
   if (V.clips.length) return V.clips.filter(c => c.on !== false && (c.kind !== "media" || S.project.media.some(m => m.id === c.mediaId && !m.pending)));
-  return M.ANIM_LIBRARY.filter(a => a.cat !== "Calibración").map(a => a.shader ? { id: a.id, name: a.name, kind: "shader", shaderId: a.shader } : { id: a.id, name: a.name, kind: "anim", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale, fx: a.fx || null });
+  // Sin set: todo el catálogo menos calibración y los shaders que necesitan cámara/video
+  // (sin cámara quedarían en negro; con cámara proyectarían la cabina). Esos, solo si los eliges.
+  return M.ANIM_LIBRARY.filter(a => a.cat !== "Calibración" && !(a.shader && getShader(a.shader)?.isf?.usesCamera)).map(a => a.shader ? { id: a.id, name: a.name, kind: "shader", shaderId: a.shader } : { id: a.id, name: a.name, kind: "anim", gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale, fx: a.fx || null });
 }
 /** Superficies que lleva el VJ: las visibles con animación, video, shader o color (no toca cámara, interactivo, texto ni dibujo). */
 const vjSurfaces = () => S.project.surfaces.filter(s => !s.hidden && !VJ_SKIP.has(lookOfId(s.id).source.type)).map(s => s.id);
@@ -563,9 +693,8 @@ function vjSource(c, palette) {
   return { type: "gen", gen: c.gen, color: recolor ? pal[0] : c.color, color2: recolor ? pal[1] : c.color2, speed: c.speed ?? 1, scale: c.scale ?? 1 };
 }
 /** B pasa a A sin tocar el historial (el VJ cambia mucho: deshacer no debe llenarse de clips). */
-function vjTake(sid) {
+function vjTake(sid, l = lookOfId(sid)) {
   clearTimeout(takeTimers.get(sid)); takeTimers.delete(sid);
-  const l = lookOfId(sid);
   if (!l?.next) return;
   const b = deckB(l);
   l.source = b.source; l.fx = b.fx; l.fit = b.fit;
@@ -576,11 +705,12 @@ function vjApply(actions) {
   const beatSec = 60 / Math.max(40, S.levels?.bpm || S.project.settings.bpm || 120);
   const flash = new Set();
   for (const a of actions) {
-    const l = lookOfId(a.surface || "");
     if (a.type === "section") { S.vjSection = a.section; continue; }
-    if (!l) continue;
-    if (!vjBase.has(a.surface)) vjBase.set(a.surface, { fx: { ...l.fx }, audio: { ...l.audio }, orig: { fx: { ...l.fx }, audio: { ...l.audio } } });
-    const b = vjBase.get(a.surface);
+    if (!a.surface || !S.project.surfaces.some(s => s.id === a.surface)) continue;
+    const l = lookOfId(a.surface);
+    const k = vjKey(a.surface);
+    if (!vjBase.has(k)) vjBase.set(k, { scene: S.project.sceneId, sid: a.surface, fx: { ...l.fx }, audio: { ...l.audio }, orig: { fx: { ...l.fx }, audio: { ...l.audio } } });
+    const b = vjBase.get(k);
     if (a.type === "clip") {
       if (l.next) vjTake(a.surface);
       const fx = { ...M.DEFAULT_FX(), ...(a.clip.fx || {}) };
@@ -589,7 +719,7 @@ function vjApply(actions) {
       b.fx = fx;
       if (a.flash) flash.add(a.surface);
       if (!a.beats) vjTake(a.surface);
-      else { l.fade = { t0: S.clock, dur: a.beats * beatSec }; takeTimers.set(a.surface, setTimeout(() => vjTake(a.surface), a.beats * beatSec * 1000 + 30)); }
+      else { l.fade = { t0: S.clock, dur: a.beats * beatSec }; takeTimers.set(a.surface, setTimeout(() => vjTake(a.surface, l), a.beats * beatSec * 1000 + 30)); }
     } else if (a.type === "fx") {
       const fx = { ...b.fx, ...a.fx };
       if (flash.has(a.surface)) fx.brightness = (fx.brightness || 1) * 2.2;   // destello al entrar el drop
@@ -616,7 +746,14 @@ A.vjStop = () => {
   if (!vj) return;
   vj = null; S.vjOn = false;
   // Cada pantalla se queda con su clip actual y recupera sus efectos y su audio.
-  for (const [sid, b] of vjBase) { const l = lookOfId(sid); if (!l) continue; if (l.next) vjTake(sid); l.fx = b.fx; l.audio = b.orig.audio; }
+  // (también en las escenas por las que pasó el VJ, no solo en la actual)
+  for (const b of vjBase.values()) {
+    const l = S.project.scenes.find(sc => sc.id === b.scene)?.looks[b.sid];
+    if (!l) continue;
+    clearTimeout(takeTimers.get(b.sid));
+    if (l.next) { const n = deckB(l); l.source = n.source; l.fit = n.fit; l.next = null; l.mix = 0; l.fade = null; }
+    l.fx = b.fx; l.audio = b.orig.audio;
+  }
   vjBase.clear();
   changed({ panel: true }); commit();
   toast("VJ automático parado");
@@ -1016,7 +1153,7 @@ A.save = async (asNew = false) => {
     name = S.project.name = n.trim();
   }
   try {
-    await Store.saveProject(name, S.project);
+    await Store.saveProject(name, savable());
     changed();
     toast(`Guardado «${name}»`);
   } catch (e) { toast("No se pudo guardar: " + e.message, "err"); }
@@ -1046,7 +1183,7 @@ A.open = async () => {
 /** Guarda en silencio el proyecto actual antes de reemplazarlo (nada se pierde). */
 async function keepCurrent() {
   if (!S.project.surfaces.length) return;
-  try { await Store.saveProject(S.project.name, S.project); } catch {}
+  try { await Store.saveProject(S.project.name, savable()); } catch {}
 }
 
 A.newProject = async () => {
@@ -1079,7 +1216,8 @@ async function exportProject() {
     const rec = await Store.getMedia(m.id);
     if (rec?.blob) media.push({ ...m, dataUrl: await Store.blobToDataURL(rec.blob) });
   }
-  const doc = { format: "lumamap", version: M.VERSION, exportedAt: new Date().toISOString(), project: { ...S.project, media: S.project.media.map(({ thumb, ...m }) => m) }, media };
+  const P = savable();
+  const doc = { format: "lumamap", version: M.VERSION, exportedAt: new Date().toISOString(), project: { ...P, media: P.media.map(({ thumb, ...m }) => m) }, media };
   const text = JSON.stringify(doc);
   const name = (S.project.name || "proyecto").replace(/[^\w\- áéíóúñÁÉÍÓÚÑ]/g, "_") + ".lumamap";
   if (native?.saveBegin) {
@@ -1505,7 +1643,7 @@ app.version = () => Updater.currentVersion();
  * proceso principal antes de lanzar el actualizador independiente.
  */
 A.prepareForUpdate = async () => {
-  await Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {});
+  await Store.saveProject(Store.AUTOSAVE, savable()).catch(() => {});
   await saveBackup(true).catch(() => {});
   if (S.rec) { try { A.record(); } catch {} }
   try { stopCamera(); } catch {}
@@ -1657,7 +1795,7 @@ async function saveBackup(force = false) {
   if (!force && sig === lastBackupSig) return;
   lastBackupSig = sig;
   const name = "__backup__" + new Date().toISOString().replace(/[:.]/g, "-");
-  await Store.saveProject(name, S.project);
+  await Store.saveProject(name, savable());
   const all = (await Store.listBackups()).sort((a, b) => b.savedAt - a.savedAt);
   for (const old of all.slice(12)) await Store.deleteProject(old.name);
 }
@@ -1717,7 +1855,7 @@ function renderOff(o, now) {
 A.snapshot = () => {
   const o = offscreenRenderer(true);
   renderOff(o, performance.now());
-  o.canvas.toBlob((b) => { saveBlob(`lumamap-${stamp()}.png`, b); toast("Imagen guardada"); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); }, "image/png");
+  o.canvas.toBlob((b) => { saveBlob(`lumamap-${stamp()}.png`, b); toast("Imagen guardada"); o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); }, "image/png");
 };
 
 A.record = () => {
@@ -1741,6 +1879,7 @@ A.record = () => {
   mr.onstop = () => {
     const blob = new Blob(chunks, { type: mime.split(";")[0] || "video/webm" });
     S.rec = null;
+    o.comp.dispose();
     o.r.gl.getExtension("WEBGL_lose_context")?.loseContext();
     updateChrome();
     saveBlob(`lumamap-${stamp()}.${blob.type.includes("mp4") ? "mp4" : "webm"}`, blob);
@@ -2718,6 +2857,13 @@ function tick(now) {
   }
   pads?.poll();
   // Modulaciones del motor de parámetros (audio, tracking, mezclas): solo en el render.
+  // «Animar al ritmo»: cada LFO mueve su parámetro con el tempo (como modulación).
+  lfoClock.tick(S.clock, S.levels?.bpm || S.project.settings.bpm || 120, S.project.settings.lfos, (l, w) => {
+    const d = describe(app, l.param);
+    if (!d || d.kind === "trigger") return;
+    params.modulateExt("lfo:" + l.id, l.param, d.kind === "bool" ? (w >= 0.5 ? 1 : 0) : d.min + (d.max - d.min) * w, "lfo");
+  });
+  deckTick();
   S.mods = params.modList(now);
   const RP = applyModList(S.project, S.master, S.mods);
   S.renderProject = RP.project; S.renderMaster = RP.master;
@@ -2733,7 +2879,9 @@ function tick(now) {
     blackout: S.blackout || (S.viewScreen ? !S.project.settings.screens[S.viewScreen].on : false), clear: S.projecting ? [0, 0, 0, 1] : [0, 0, 0, 0],
     live: S.live, compare: compareNow(),
   });
-  pool.applyLookAudio(layers.flatMap(l => Object.values(l.scene.looks)), S.muted || outputPlaysAudio());
+  const allLooks = layers.flatMap(l => Object.values(l.scene.looks));
+  pool.applyLookAudio(allLooks, S.muted || outputPlaysAudio());
+  pool.transport(allLooks, dt, S.levels?.bpm || S.project.settings.bpm || 120, S.playing);
   // Luces: el video alimenta los pixel maps y los fixtures (muestreo en la GPU).
   dmx.tick(now, { project: RP.project, layers, time: S.clock, levels: S.levels, master: RP.master });
   if (!document.hidden && !S.previewSkip) { drawOverlay(v, view); drawCompare(ovCtx(), v, DPR()); drawLoupe(v, view); }
@@ -2759,7 +2907,7 @@ function tick(now) {
   }
   if (S.saveDue && now > S.saveDue) {
     S.saveDue = 0;
-    Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {});
+    Store.saveProject(Store.AUTOSAVE, savable()).catch(() => {});
   }
   perf.lastWork = performance.now() - workStart;
 }
@@ -3260,7 +3408,7 @@ async function init() {
   $("#gl").addEventListener("webglcontextlost", (e) => {
     e.preventDefault();
     window.LumaDesktop?.log?.("gpu", "Contexto WebGL perdido: se recarga el editor");
-    Store.saveProject(Store.AUTOSAVE, S.project).catch(() => {}).finally(() => setTimeout(() => location.reload(), 800));
+    Store.saveProject(Store.AUTOSAVE, savable()).catch(() => {}).finally(() => setTimeout(() => location.reload(), 800));
   });
   addEventListener("error", (e) => window.LumaDesktop?.log?.("renderer", `${e.message} @ ${e.filename}:${e.lineno}`));
   addEventListener("unhandledrejection", (e) => window.LumaDesktop?.log?.("renderer", "Promesa rechazada: " + (e.reason?.stack || e.reason)));

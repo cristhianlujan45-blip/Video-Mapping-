@@ -8,6 +8,7 @@ import { VJ_STYLES, SECTIONS, clipEnergy, setFromText } from "./autovj.js";
 import { ANIM_LIBRARY, ANIM_CATEGORIES } from "./model.js";
 import { animThumb } from "./thumbs.js";
 import { aiOf } from "./panels-assistant.js";
+import { getShader } from "./plugins.js";
 
 const EN = { soft: "🌙 Suave", mid: "⚡ Media", hard: "🔥 Fuerte" };
 const SEC_IC = { calm: "🌙", build: "📈", drop: "💥", high: "🔥", break: "🌫" };
@@ -83,7 +84,7 @@ export async function openVjSet(app) {
     // Sin IA (o si la IA no dio una lista válida): las del tema y una mezcla de energías del estilo.
     let anims = r.anims;
     if (!anims) {
-      const pool = ANIM_LIBRARY.filter(a => a.cat !== "Calibración");
+      const pool = ANIM_LIBRARY.filter(a => a.cat !== "Calibración" && !(a.shader && getShader(a.shader)?.isf?.usesCamera));
       const themed = pool.filter(a => r.gens.includes(a.gen));
       const by3 = (e, k) => pool.filter(a => clipEnergy(a) === e && !themed.includes(a)).sort(() => Math.random() - 0.5).slice(0, k);
       anims = [...themed.slice(0, 10), ...by3("soft", 4), ...by3("mid", 4), ...by3("hard", 6)];
