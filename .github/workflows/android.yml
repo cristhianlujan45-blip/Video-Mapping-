@@ -170,9 +170,55 @@ jobs:
 
   # Descarga directa (sin zips): publica el instalador y el APK en una versión
   # preliminar «lumamap-latest» de la página Releases del repositorio.
+  # Mac: imagen .dmg para Apple Silicon (M1/M2/M3/M4) y otra para Intel. Firma ad hoc (sin
+  # certificado de Apple). Se abre la app de verdad y se espera a que el editor arranque.
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build LumaMap para Mac (Apple Silicon e Intel)
+        working-directory: lumamap/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm ci --no-audit --no-fund
+          npm version "2.3.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+          node build.mjs installer-mac arm64
+          node build.mjs installer-mac x64
+          ls -la dist/*.dmg
+
+      - name: Abrir la app del Mac y comprobar que arranca
+        working-directory: lumamap/desktop
+        run: |
+          MNT=$(mktemp -d)
+          hdiutil attach dist/LumaMap-Mac-arm64.dmg -nobrowse -mountpoint "$MNT"
+          cp -R "$MNT/LumaMap.app" "$RUNNER_TEMP/"
+          hdiutil detach "$MNT"
+          codesign --verify --deep --verbose=2 "$RUNNER_TEMP/LumaMap.app"
+          DATA=$(mktemp -d)
+          LUMAMAP_USER_DATA="$DATA" "$RUNNER_TEMP/LumaMap.app/Contents/MacOS/LumaMap" > "$RUNNER_TEMP/mac-app.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 60); do grep -q "Editor listo" "$DATA/logs/lumamap.log" 2>/dev/null && break; sleep 2; done
+          cat "$DATA/logs/lumamap.log" || true
+          kill $PID 2>/dev/null || true
+          grep -q "Editor listo" "$DATA/logs/lumamap.log"
+
+      - name: Upload LumaMap Mac
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumamap-mac
+          path: lumamap/desktop/dist/*.dmg
+          if-no-files-found: error
+
   publish:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: [build, windows, e2e]
+    needs: [build, windows, mac, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -185,6 +231,9 @@ jobs:
           mkdir release
           cp out/lumamap-windows-installer/*.exe release/LumaMap-Setup.exe
           cp out/lumamap-android/lumamap-release.apk release/LumaMap-Android.apk
+          cp out/lujan-mapping-debug-apk/*.apk release/LujanMapping-Android.apk
+          cp out/lumamap-mac/LumaMap-Mac-arm64.dmg release/LumaMap-Mac-AppleSilicon.dmg
+          cp out/lumamap-mac/LumaMap-Mac-x64.dmg release/LumaMap-Mac-Intel.dmg
           BASE="https://github.com/${{ github.repository }}/releases/download/lumamap-latest"
           NOTES=$(echo "${{ github.event.head_commit.message }}" | head -n1 | sed 's/"/\\"/g')
           SHA=$(sha256sum release/LumaMap-Setup.exe | cut -d' ' -f1)
@@ -196,7 +245,8 @@ jobs:
             "commit": "${{ github.sha }}",
             "notes": "${NOTES}",
             "android": { "versionCode": $((1000 + LUMAMAP_BUILD)), "url": "${BASE}/LumaMap-Android.apk" },
-            "windows": { "version": "2.3.${LUMAMAP_BUILD}", "url": "${BASE}/LumaMap-Setup.exe", "sha256": "${SHA}", "size": ${SIZE} }
+            "windows": { "version": "2.3.${LUMAMAP_BUILD}", "url": "${BASE}/LumaMap-Setup.exe", "sha256": "${SHA}", "size": ${SIZE} },
+            "mac": { "version": "2.3.${LUMAMAP_BUILD}", "arm64": "${BASE}/LumaMap-Mac-AppleSilicon.dmg", "x64": "${BASE}/LumaMap-Mac-Intel.dmg" }
           }
           JSON
           cat release/version.json
@@ -212,7 +262,7 @@ jobs:
         run: |
           gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/lumamap-latest" -f sha="${GITHUB_SHA}" -F force=true || true
           for a in $(gh release view lumamap-latest --json assets -q '.assets[].name' 2>/dev/null); do
-            case "$a" in LumaMap-Setup.exe|LumaMap-Android.apk|version.json) ;; *) gh release delete-asset lumamap-latest "$a" -y || true ;; esac
+            case "$a" in LumaMap-Setup.exe|LumaMap-Android.apk|LujanMapping-Android.apk|LumaMap-Mac-AppleSilicon.dmg|LumaMap-Mac-Intel.dmg|version.json) ;; *) gh release delete-asset lumamap-latest "$a" -y || true ;; esac
           done
       - uses: softprops/action-gh-release@v2
         with:
@@ -227,6 +277,7 @@ jobs:
             Versión **2.3.${{ github.run_number }}**. La app avisa sola de las versiones nuevas (Menú → Buscar actualizaciones).
 
             - **Windows:** descarga `LumaMap-Setup.exe`, ábrelo e instala (si aparece «Windows protegió su PC»: *Más información → Ejecutar de todas formas*).
-            - **Android:** descarga `LumaMap-Android.apk` e instálalo (permite «instalar apps desconocidas»).
+            - **Android (2 apps):** `LumaMap-Android.apk` (la app completa) y `LujanMapping-Android.apk` (LUJAN MAPPING). Descárgalas e instálalas (permite «instalar apps desconocidas»).
+            - **Mac:** `LumaMap-Mac-AppleSilicon.dmg` (M1, M2, M3, M4) o `LumaMap-Mac-Intel.dmg`. Ábrelo y arrastra LumaMap a Aplicaciones. La primera vez: clic derecho sobre LumaMap → *Abrir* → *Abrir* (no está firmada con un certificado de Apple). Los plugins FFGL (.dll) son solo de Windows.
           files: release/*
           fail_on_unmatched_files: true

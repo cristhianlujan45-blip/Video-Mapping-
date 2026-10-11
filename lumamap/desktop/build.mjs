@@ -1,6 +1,8 @@
 // Empaqueta LumaMap para escritorio.
 //   node build.mjs --stage        prepara .stage/ (para `npm start`)
 //   node build.mjs win32 x64      genera dist/LumaMap-Windows-x64.zip (portable, sin instalar)
+//   node build.mjs installer      instalador de Windows (dist/LumaMap-Setup.exe)
+//   node build.mjs installer-mac arm64|x64   imagen de Mac (dist/LumaMap-Mac-<arch>.dmg), en un Mac
 // La app web (../web) se copia dentro: el escritorio usa exactamente el mismo código.
 import fs from "node:fs";
 import path from "node:path";
@@ -21,12 +23,15 @@ for (const m of ["@anthropic-ai/sdk", "standardwebhooks", "@stablelib/base64", "
   fs.cpSync(path.join(here, "node_modules", m), path.join(stage, "node_modules", m), { recursive: true,
     filter: (src) => !/\.(map|d\.ts|d\.mts|d\.cts)$/.test(src) && !/[\\/]src([\\/]|$)/.test(path.relative(path.join(here, "node_modules", m), src)) });
 // Compilando para Windows desde otro sistema: se descarga el ffmpeg.exe de Windows.
-const targetPlatform = process.argv[2] === "installer" ? "win32" : (process.argv[2] || process.platform);
-if (!process.argv.includes("--stage") && targetPlatform !== process.platform) {
+const MAC = process.argv[2] === "installer-mac";
+const targetPlatform = process.argv[2] === "installer" ? "win32" : MAC ? "darwin" : (process.argv[2] || process.platform);
+const targetArch = MAC ? (process.argv[3] || process.arch) : "x64";
+// Para otra plataforma o, en el Mac, para el otro procesador (Intel / Apple Silicon): su ffmpeg.
+if (!process.argv.includes("--stage") && (targetPlatform !== process.platform || (MAC && targetArch !== process.arch))) {
   const dir = path.join(stage, "node_modules", "ffmpeg-static");
   for (const f of ["ffmpeg", "ffmpeg.exe"]) fs.rmSync(path.join(dir, f), { force: true });
   execFileSync(process.execPath, [path.join(dir, "install.js")], { cwd: dir, stdio: "inherit",
-    env: { ...process.env, npm_config_platform: targetPlatform, npm_config_arch: "x64" } });
+    env: { ...process.env, npm_config_platform: targetPlatform, npm_config_arch: targetArch } });
 }
 // Anfitrión de plugins FFGL de Resolume (ffgl/ffglhost.exe, fuera del .asar para poder ejecutarlo).
 // Se compila aquí si falta (y hay compilador); el instalador de Windows no se hace sin él.
@@ -57,6 +62,44 @@ fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
 }, null, 2));
 if (process.argv.includes("--stage")) process.exit(0);
 
+// Mac (.dmg): arrastrar LumaMap a Aplicaciones. Firma «ad hoc» (sin certificado de Apple): la
+// primera vez se abre con clic derecho → Abrir. Cámara y micrófono piden permiso al usarse.
+if (MAC) {
+  const { build, Platform, Arch } = await import("electron-builder");
+  const files = await build({
+    targets: Platform.MAC.createTarget(["dmg"], targetArch === "arm64" ? Arch.arm64 : Arch.x64),
+    projectDir: here,
+    publish: "never",
+    config: {
+      appId: "com.lumamap.desktop",
+      productName: "LumaMap",
+      copyright: "MIT",
+      directories: { app: stage, output: path.join(here, "dist") },
+      electronVersion: pkg.devDependencies.electron.replace(/^[^\d]*/, ""),
+      asar: true,
+      asarUnpack: ["**/node_modules/ffmpeg-static/**"],
+      npmRebuild: false,
+      publish: null,
+      artifactName: `LumaMap-Mac-${targetArch}.\${ext}`,
+      mac: {
+        icon: path.join(here, "build", "icon-1024.png"),
+        category: "public.app-category.video",
+        target: ["dmg"],
+        identity: "-",   // firma ad hoc: Apple Silicon no abre apps sin ninguna firma
+        hardenedRuntime: false,
+        gatekeeperAssess: false,
+        extendInfo: {
+          NSCameraUsageDescription: "LumaMap usa la cámara para las proyecciones interactivas y el seguimiento de personas.",
+          NSMicrophoneUsageDescription: "LumaMap escucha la música para que las visuales sigan el ritmo.",
+          NSLocalNetworkUsageDescription: "LumaMap habla con luces (Art-Net, sACN), controladores OSC y el móvil por la red local.",
+        },
+      },
+      dmg: { title: "LumaMap" },
+    },
+  });
+  console.log("Listo:", files.filter(f => f.endsWith(".dmg")).join("\n"));
+  process.exit(0);
+}
 // Instalador de Windows (.exe): doble clic, instala y crea accesos directos.
 if (process.argv[2] === "installer") {
   const { build, Platform, Arch } = await import("electron-builder");

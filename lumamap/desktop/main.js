@@ -98,6 +98,8 @@ function createEditor() {
     webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload: path.join(__dirname, "preload.js") },
   });
   editor.once("ready-to-show", () => { editor.maximize(); editor.show(); });
+  // En el registro: la app arrancó (y con qué modo gráfico). Lo usa también la prueba del Mac en la CI.
+  editor.webContents.once("did-finish-load", () => log("info", `Editor listo (${process.platform} ${process.arch}, modo gráfico ${ANGLE_NAMES[gpuMode]})`));
   editor.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith(ORIGIN) && url.includes("output.html")) {
       const n = screenOf(url);

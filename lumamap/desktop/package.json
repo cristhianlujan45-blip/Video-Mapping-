@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node build.mjs --stage && electron .stage",
     "dist:win": "node build.mjs win32 x64",
-    "installer:win": "node build.mjs installer"
+    "installer:win": "node build.mjs installer",
+    "installer:mac": "node build.mjs installer-mac"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",

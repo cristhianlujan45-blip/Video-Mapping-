@@ -245,6 +245,12 @@ La última versión se publica sola en la página **Releases** del repositorio
 - **Android:** `LumaMap-Android.apk`. Todas las versiones se firman con la misma
   clave, así que cada APK nuevo se instala **encima** del anterior sin perder tus
   proyectos (solo hay que desinstalar una vez las versiones 2.0 y 2.1).
+- **Android, segunda app:** `LujanMapping-Android.apk` (LUJAN MAPPING), aparte de LumaMap.
+- **Mac:** `LumaMap-Mac-AppleSilicon.dmg` (Mac con M1, M2, M3 o M4) o
+  `LumaMap-Mac-Intel.dmg`. Abre el .dmg y arrastra LumaMap a *Aplicaciones*. La primera vez:
+  clic derecho sobre LumaMap → *Abrir* → *Abrir* (no lleva certificado de Apple). Todo funciona
+  igual que en Windows salvo los plugins FFGL (.dll, son programas de Windows) y la
+  actualización automática (en el Mac se descarga el .dmg nuevo).
 
 **Actualizar sin reinstalar:** la app consulta `version.json` al abrirse; si hay
 una versión nueva aparece el aviso con el botón **Actualizar** (también en
