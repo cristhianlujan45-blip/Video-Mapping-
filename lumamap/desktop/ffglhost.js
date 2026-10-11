@@ -40,10 +40,17 @@ class HostConn {
     this.proc.stderr.on("data", (d) => { this.stderr = (this.stderr + d.toString()).slice(-4000); });
     this.proc.stdin.on("error", () => {});   // tubería rota: lo resuelve el «exit»
     this.proc.on("error", (e) => this._die(e.code === "ENOENT" ? "No se encuentra el anfitrión de plugins (ffglhost)" : e.message, null));
+    // «exit» puede llegar antes que los últimos datos de stdout/stderr (p. ej. la respuesta de error
+    // de un plugin roto justo antes de cerrarse): se espera a que las dos tuberías terminen de leerse
+    // (con un tope, por si un proceso hijo del plugin las dejara abiertas) y luego se explica el cierre.
+    let ended = 0, onEnded = null;
+    const ends = () => new Promise(r => { if (ended >= 2) r(); else onEnded = r; });
+    for (const st of [this.proc.stdout, this.proc.stderr]) st.on("close", () => { if (++ended >= 2) onEnded?.(); });
     this.proc.on("exit", (code, signal) => {
-      // Se espera a que llegue todo stderr (el aviso de FFGLHOST_CRASH) antes de explicar el cierre.
-      setImmediate(() => this._die(exitReason(code, signal, this.stderr), code ?? signal));
-      onExit?.(code, signal);
+      Promise.race([ends(), new Promise(r => setTimeout(r, 500))]).then(() => {
+        this._die(exitReason(code, signal, this.stderr), code ?? signal);
+        onExit?.(code, signal);
+      });
     });
   }
   _take(n) {
