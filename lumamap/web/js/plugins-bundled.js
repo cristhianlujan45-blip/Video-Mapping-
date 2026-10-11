@@ -2,6 +2,7 @@
 // Plugins que vienen con LumaMap (se pueden apagar en Menú → Plugins). Son datos, como los
 // que instala el usuario: sirven también de ejemplo del formato (ver plugins.js).
 import { VIRAL } from "./plugins-viral.js";
+import { PRO } from "./plugins-pro.js";
 
 const TUNNEL = `/*{
   "DESCRIPTION": "Túnel de anillos de luz que avanza hacia ti",
@@ -328,4 +329,5 @@ export const BUNDLED = [
     ],
   },
   ...VIRAL,
+  ...PRO,
 ];
