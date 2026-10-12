@@ -24,7 +24,23 @@ float sdEl(vec2 p, vec2 ab) { return (length(p / ab) - 1.0) * min(ab.x, ab.y); }
 float sdSeg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
 float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
 // Forma rellena con contorno de tinta (antialias de 1 píxel: nítido a cualquier resolución).
-vec3 layer(vec3 col, float d, vec3 fill) { col = mix(col, fill, smoothstep(PXS, -PXS, d)); return mix(col, INK, smoothstep(LW + PXS, LW - PXS, abs(d)) * step(0.0001, LW)); }
+// Con «acabado de cine», el relleno se oscurece suave hacia el borde: se lee como volumen, no como pegatina.
+vec3 layer(vec3 col, float d, vec3 fill) {
+  if (cine) fill *= 0.8 + 0.2 * smoothstep(0.0, -0.05, d);
+  col = mix(col, fill, smoothstep(PXS, -PXS, d));
+  return mix(col, INK, smoothstep(LW + PXS, LW - PXS, abs(d)) * step(0.0001, LW));
+}
+// Igual pero con borde difuso (desenfoque de lente para lo que está muy cerca o muy lejos).
+vec3 layerSoft(vec3 col, float d, vec3 fill, float soft) { col = mix(col, fill, smoothstep(soft + PXS, -soft - PXS, d)); return mix(col, INK, smoothstep(LW + PXS, LW - PXS, abs(d)) * step(0.0001, LW) * step(soft, 0.002)); }
+// Acabado de cine: viñeta, grano de película animado y luces un poco cálidas.
+vec3 finish(vec3 col, vec2 uv) {
+  if (!cine) return col;
+  vec2 v = uv - 0.5;
+  col *= 1.0 - 0.7 * dot(v, v);
+  col += (hash(floor(uv * RENDERSIZE / max(1.0, RENDERSIZE.y / 1080.0)) + floor(PH * 48.0)) - 0.5) * 0.03;
+  col = mix(col, col * vec3(1.03, 1.0, 0.97), smoothstep(0.55, 1.0, dot(col, vec3(0.333))));
+  return clamp(col, 0.0, 1.0);
+}
 vec3 fillOnly(vec3 col, float d, vec3 fill) { return mix(col, fill, smoothstep(PXS, -PXS, d)); }
 // Destello de 4 puntas (estrellas de caricatura).
 float sparkle(vec2 p, float s) { p = abs(p) / s; return max(0.0, 1.0 - (sqrt(p.x) + sqrt(p.y))); }
@@ -36,7 +52,8 @@ const toon = (desc, inputs, body, { secs = 6, line = 2.5 } = {}) => `/*{
   "DESCRIPTION": "${desc}",
   "CREDIT": "LumaMap",
   "INPUTS": [ ${F("loopSec", "Duración del bucle (s)", secs, 1, 30)},
-    ${F("grosor", "Grosor del contorno", line, 0, 6)}${inputs.length ? ",\n    " + inputs.join(",\n    ") : ""} ]
+    ${F("grosor", "Grosor del contorno", line, 0, 6)},
+    { "NAME": "cine", "TYPE": "bool", "DEFAULT": true, "LABEL": "Acabado de cine" }${inputs.length ? ",\n    " + inputs.join(",\n    ") : ""} ]
 }*/
 ${LIB}
 ${body}`;
@@ -55,7 +72,12 @@ void main() {
   float a = atan(p.y, p.x), r = length(p);
   float R = 0.34 * (1.0 + 0.05 * sin(6.0 * a + PH * TAU * 2.0) + 0.03 * sin(11.0 * a - PH * TAU * 3.0));
   float d = r - R;
-  col += verde.rgb * exp(-max(d, 0.0) * 14.0) * 0.5;
+  col += verde.rgb * (exp(-max(d, 0.0) * 14.0) * 0.5 + exp(-max(d, 0.0) * 4.0) * 0.18);
+  for (int i = 0; i < 14; i++) {
+    float fi = float(i), an = hash1(fi) * TAU + PH * TAU * (mod(fi, 2.0) * 2.0 - 1.0);
+    float rr = 0.4 + fract(hash1(fi * 3.0) + PH) * 0.25;
+    col += mix(verde.rgb, vec3(1.0), 0.5) * smoothstep(0.006, 0.0, length(p - vec2(cos(an), sin(an)) * rr)) * (1.0 - fract(hash1(fi * 3.0) + PH));
+  }
   float drops = 1e3;
   for (int i = 0; i < 7; i++) {
     float fi = float(i), an = fi * TAU / 7.0 + PH * TAU;
@@ -67,8 +89,9 @@ void main() {
   float lv = floor((0.5 + 0.5 * sw) * 2.999) / 2.0;
   vec3 inside = mix(verde.rgb * 0.45, mix(verde.rgb, vec3(0.85, 1.0, 0.5), 0.5), lv);
   inside = mix(inside, vec3(0.95, 1.0, 0.7), smoothstep(0.12, 0.0, r));
+  if (cine) inside *= 0.55 + 0.45 * smoothstep(R, R * 0.35, r) + 0.5 * smoothstep(0.1, 0.0, r);   // fondo del túnel
   col = layer(col, d, inside);
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`);
 
 const SAUCER = toon("Platillo volante que flota sobre un planeta y abduce una roca con su rayo", [
@@ -105,7 +128,7 @@ void main() {
     float fi = float(i), on = step(0.5, fract(PH * 8.0 - fi * 0.2));
     col = layer(col, length(q - vec2(-0.1 + fi * 0.05, -0.006)) - 0.009, mix(vec3(0.35, 0.1, 0.1), vec3(1.0, 0.9, 0.3), on));
   }
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`);
 
 const ALIENWORLD = toon("Planeta alienígena: dos soles, un planeta con anillos, nubes y plantas raras que se mecen", [
@@ -147,7 +170,7 @@ void main() {
     col = layer(col, bulb, mod(fi, 2.0) < 0.5 ? planta.rgb : vec3(1.0, 0.45, 0.6));
     col = fillOnly(col, length(p - top - vec2(0.008, 0.01)) - 0.007, vec3(1.0));
   }
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 8 });
 
 const TV = toon("Tele interdimensional: un televisor de caricatura que cambia de canal (barras, espiral, carita, pelota) con estática", [
@@ -205,7 +228,7 @@ void main() {
   col = layer(col, length(p - vec2(0.27, -0.03)) - 0.035, vec3(0.9, 0.85, 0.7));
   col = layer(col, sdBox2(rot(PH * TAU) * (p - vec2(0.27, 0.1)), vec2(0.004, 0.025)), INK);
   for (int i = 0; i < 4; i++) col = layer(col, sdBox2(p - vec2(0.27, -0.12 - float(i) * 0.025), vec2(0.04, 0.004)), vec3(0.35, 0.25, 0.2));
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 8 });
 
 const SLIME = toon("Baba alienígena de tres ojos que se bambolea, parpadea y gotea", [
@@ -246,7 +269,7 @@ void main() {
   }
   vec2 m = p - vec2(0.0, -0.05);
   col = mix(col, INK, smoothstep(LW + PXS, LW - PXS, abs(length(m) - 0.08)) * step(m.y, -0.04) * step(0.0001, LW));
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`);
 
 const TOONSPACE = toon("Espacio de caricatura: planetas que pasan, estrellas de cuatro puntas, un cohete y una estrella fugaz", [
@@ -287,7 +310,7 @@ void main() {
   col = layer(col, sdBox2(rc - vec2(-0.09, -0.035), vec2(0.03, 0.02)), vec3(0.9, 0.2, 0.25));
   col = layer(col, sdEl(rc, vec2(0.12, 0.04)), vec3(0.92, 0.92, 0.95));
   col = layer(col, length(rc - vec2(0.02, 0.0)) - 0.018, vec3(0.5, 0.85, 1.0));
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 10 });
 
 /* ============================ Anime ============================ */
@@ -305,7 +328,7 @@ void main() {
   float r0 = centro + 0.25 * hash(vec2(s, k + 3.0));
   float wd = (0.15 + 0.7 * hash(vec2(s, k + 7.0))) * smoothstep(r0, r0 + 0.5, r);
   float ln = step(h, densidad) * step(r0, r) * smoothstep(wd * 0.5 + 0.02, wd * 0.5 - 0.02, abs(f - 0.5));
-  gl_FragColor = vec4(mix(fondo.rgb, lineas.rgb, ln), 1.0);
+  gl_FragColor = vec4(finish(mix(fondo.rgb, lineas.rgb, ln), isf_FragNormCoord), 1.0);
 }`, { secs: 2, line: 0 });
 
 const SAKURA = toon("Pétalos de sakura que caen girando, con una rama en flor y cielo de atardecer anime", [
@@ -318,6 +341,11 @@ void main() {
   float ar = RENDERSIZE.x / RENDERSIZE.y;
   vec3 col = mix(cielo1.rgb, cielo2.rgb, smoothstep(-0.4, 0.5, p.y));
   col += vec3(1.0, 0.9, 0.7) * exp(-length(p - vec2(0.35, -0.1)) * 4.0) * 0.4;
+  if (cine) for (int i = 0; i < 10; i++) {
+    float fi = float(i);
+    vec2 bp = vec2((hash1(fi * 9.1) - 0.5) * ar, (hash1(fi * 4.3) - 0.5) * 0.9) + 0.03 * vec2(sin(PH * TAU + fi), cos(PH * TAU + fi));
+    col += vec3(1.0, 0.85, 0.9) * smoothstep(0.05, 0.035, length(p - bp)) * 0.08;
+  }
   vec2 b0 = vec2(-ar * 0.5 - 0.02, 0.42), b1 = vec2(-ar * 0.25, 0.33), b2 = vec2(-ar * 0.05, 0.38), b3 = vec2(-ar * 0.18, 0.47);
   float br = min(sdSeg(p, b0, b1) - 0.016, min(sdSeg(p, b1, b2) - 0.01, sdSeg(p, b1, b3) - 0.008));
   col = layer(col, br, vec3(0.35, 0.2, 0.18));
@@ -338,9 +366,11 @@ void main() {
     float sq = 0.55 + 0.45 * abs(cos(PH * TAU * k + fi * 1.3));   // gira en 3D: se ve más o menos ancho
     q.x /= sq;
     float d = (max(length(q - vec2(0.02, 0.0)), length(q + vec2(0.02, 0.0))) - 0.034) * s * sq;
-    col = layer(col, d, mix(petalo.rgb, vec3(1.0), 0.25 * step(0.0, q.y)));
+    float blur = cine ? max(0.0, s - 1.05) * 0.03 : 0.0;   // los más cercanos, desenfocados
+    vec3 pc = mix(petalo.rgb * 0.92, mix(petalo.rgb, vec3(1.0), 0.6), smoothstep(-0.03, 0.03, q.y));
+    col = layerSoft(col, d, pc, blur);
   }
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 8, line: 1.5 });
 
 const ANIMESKY = toon("Cielo anime: nubes enormes de colores planos que pasan, sol brillante y pájaros", [
@@ -363,6 +393,11 @@ void main() {
   float ra = atan(sp.y, sp.x);
   col += vec3(1.0, 0.95, 0.8) * (exp(-length(sp) * 5.0) * 0.6 + smoothstep(0.6, 1.0, sin(ra * 12.0 + PH * TAU)) * exp(-length(sp) * 3.0) * 0.25);
   col = fillOnly(col, length(sp) - 0.045, vec3(1.0, 1.0, 0.95));
+  if (cine) for (int i = 1; i < 5; i++) {
+    float fi = float(i);
+    vec2 gp = mix(vec2(ar * 0.32, 0.32), -vec2(ar * 0.32, 0.32), fi * 0.28);
+    col += mix(vec3(0.6, 0.9, 1.0), vec3(1.0, 0.7, 0.9), fi / 4.0) * smoothstep(0.03 + fi * 0.012, 0.0, length(p - gp)) * 0.12;
+  }
   for (int l = 0; l < 3; l++) {
     float fl = float(l), s = 0.7 + fl * 0.45;
     for (int i = 0; i < 3; i++) {
@@ -370,8 +405,10 @@ void main() {
       vec2 c = p - vec2(fract(hash1(fi * 3.7 + fl * 11.0) + PH * (fl + 1.0) * 0.0 + PH) * w - w * 0.5, -0.3 + 0.18 * fl + 0.1 * hash1(fi + fl * 5.0));
       if (l == 2) c.x = p.x - (fract(hash1(fi * 3.7 + 22.0) + PH * 2.0) * w - w * 0.5);
       float d = cloud(c, s);
+      if (cine) d += (fbm(c * 30.0 / s + fl * 7.0) - 0.5) * 0.012 * s;   // borde deshilachado
       vec3 shade = mix(nube.rgb, cielo.rgb * 0.5 + vec3(0.45, 0.42, 0.55), 0.55);
-      col = fillOnly(col, d, nube.rgb);
+      vec3 body = cine ? mix(shade, nube.rgb, smoothstep(-0.06 * s, 0.1 * s, c.y)) : nube.rgb;
+      col = fillOnly(col, d, body);
       col = fillOnly(col, max(d, -cloud(c + vec2(-0.02, 0.035) * s, s)), shade);
       col = mix(col, vec3(1.0, 0.98, 0.9), smoothstep(0.006 * s, 0.0, abs(d)) * step(-0.02 * s, c.y) * 0.6);
     }
@@ -383,7 +420,7 @@ void main() {
     float bd = min(sdSeg(bp, vec2(0.0), vec2(-0.025, 0.015 * flap)), sdSeg(bp, vec2(0.0), vec2(0.025, 0.015 * flap)));
     col = mix(col, INK, smoothstep(0.004, 0.002, bd));
   }
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 12, line: 0 });
 
 const NEONCITY = toon("Ciudad de neón anime de noche, con lluvia, letreros que parpadean y la calle mojada", [
@@ -402,6 +439,7 @@ void main() {
     float bi = floor(x / bw), fx = fract(x / bw), k = mod(bi, N);
     float h = -0.05 + fl * -0.08 + 0.35 * hash(vec2(k, fl)) - fl * 0.02;
     vec3 bc = mix(vec3(0.22, 0.12, 0.35), vec3(0.06, 0.04, 0.12), fl / 2.0);
+    if (cine) col += mix(neon1.rgb, neon2.rgb, 0.5) * 0.06 * exp(-abs(pp.y - h) * 8.0) * (1.0 - fl * 0.3);   // niebla iluminada
     float inB = step(pp.y, h) * step(0.06, fx) * step(fx, 0.94);
     if (inB > 0.5) {
       col = bc;
@@ -417,15 +455,17 @@ void main() {
         vec2 gc = floor((sg + vec2(0.14, 0.07)) * vec2(30.0, 30.0));
         col = mix(col, nc * 1.4, on * step(0.55, hash(gc + k)) * step(sd, -0.015));
         col = mix(col, nc * 1.2, on * smoothstep(0.006, 0.0, abs(sd)));
+        if (cine) col += nc * on * exp(-max(sd, 0.0) * 25.0) * 0.35;
       }
       col = mix(col, INK, smoothstep(LW + PXS, LW - PXS, abs(pp.y - h)) * step(0.0001, LW));
     }
   }
-  if (refl) col = col * 0.45 + vec3(0.02, 0.02, 0.05);
+  if (refl) col = col * (cine ? 0.55 : 0.45) + vec3(0.02, 0.02, 0.05);
+  if (cine) col += mix(neon1.rgb, neon2.rgb, 0.5 + 0.5 * sin(p.x * 3.0)) * exp(-abs(p.y - gy) * 18.0) * 0.12;
   vec2 rg = vec2(p.x * 70.0, p.y * 7.0 + PH * 14.0);
   float rain = step(0.93, hash(vec2(floor(rg.x), floor(rg.y)))) * step(0.5, fract(rg.y));
   col += vec3(0.6, 0.7, 0.9) * rain * 0.35;
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 10, line: 1.5 });
 
 const BEAM = toon("Rayo de energía anime: se carga una bola de luz y dispara un rayo enorme (hay sitio para tu personaje a la izquierda)", [
@@ -436,6 +476,8 @@ void main() {
   float ar = RENDERSIZE.x / RENDERSIZE.y;
   vec2 O = vec2(-ar * 0.28, 0.0);
   float fire = smoothstep(0.45, 0.5, PH) * (1.0 - smoothstep(0.82, 0.9, PH));
+  float kf = floor(PH * 60.0);
+  if (cine) p += (vec2(hash1(kf), hash1(kf + 5.0)) - 0.5) * 0.012 * fire;   // la imagen tiembla al disparar
   vec3 col = mix(vec3(0.03, 0.03, 0.1), vec3(0.08, 0.1, 0.25), uv.y) + energia.rgb * fire * 0.15;
   float row = floor(p.y * 90.0);
   float sl = step(0.82, hash(vec2(row, 1.0))) * step(0.6, fract(p.x * 1.5 + hash(vec2(row, 2.0)) + PH * 10.0));
@@ -452,6 +494,7 @@ void main() {
   float wb = 0.09 * smoothstep(0.0, 0.1, f) * (1.0 - smoothstep(0.8, 1.0, f)) * (1.0 + 0.08 * sin(p.x * 40.0 - PH * TAU * 20.0));
   float xEnd = mix(O.x, ar * 0.6, smoothstep(0.0, 0.15, f));
   float bd = max(abs(p.y - O.y) - wb, max(O.x - p.x, p.x - xEnd));
+  if (cine) col += energia.rgb * exp(-max(bd, 0.0) * 10.0) * 0.55 * fire + energia.rgb * exp(-abs(p.y + 0.42) * 30.0) * 0.25 * fire;
   if (wb > 0.001) {
     col = mix(col, energia.rgb * 0.9, smoothstep(PXS, -PXS, bd));
     col = mix(col, mix(energia.rgb, vec3(1.0), 0.6), smoothstep(PXS, -PXS, bd + wb * 0.35));
@@ -463,7 +506,7 @@ void main() {
   col = layer(col, bd2, energia.rgb);
   col = fillOnly(col, bd2 + R * 0.35, mix(energia.rgb, vec3(1.0), 0.6));
   col = fillOnly(col, bd2 + R * 0.65, vec3(1.0));
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 4, line: 2 });
 
 const AURA = toon("Aura de poder anime: llamas de energía alrededor de un hueco para tu personaje, rayos y piedras que suben", [
@@ -490,6 +533,7 @@ void main() {
   float lv = t < 0.0 ? 0.0 : t < 0.45 ? 1.0 : t < 0.8 ? 2.0 : 3.0;
   if (lv > 0.5) col = lv < 1.5 ? aura.rgb * 0.75 : lv < 2.5 ? mix(aura.rgb, vec3(1.0), 0.45) : vec3(1.0, 1.0, 0.95);
   col = mix(col, INK, smoothstep(LW + PXS, LW - PXS, abs(t) * reach) * step(0.0001, LW));
+  if (cine && lv < 0.5) col += aura.rgb * exp(-max(body - reach, 0.0) * 9.0) * 0.35;
   if (body < 0.0) col = vec3(0.04, 0.03, 0.08);
   float kk = floor(PH * 6.0);
   if (hash1(kk * 3.1) > 0.35) {
@@ -509,7 +553,7 @@ void main() {
     vec2 rp = vec2((hash1(fi * 5.0) - 0.5) * 1.2, -0.45 + f * 0.95);
     col = layer(col, sdRBox(rot(PH * TAU * 2.0 + fi) * (p - rp), vec2(0.015 + 0.01 * hash1(fi)), 0.004), vec3(0.45, 0.4, 0.38) * (1.0 - f * 0.5));
   }
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(finish(col, isf_FragNormCoord), 1.0);
 }`, { secs: 3, line: 2 });
 
 export const TOONS = [
