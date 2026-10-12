@@ -4,6 +4,7 @@
 import { VIRAL } from "./plugins-viral.js";
 import { PRO } from "./plugins-pro.js";
 import { LOOPS3D } from "./plugins-loops3d.js";
+import { TOONS } from "./plugins-toons.js";
 
 const TUNNEL = `/*{
   "DESCRIPTION": "Túnel de anillos de luz que avanza hacia ti",
@@ -332,4 +333,5 @@ export const BUNDLED = [
   ...VIRAL,
   ...PRO,
   ...LOOPS3D,
+  ...TOONS,
 ];

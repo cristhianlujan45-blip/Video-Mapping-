@@ -92,7 +92,7 @@ const r = await page.evaluate(async () => {
   }
   // Loops 3D: el fotograma de t y el de t + duración del bucle son el mismo (se repiten sin corte).
   out.loops = [];
-  for (const a of M.ANIM_LIBRARY.filter(x => x.shader && /^loops-3d/.test(getShader(x.shader)?.plugin || ""))) {
+  for (const a of M.ANIM_LIBRARY.filter(x => x.shader && /^(loops-3d|toons-)/.test(getShader(x.shader)?.plugin || ""))) {
     const sh = getShader(a.shader), T = sh.isf.inputs.find(i => i.name === "loopSec").def;
     const run = (t) => { const e = sc.draw("loop", sh.id, sh.isf, {}, { width: 192, height: 108, time: t, images: {}, audio: quiet }); const c = document.createElement("canvas"); c.width = 128; c.height = 72; const g2 = c.getContext("2d"); g2.drawImage(e.canvas, 0, 0, 128, 72); return g2.getImageData(0, 0, 128, 72).data; };
     out.loops.push({ name: a.name, seam: diff(run(1.7), run(1.7 + T)), move: diff(run(1.7), run(1.7 + T / 4)) });
@@ -136,8 +136,8 @@ await test(`plugins incluidos (${r.plugins}): sus ${r.shaders.length} shaders IS
   assert.ok(r.shaders.filter(x => x.cam).length >= 4, "plugin de cámara reactiva");
   assert.ok(r.shaders.some(x => x.passes >= 2), "con varias pasadas (estelas)");
 });
-await test(`${r.loops.length} loops 3D se repiten sin corte (el fotograma final es igual al inicial) y se mueven`, () => {
-  assert.ok(r.loops.length >= 12, String(r.loops.length));
+await test(`${r.loops.length} loops (3D, caricaturas y anime) se repiten sin corte (el fotograma final es igual al inicial) y se mueven`, () => {
+  assert.ok(r.loops.length >= 24, String(r.loops.length));
   const bad = r.loops.filter(x => x.seam > 0.5 || x.move < 1).map(x => `${x.name}: corte ${x.seam.toFixed(2)}, movimiento ${x.move.toFixed(2)}`);
   assert.ok(!bad.length, bad.join(" | "));
 });
