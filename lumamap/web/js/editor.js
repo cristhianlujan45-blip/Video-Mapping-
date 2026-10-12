@@ -209,7 +209,9 @@ app.mappingLabel = mappingLabel;
 A.learn = async (id) => {
   const d = describe(app, id);
   if (!d) return;
-  if (midi.supported && !midi.active) await A.midi({ quiet: true });
+  // MIDI arranca en segundo plano: el diálogo sale al momento aunque el sistema tarde en dar acceso
+  // (o no lo dé nunca); en cuanto llega, un knob/fader también vale para aprender.
+  if (midi.supported && !midi.active) A.midi({ quiet: true }).catch(() => {});
   const content = h("div", { class: "learn" },
     h("div", { class: "learn-pulse" }),
     h("p", {}, "Pulsa ahora el botón que quieras usar: una tecla, un botón o stick del mando (Xbox, PlayStation…), o mueve un knob/fader MIDI. También vale OSC o DMX."),

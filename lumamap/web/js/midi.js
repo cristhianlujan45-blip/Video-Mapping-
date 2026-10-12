@@ -44,11 +44,16 @@ export class MidiDriver {
   async start() {
     if (this.access) return true;
     if (!this.supported) { this.error = "Este navegador no tiene Web MIDI (usa la app de escritorio, Chrome o Edge)."; this.onStatus(); return false; }
+    // Una sola petición a la vez, y con tope: si el sistema no contesta, se avisa en vez de esperar para siempre.
+    if (!this._req) this._req = navigator.requestMIDIAccess({ sysex: false }).finally(() => { this._req = null; });
+    let timer;
     try {
-      this.access = await navigator.requestMIDIAccess({ sysex: false });
+      const access = await Promise.race([this._req, new Promise((_, no) => { timer = setTimeout(() => no(Object.assign(new Error("el sistema no responde (¿otro programa usa el MIDI?). Vuelve a intentarlo."), { name: "TimeoutError" })), 8000); })]);
+      if (!this.access) this.access = access;
     } catch (e) {
-      this.error = (e?.name === "NotSupportedError" ? "MIDI no disponible: " : "Permiso MIDI denegado: ") + e.message; this.onStatus(); return false;
-    }
+      this.error = (e?.name === "NotSupportedError" || e?.name === "TimeoutError" ? "MIDI no disponible: " : "Permiso MIDI denegado: ") + e.message; this.onStatus(); return false;
+    } finally { clearTimeout(timer); }
+    if (this.access.onstatechange) return true;   // otra llamada ya lo dejó listo
     this.error = "";
     this.bind();
     this.access.onstatechange = () => { this.bind(); this.onStatus(); };

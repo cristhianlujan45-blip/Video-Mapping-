@@ -612,6 +612,23 @@ await test("arrastrar y soltar: una animación y un efecto se sueltan encima de 
   assert.equal(await page.evaluate((id) => window.__lumamap.S.project.scenes.find(s => s.id === window.__lumamap.S.project.sceneId).looks[id].fx.style, id), "matrix");
   await page.evaluate(() => window.__lumamap.openTab(null));
 });
+await test("aprender un control: el diálogo sale al momento aunque el MIDI del sistema no conteste", async () => {
+  const saved = await page.evaluate(() => {
+    const m = window.__lumamap.midiDriver;
+    window.__realMidi = { access: m.access, req: navigator.requestMIDIAccess };
+    m.access = null;
+    Object.defineProperty(navigator, "requestMIDIAccess", { value: () => new Promise(() => {}), configurable: true });   // nunca contesta
+    window.__lumamap.actions.learn("global/blackout");
+    return true;
+  });
+  assert.ok(saved);
+  try { await page.locator(".learn").waitFor({ timeout: 3000 }); }
+  finally {
+    await page.evaluate(() => { window.__lumamap.params.cancelLearn?.(); document.getElementById("modal")?._close?.(null);
+      const m = window.__lumamap.midiDriver; m.access = window.__realMidi.access; m._req = null;
+      Object.defineProperty(navigator, "requestMIDIAccess", { value: window.__realMidi.req, configurable: true }); });
+  }
+});
 await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al apagón y funciona junto al teclado", async () => {
   await page.evaluate(() => {
     const mk = (i, id) => ({ index: i, id, connected: true, buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0] });
