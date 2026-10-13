@@ -4,6 +4,7 @@
 import { h, section, btn, hint, slider, dialog, closeDialog } from "./ui.js";
 import { describe, catalog } from "./params.js";
 import { MYPANEL_MAX } from "./mypanel.js";
+import { tipCard } from "./tutorial.js";
 
 let editing = false;
 const fmtOf = (d) => (v) => d.min === 0 && d.max === 1 ? Math.round(v * 100) + "%" : (Math.abs(d.max - d.min) >= 20 ? Math.round(v) : v.toFixed(2));
@@ -61,6 +62,7 @@ export function openMyPanelBig(app) {
 export function myPanelSection(app) {
   const list = app.S.project.settings.panel;
   return section("🎚 Mi panel",
+    tipCard(app, "mypanel"),
     list.length
       ? h("div", {}, h("div", { class: "mpgrid" }, ...list.map(it => control(app, it))))
       : hint("Junta aquí los controles que más usas (como un panel de TouchDesigner): brillo, opacidad de una superficie, un efecto, GO, apagón, luces… También salen en el mando del móvil."),

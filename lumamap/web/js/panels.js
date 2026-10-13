@@ -10,6 +10,7 @@ import { getShader } from "./plugins.js";
 import { hexToIsf, isfToHex } from "./isf.js";
 import { openPlugins } from "./panels-plugins.js";
 import { camFxSection, camFxPointer, camBinding } from "./panels-camfx.js";
+import { tutorialOn, setTutorial, resetTips } from "./tutorial.js";
 import { ffglControls } from "./panels-ffgl.js";
 import { vjSection } from "./panels-vj.js";
 import { signalsSection } from "./panels-signals.js";
@@ -1083,6 +1084,9 @@ const menu = {
       section("Ayuda y sistema", h("div", { class: "list" },
         item("help", "Ayuda y atajos", () => A.help()),
         item("wand", "Todos los comandos", A.palette, "Busca cualquier acción escribiendo · Ctrl+K"),
+        item("help", `🎓 Tutorial guiado: ${tutorialOn() ? "activado" : "desactivado"}`, () => { const on = !tutorialOn(); setTutorial(on, app); toast(on ? "Tutorial activado: consejos la primera vez que abras algo nuevo" : "Tutorial desactivado"); app.renderPanel(); },
+          `Consejos la primera vez que abres algo nuevo (nodos, señales, Mi panel, efectos de cámara) y lecciones paso a paso · toca para ${tutorialOn() ? "desactivarlo" : "activarlo"}`),
+        tutorialOn() ? item("restart", "Volver a ver los consejos", () => { resetTips(); toast("Los consejos saldrán otra vez"); }, "Como la primera vez") : null,
         item("gauge", "Prueba de velocidad", () => A.speedTest(), "Mide este equipo y elige la calidad para que todo vaya fluido"),
         window.LumaDesktop ? item("gauge", "Analizar el equipo y calidad", () => A.hardwareProfile(false), "GPU, CPU, pantallas, cámaras y códecs por hardware") : null,
         app.updateInfo?.canRollback ? item("undo", "Volver a la versión anterior", () => A.rollbackUpdate(), "Restaura la versión instalada antes de la última actualización") : null,

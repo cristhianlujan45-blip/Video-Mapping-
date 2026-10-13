@@ -104,8 +104,8 @@ export function parseCommand(app, text) {
     return { reply: "Te abro el asistente de holograma: eliges qué aparece y cuántos proyectores, y lo monto solo (quito el fondo de la persona, uno los proyectores y te digo cómo colocarlo).",
       actions: [A("hologram_setup", { type: /pir[aá]mide/.test(t) ? "piramide" : /\b(tul|tela|gasa)\b/.test(t) ? "tul" : "escenario", n: pn ? num(pn[1]) : 1 })] };
   }
-  if (/(c[oó]mo|ens[eé][ñn]ame|mu[eé]strame|aprender|tutorial|explica)/.test(t)) {
-    const lesson = /m[aá]scara/.test(t) ? 2 : /malla|warp|curv/.test(t) ? 3 : /varias superficies/.test(t) ? 4 : /proyectores|blending|bordes/.test(t) ? 5 : /vj|en vivo/.test(t) ? 6 : /audio|m[uú]sica/.test(t) ? 7 : /luz|luces|dmx/.test(t) ? 8 : /interactiv|tracking|c[aá]mara/.test(t) ? 9 : /show|escena|cue/.test(t) ? 10 : /calibr|esquina|mapping|empez/.test(t) ? 1 : 0;
+  if (/(c[oó]mo|ens[eé][ñn]ame|mu[eé]strame|aprender|tutorial|expl[ií]ca)/.test(t)) {
+    const lesson = /nodo|touch ?designer|se[ñn]al|\blfo\b|mi panel/.test(t) ? 11 : /(efecto|filtro)s? (de|para) (la )?c[aá]mara|filtro/.test(t) ? 12 : /m[aá]scara/.test(t) ? 2 : /malla|warp|curv/.test(t) ? 3 : /varias superficies/.test(t) ? 4 : /proyectores|blending|bordes/.test(t) ? 5 : /vj|en vivo/.test(t) ? 6 : /audio|m[uú]sica/.test(t) ? 7 : /luz|luces|dmx/.test(t) ? 8 : /interactiv|tracking|c[aá]mara/.test(t) ? 9 : /show|escena|cue/.test(t) ? 10 : /calibr|esquina|mapping|empez/.test(t) ? 1 : 0;
     return { intent: "explain", reply: lesson ? "Te lo enseño paso a paso." : "", actions: lesson ? [A("start_lesson", { level: lesson })] : [] };
   }
 

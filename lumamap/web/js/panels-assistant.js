@@ -10,6 +10,7 @@ import { AIEngine, MSG } from "./ai/providers.js";
 import { validateAction, applyAction } from "./ai/actions.js";
 import { AREAS, analyzeProject } from "./ai/analyzer.js";
 import { Academy, LEVELS } from "./ai/academy.js";
+import { tutorialOn, setTutorial } from "./tutorial.js";
 import { planChanges, applyPlan, planFromSong } from "./ai/showplan.js";
 import { analyzeFile } from "./ai/songanalysis.js";
 import { MODEL_TIERS, ADVANCED_MODELS } from "./ai/hardware.js";
@@ -220,7 +221,8 @@ function autoMapCard(app, res) {
 /* ---------------- Academia ---------------- */
 function academyList(app) {
   const A = app.academy;
-  return h("div", { class: "aicard" }, h("b", {}, "🎓 Academia de video mapping"), hint("Lecciones paso a paso: el asistente te dice una cosa y espera a que la hagas."),
+  return h("div", { class: "aicard" }, h("b", {}, "🎓 Academia de video mapping"), hint("Lecciones paso a paso: el asistente te dice una cosa y espera a que la hagas. La 11 enseña los nodos y las señales (como TouchDesigner) y la 12 los efectos de cámara y filtros."),
+    toggle({ label: "Tutorial guiado", hint: "Consejos la primera vez que abres algo nuevo (nodos, señales, Mi panel, efectos de cámara). Apagado: no sale nada.", value: tutorialOn(), onChange: (v) => { setTutorial(v, app); app.renderPanel(); } }),
     h("div", { class: "lessons" }, ...LEVELS.map(L => h("button", { class: `lesson ${A.done.has(L.level) ? "done" : ""}`, onclick: () => { A.start(L.level); ui.card = null; app.renderPanel(); } },
       h("b", {}, `${A.done.has(L.level) ? "✓" : L.level}`), h("span", {}, L.title), h("small", {}, `${L.steps.length} pasos`)))));
 }
@@ -452,6 +454,7 @@ const QUICK = [
   ["Analizar Superficie", "photo", (app) => { ui.card = { kind: "automap-start" }; app.renderPanel(); }],
   ["Detectar Problemas", "info", async (app) => { ui.card = { kind: "health", data: await app.ai.analyze() }; app.renderPanel(); }],
   ["Aprender Mapping", "help", (app) => { ui.card = { kind: "academy" }; app.renderPanel(); }],
+  ["Aprender nodos", "link", (app) => { app.academy.start(11); ui.log.push({ who: "ai", text: searchKnowledge("red de nodos touchdesigner", 1)[0]?.text || "" }); app.renderPanel(); }],
   ["Optimizar Proyecto", "gauge", async (app) => { ui.card = { kind: "health", data: await app.ai.optimize(), title: "Optimizar el proyecto" }; app.renderPanel(); }],
   ["Show con mi canción", "audio", (app) => pickSong(app)],
   ["Crear Show", "scenes", (app) => { ui.card = { kind: "show-start" }; app.renderPanel(); }],

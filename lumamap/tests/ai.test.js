@@ -110,6 +110,25 @@ await test("Sin IA: las órdenes del usuario se convierten en acciones propuesta
   assert.equal(parseCommand(app, "Quiero que las luces cambien con el beat").actions[0].parameters.effect, "Estrobo al tempo");
 });
 
+await test("la IA enseña los nodos (como TouchDesigner) y los efectos de cámara con sus lecciones", async () => {
+  const app = withSurfaces(1);
+  const lesson = (t) => { const c = parseCommand(app, t); return c.actions.find(a => a.action === "start_lesson")?.parameters.level ?? JSON.stringify(c); };
+  assert.equal(lesson("Enséñame a usar los nodos"), 11);
+  assert.equal(lesson("¿cómo funciona esto como touch designer?"), 11);
+  assert.equal(lesson("explícame las señales"), 11);
+  assert.equal(lesson("cómo pongo filtros a mis fotos"), 12);
+  assert.equal(lesson("enséñame los efectos de cámara"), 12);
+  assert.equal(lesson("enséñame las máscaras"), 2);
+  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 12 } }).ok, true);
+  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 13 } }).ok, false);
+  const { LEVELS } = await import("../web/js/ai/academy.js");
+  assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  const { searchKnowledge } = await import("../web/js/ai/knowledge.js");
+  assert.equal(searchKnowledge("cómo uso la red de nodos")[0].id, "nodos");
+  assert.equal(searchKnowledge("desactivar el tutorial")[0].id, "tutorial");
+  assert.equal(searchKnowledge("filtros para mis videos")[0].id, "efectos-camara");
+});
+
 await test("Show Director: 5 minutos → 6 secciones que suman 300 s, con animaciones y luces reales", () => {
   const ctx = buildProjectContext(withSurfaces(1));
   const p = planFromRules("Quiero crear un show de 5 minutos con visuales que reaccionen a la música y cambios de iluminación.", ctx);

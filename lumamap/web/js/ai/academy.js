@@ -1,13 +1,17 @@
 // web/js/ai/academy.js
-// ACADEMIA DE VIDEO MAPPING: 10 niveles, un paso cada vez («PASO 2/5»).
+// ACADEMIA DE VIDEO MAPPING: 12 niveles, un paso cada vez («PASO 2/5»).
 // Cada paso dice UNA cosa y espera a que el usuario la haga de verdad en la
 // app (se comprueba el estado real del proyecto), luego pasa al siguiente.
 // Funciona sin IA. El progreso se guarda en este equipo.
 import { currentScene } from "../model.js";
+import { getShader } from "../plugins.js";
 
 const sel = (app) => app.S.project.surfaces.find(s => s.id === app.S.sel) || null;
 const look = (app) => { const s = sel(app); return s ? currentScene(app.S.project).looks[s.id] : null; };
 const sig = (s) => s ? JSON.stringify(s.points) : "";
+const nodesOpen = () => typeof document !== "undefined" && !!document.querySelector(".nodes .nodenet");
+// Efecto de cámara / filtro puesto: qué imagen le entra ("camera" o "media"), o "".
+const camFx = (app) => { const src = look(app)?.source; if (src?.type !== "shader") return ""; const i = getShader(src.shaderId)?.isf.inputs.find(x => x.type === "image"); return i ? ((src.shaderParams || {})[i.name]?.kind === "media" ? "media" : "camera") : ""; };
 const outputsOpen = (app) => { try { return (app.perf?.().outputs || []).length > 0 || !!app.S.projecting || !!app.S.output; } catch { return false; } };
 
 export const LEVELS = [
@@ -68,6 +72,24 @@ export const LEVELS = [
     { text: "Cambia la transición de una escena (corte, disolver, destello…).", check: (app) => app.S.project.scenes.some(s => s.transition && s.transition !== "fade") },
     { text: "Pasa a la escena siguiente (Enter o GO).", start: (app) => ({ id: app.S.project.sceneId }), check: (app, b) => app.S.project.sceneId !== b.id },
     { text: "Prueba el modo actuación (Show → «Actuación y emergencia», o F10). Sal con Mayús+Esc.", check: (app) => !!app.S.perfMode },
+  ] },
+  { level: 11, title: "Nodos y señales (como TouchDesigner)", steps: [
+    { text: "Crea o selecciona una superficie (Añadir → Rectángulo).", check: (app) => !!sel(app) },
+    { text: "Abre la red de nodos: en «Capas» toca «🔗 Ver como red de nodos» (o Ctrl+K y escribe «nodos»).", tab: "layers", check: nodesOpen },
+    { text: "La imagen viaja de izquierda a derecha: Fuente → Señales → Efectos → Forma → Mezcla → Salida. Toca el nodo morado «＋» y elige un efecto (por ejemplo «Caleidoscopio 6»).", start: (app) => ({ f: JSON.stringify(look(app)?.fx || {}) }), check: (app, b) => !!look(app) && JSON.stringify(look(app).fx) !== b.f },
+    { text: "Toca ⏻ en el nodo de ese efecto: se apaga sin perderse. Tócalo otra vez y vuelve igual.", check: (app, b) => { if (look(app)?.bypass) b.off = true; return !!b.off && !look(app)?.bypass; }, start: () => ({ off: false }) },
+    { text: "Toca el nodo del efecto: te lleva a «Efectos» para ajustarlo.", check: (app) => app.S.tab === "fx" && !nodesOpen() },
+    { text: "Crea una señal: mantén pulsado (o clic derecho) un deslizador → «〰 Animar al ritmo» → elige una onda o «Seguir los graves».", start: (app) => ({ n: app.S.project.settings.lfos.length }), check: (app, b) => app.S.project.settings.lfos.length > b.n },
+    { text: "Mírala moverse: abre «Audio» → «📈 Señales en vivo».", check: (app) => app.S.tab === "audio" },
+    { text: "Añade ese control a tu mesa: «En vivo» → «🎚 Mi panel» → «＋ Añadir control».", start: (app) => ({ n: app.S.project.settings.panel.length }), check: (app, b) => app.S.project.settings.panel.length > b.n },
+    { text: "Vuelve a la red de nodos: el nodo verde ya dice que se mueve solo. En un nodo de efecto, ⏻ lo apaga sin perderlo y ＋ añade otro.", tab: "layers", check: nodesOpen },
+  ] },
+  { level: 12, title: "Efectos de cámara y filtros", steps: [
+    { text: "Crea o selecciona una superficie (Añadir → Rectángulo).", check: (app) => !!sel(app) },
+    { text: "En «Contenido» elige «Cámara» (permite el acceso a la cámara).", tab: "content", check: (app) => look(app)?.source.type === "camera" || camFx(app) === "camera" },
+    { text: "Toca un efecto de «📷 Efectos de cámara» (por ejemplo «Cámara térmica»).", check: (app) => camFx(app) === "camera" },
+    { text: "Ahora pon una foto o un video tuyo: «Contenido» → «Video o imagen».", check: (app) => look(app)?.source.type === "media" },
+    { text: "Ponle un filtro de «🎨 Filtros para esta foto / este video». «Quitar el filtro» la deja como estaba.", check: (app) => camFx(app) === "media" },
   ] },
 ];
 

@@ -8,6 +8,7 @@
 import { h, section, btn, tiles, hint, toast } from "./ui.js";
 import { getShader, camFxFor } from "./plugins.js";
 import { animThumb } from "./thumbs.js";
+import { tipCard } from "./tutorial.js";
 
 const imageInput = (sh) => sh?.isf.inputs.find(i => i.type === "image")?.name || null;
 const USE_NOTE = { camera: "solo cámara", video: "cámara y videos", both: "cámara, videos y fotos" };
@@ -62,6 +63,7 @@ export function camFxSection(app, { fold = null } = {}) {
   const b = camBinding(src);
   const title = kind === "camera" ? `📷 Efectos de cámara (${list.length})` : `🎨 Filtros para ${kind === "video" ? "este video" : "esta foto"} (${list.length})`;
   const body = [
+    tipCard(app, "camfx"),
     hint(kind === "camera"
       ? "Hechos para la cámara en vivo. Los que llevan 🎞 también sirven como filtro de tus fotos y videos (Contenido → Video o imagen)."
       : `Efectos de cámara que también funcionan como filtro: tu ${kind === "video" ? "video" : "foto"} sigue siendo el mismo, el filtro va encima. Los que solo tienen sentido con la cámara en vivo${kind === "image" ? " o con movimiento" : ""} no salen aquí.`),

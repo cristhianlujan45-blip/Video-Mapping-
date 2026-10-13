@@ -2,7 +2,8 @@
 // Todos los comandos de LumaMap en un solo registro: atajos de teclado, paleta
 // de comandos (Ctrl+K), menú contextual (clic derecho / pulsación larga) y menú
 // nativo de la versión de escritorio usan esta misma lista.
-import { h, dialog, closeDialog } from "./ui.js";
+import { h, dialog, closeDialog, toast } from "./ui.js";
+import { tutorialOn, setTutorial } from "./tutorial.js";
 import { icon } from "./icons.js";
 import { PATTERNS } from "./overlay.js";
 
@@ -105,6 +106,8 @@ export function buildCommands(app) {
 
   add("Ayuda", "palette", "Todos los comandos", () => openPalette(app), { keys: "Ctrl+K", ic: "menu" });
   add("Ayuda", "help", "Ayuda y atajos", () => A.help(), { keys: "F1", ic: "help" });
+  add("Ayuda", "tutorial", "Tutorial guiado: activar o desactivar", () => { const on = !tutorialOn(); setTutorial(on, app); toast(on ? "Tutorial activado" : "Tutorial desactivado"); }, { ic: "help" });
+  add("Ayuda", "lessonNodes", "Aprender los nodos y las señales (lección paso a paso)", () => import("./panels-assistant.js").then(m => { m.aiOf(app); app.academy.start(11); }), { ic: "link" });
   add("Conexiones", "midi", "Conectar controlador MIDI", () => A.midi(), { ic: "midi" });
   add("Conexiones", "remote", "Control desde el móvil y OSC", () => A.remoteInfo(), { ic: "live" });
   add("Show", "emergency", "EMERGENCIA: salida segura inmediata", A.emergency, { keys: "Ctrl+Shift+E", ic: "blackout" });

@@ -5,6 +5,7 @@
 import { h, section, btn, hint } from "./ui.js";
 import { describe } from "./params.js";
 import { LFO_SHAPES, SOUND_SHAPES } from "./lfo.js";
+import { tipCard } from "./tutorial.js";
 
 const BANDS = [["bass", "Graves", "#ff4d6d"], ["mid", "Medios", "#ffd166"], ["high", "Agudos", "#4dd2ff"], ["beat", "Golpe", "#ffffff"]];
 const LCOLS = ["#a78bfa", "#34d399", "#f472b6", "#fb923c", "#60a5fa", "#facc15", "#2dd4bf", "#e879f9"];
@@ -74,6 +75,7 @@ export function signalsSection(app) {
     : hint("Aún no has creado señales. Mantén pulsado (o clic derecho) cualquier deslizador → «〰 Animar al ritmo» y elige una onda, un golpe, ruido o que siga los graves.");
 
   return section("📈 Señales en vivo",
+    tipCard(app, "signals"),
     hint("Lo que se mueve solo, en directo (como los visores de CHOP de TouchDesigner): el sonido y cada parámetro animado."),
     cv, legend, list);
 }

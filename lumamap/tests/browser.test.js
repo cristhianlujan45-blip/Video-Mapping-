@@ -1060,7 +1060,7 @@ await test("plugins en 4K: con la composición en 4K el shader se dibuja a 2160 
   assert.deepEqual(r.auto, [3840, 2160], "auto en el PC: 4K");
   assert.deepEqual(r.hd, [1920, 1080], "elegido 1080p");
 });
-await test("como TouchDesigner: señales que siguen los graves (con monitor en vivo), red de nodos de la superficie y Mi panel", async () => {
+await test("como TouchDesigner: señales que siguen los graves (con monitor en vivo), red de nodos de la superficie (⏻, ＋, todo el show), tutorial con lección e interruptor, y Mi panel", async () => {
   // 1 · Señal que sigue los graves → mueve el brillo general, y se ve en «Señales en vivo».
   await page.evaluate(() => {
     const a = window.__lumamap, au = a.audio();
@@ -1088,9 +1088,52 @@ await test("como TouchDesigner: señales que siguen los graves (con monitor en v
   assert.ok(heads.length >= 6, heads.join("|"));
   assert.equal(heads[0].toLowerCase(), "fuente"); assert.equal(heads.at(-1).toLowerCase(), "salida");
   assert.match(await net.locator('.node[data-fam="fx"]').first().textContent(), /Color.*Brillo/);
+  // Tutorial guiado: la primera vez sale un consejo; «Entendido» y no vuelve a salir.
+  assert.equal(await page.locator(".nodes .tutip").count(), 1, "consejo de la primera vez");
+  await page.locator(".nodes .tutip").getByRole("button", { name: "Entendido" }).click();
+  assert.equal(await page.locator(".nodes .tutip").count(), 0);
+  // ⏻ apaga el efecto sin perderlo (bypass) y lo vuelve a encender igual.
+  const colorNode = () => net.locator('.node[data-fam="fx"]', { hasText: "Brillo" }).first();
+  await colorNode().locator(".nodepow").click();
+  assert.deepEqual(await page.evaluate(() => { const l = window.__lumamap.lookSel(); return [l.fx.brightness, l.bypass?.Color?.brightness]; }), [1, 1.5]);
+  assert.match(await colorNode().textContent(), /Apagado/);
+  await colorNode().locator(".nodepow").click();
+  assert.deepEqual(await page.evaluate(() => { const l = window.__lumamap.lookSel(); return [l.fx.brightness, l.bypass]; }), [1.5, undefined]);
+  // ＋ añade un efecto encima de lo que ya tiene y aparece su nodo.
+  await net.locator(".node.add").click();
+  await page.locator(".nodes .nodeadd .chip", { hasText: "Caleidoscopio 6" }).click();
+  assert.deepEqual(await page.evaluate(() => { const l = window.__lumamap.lookSel(); return [l.fx.kaleido, l.fx.brightness]; }), [6, 1.5]);
+  await net.locator('.node[data-fam="fx"]', { hasText: "Distorsión" }).waitFor();
+  // 🌐 Todo el show: una fila por superficie con su pantalla de salida.
+  await page.locator(".nodes .chip", { hasText: "🌐 Todo el show" }).click();
+  const rows = page.locator(".nodes .nodenet.mini");
+  assert.equal(await rows.count(), await page.evaluate(() => window.__lumamap.S.project.surfaces.length));
+  assert.match(await rows.first().locator('.node[data-fam="out"]').textContent(), /Pantalla|Todas/);
+  await rows.first().locator('.node[data-fam="src"]').click();
+  await net.waitFor();
   await net.locator('.node[data-fam="shape"]').click();
   await page.waitForFunction(() => window.__lumamap.S.tab === "shape", null, { timeout: 5000 });
-  await page.evaluate((id) => { const a = window.__lumamap; a.select(id); a.edit(() => { a.lookSel().fx.brightness = 1; }); a.openTab(null); }, id);
+  await page.evaluate((id) => { const a = window.__lumamap; a.select(id); a.edit(() => { a.lookSel().fx.brightness = 1; a.lookSel().fx.kaleido = 0; }); a.openTab(null); }, id);
+  // La lección 11 (nodos) avanza sola con lo que haces de verdad; con el tutorial apagado se va.
+  await page.evaluate(async () => { const m = await import("./js/panels-assistant.js"), a = window.__lumamap; m.aiOf(a); a.academy.start(11); });
+  await page.locator("#academyCard", { hasText: "red de nodos" }).waitFor();   // paso 1 (hay superficie) ya hecho
+  await page.evaluate(() => { window.__lumamap.openNodes(); });
+  await page.locator("#academyCard", { hasText: "nodo morado" }).waitFor();
+  await net.locator(".node.add").click();
+  await page.locator(".nodes .nodeadd .chip", { hasText: "Sepia" }).click();
+  await page.locator("#academyCard", { hasText: "Toca ⏻" }).waitFor();
+  const sepia = () => net.locator('.node[data-fam="fx"]', { hasText: "Sepia" }).first();
+  await sepia().locator(".nodepow").click();
+  await page.waitForTimeout(700);   // la academia lo mira dos veces por segundo
+  await sepia().locator(".nodepow").click();
+  await page.locator("#academyCard", { hasText: "te lleva a «Efectos»" }).waitFor();
+  await sepia().click();
+  await page.locator("#academyCard", { hasText: "Crea una señal" }).waitFor();
+  await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.lookSel().fx.sepia = 0; }); });
+  await page.evaluate(async () => { const { setTutorial, tutorialOn } = await import("./js/tutorial.js"); setTutorial(false, window.__lumamap); window.__tutOff = !tutorialOn(); });
+  await page.locator("#academyCard").waitFor({ state: "detached" });
+  assert.equal(await page.evaluate(async () => { const { tipCard, resetTips, setTutorial } = await import("./js/tutorial.js"); resetTips(); const off = tipCard(window.__lumamap, "nodes"); setTutorial(true); const on = tipCard(window.__lumamap, "nodes"); return [off, !!on].join(); }), ",true");
+  await page.evaluate(() => window.__lumamap.openTab(null));
   // 3 · Mi panel: un deslizador y un botón elegidos por el usuario, que de verdad mueven el show.
   await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.S.project.settings.panel = [{ param: "global/master", label: "" }, { param: "global/blackout", label: "Negro total" }]; }); if (a.S.blackout) a.actions.blackout(); a.openTab("live"); });
   const mp = page.locator("#panelBody .mpgrid");
