@@ -9,6 +9,7 @@ import { openMediaLibrary } from "./panels-library.js";
 import { getShader } from "./plugins.js";
 import { hexToIsf, isfToHex } from "./isf.js";
 import { openPlugins } from "./panels-plugins.js";
+import { camFxSection, camFxPointer, camBinding } from "./panels-camfx.js";
 import { ffglControls } from "./panels-ffgl.js";
 import { vjSection } from "./panels-vj.js";
 import { signalsSection } from "./panels-signals.js";
@@ -167,11 +168,13 @@ function shaderControls(app, src) {
   if (!sh) return section("Shader", hint("Este shader es de un plugin que no está instalado o está apagado (Menú → Plugins)."));
   const P = (src.shaderParams ||= {});
   const val = (i) => P[i.name] ?? i.def;
-  const media = app.S.project.media.filter(m => (m.kind === "video" || m.kind === "image") && !m.pending);
+  // Solo los archivos con los que el efecto tiene sentido (los «solo cámara» no salen con fotos ni videos).
+  const media = sh.use === "camera" ? [] : app.S.project.media.filter(m => (m.kind === "video" || (m.kind === "image" && sh.use !== "video")) && !m.pending);
   const ctl = sh.isf.inputs.map(i => {
     if (i.type === "image") {
       const b = P[i.name] || { kind: "camera" };
       return h("div", {}, h("div", { class: "lbl" }, `${i.label}: qué imagen usa`),
+        sh.use === "camera" ? hint("Efecto solo para la cámara en vivo (necesita a alguien delante).") : sh.use === "video" ? hint("Funciona con la cámara y con videos (necesita movimiento; con una foto no haría nada).") : null,
         h("div", { class: "chips" },
           h("button", { class: `chip ${b.kind !== "media" ? "on" : ""}`, onclick: () => app.edit(() => { P[i.name] = { kind: "camera" }; app.renderPanel(); }) }, "📷 Cámara"),
           ...media.map(m => h("button", { class: `chip ${b.kind === "media" && b.id === m.id ? "on" : ""}`, onclick: () => app.edit(() => { P[i.name] = { kind: "media", id: m.id }; app.renderPanel(); }) }, `🎞 ${m.name}`))),
@@ -220,7 +223,7 @@ function animCatalog(app, onPick, { drag = false } = {}) {
   }
   search.addEventListener("input", () => { animUI.q = search.value; renderGrid(); });
   renderGrid();
-  return section(`Biblioteca de animaciones (${ANIM_LIBRARY.length})`, search, cats, grid);
+  return section(`Biblioteca de animaciones (${ANIM_LIBRARY.length})`, search, cats, grid, camFxPointer(app));
 }
 
 const anim = {
@@ -453,7 +456,7 @@ const content = {
     const types = [...SOURCE_TYPES, ...(projs.length && !s.face3d ? [{ id: "projector3d", label: "Proyector 3D", ic: "cube" }] : [])];
     const wrap = h("div", {},
       s.face3d ? hint("Cara de un objeto 3D: su contenido se ve en la ventana 3D y en lo que proyecta cada proyector.") : null,
-      tiles(types.map(t => ({ ...t })), { value: src.type === "shader" ? "gen" : src.type, cols: 4, onPick: (id) => {
+      tiles(types.map(t => ({ ...t })), { value: src.type === "shader" ? (camBinding(src) ? (camBinding(src).kind === "media" ? "media" : "camera") : "gen") : src.type, cols: 4, onPick: (id) => {
         if (id === "media" && !app.S.project.media.length) return A.importMedia("selected");
         if (id === "projector3d") return A.setSource({ type: id, projectorId: src.projectorId || projs[0].id });
         A.setSource({ type: id });
@@ -485,12 +488,14 @@ const content = {
           slider({ label: "Volumen", min: 0, max: 1, value: look.volume, def: 0, fmt: pct, onInput: (v) => app.edit(() => { look.volume = v; }), param: `surf/${s.id}/volume` }),
           transportControls(app, look, src.mediaId),
           btn({ label: "Reiniciar videos", ic: "restart", kind: "block", onClick: A.restart })) : null));
+      wrap.append(camFxSection(app));   // filtros de los plugins para esta foto o video
     }
 
     if (src.type === "ffgl") wrap.append(ffglControls(app, src));   // plugin FFGL de Resolume (Menú → Plugins)
     if (src.type === "shader") {
       wrap.append(shaderControls(app, src));
-      wrap.append(animCatalog(app, (a) => applyAnim(app, a), { drag: true }));
+      // Efecto de cámara / filtro: se cambia por otro de su sitio; un shader normal, por otra animación.
+      wrap.append(camBinding(src) ? (camFxSection(app) || hint("Este efecto necesita la cámara, un video o una foto.")) : animCatalog(app, (a) => applyAnim(app, a), { drag: true }));
     }
     if (src.type === "gen") {
       wrap.append(animCatalog(app, (a) => applyAnim(app, a), { drag: true }));
@@ -539,8 +544,9 @@ const content = {
     }
     if (src.type === "camera") {
       wrap.append(section("Cámara",
-        hint("Proyecta en vivo lo que ve la cámara (permite el acceso cuando se pida). Ponle efectos en la pestaña Efectos: térmica, contorno neón, caleidoscopio, chroma key…"),
+        hint("Proyecta en vivo lo que ve la cámara (permite el acceso cuando se pida). Abajo tienes los efectos de cámara de los plugins; en la pestaña Efectos, los rápidos (térmica, contorno neón, quitar el fondo verde…)."),
         cameraPicker(app, src.camId || "", (v) => app.actions.setSource({ camId: v }))));
+      wrap.append(camFxSection(app));
     }
     if (src.type === "body") {
       const tracker = bodyTracker(src.camId || "default");
@@ -653,6 +659,7 @@ const fx = {
 
     return h("div", {},
       compareSec,
+      camFxSection(app, { fold }),   // efectos de cámara / filtros de los plugins (si hay cámara, foto o video)
       section(`Biblioteca de efectos (${FX_LIBRARY.length})`,
         search, cats,
         toggle({ label: "Combinar con el efecto actual", hint: "Apagado: cada efecto sustituye al anterior", value: fxUI.combine, onChange: (v) => { fxUI.combine = v; } }),

@@ -10,6 +10,9 @@
 //   "effects":    [ { "name": "Neón rosa", "fx": { "saturation": 1.8, "duotone": 1, … } } ],
 //   "animations": [ { "name": "Fuego azul", "gen": "fire", "color": "#00e5ff", "color2": "#002244", "speed": 1, "scale": 1, "fx": { … } } ],
 //   "shaders":    [ { "name": "Rejilla retro", "isf": "/* { \"INPUTS\": [] } */ void main(){ … }" } ] }
+// Los shaders con entrada de imagen (cámara o video) no son animaciones: van a «📷 Efectos de cámara»
+// (CAM_FX). "use" dice dónde tienen sentido: "camera" (solo con la cámara en vivo), "video" (cámara y
+// videos, no fotos: necesitan movimiento) o "both" (por defecto: cámara, videos y fotos como filtro).
 import { DEFAULT_FX, GENERATORS, FX_LIBRARY, FX_CATEGORIES, FX_PRESETS, ANIM_LIBRARY, ANIM_CATEGORIES } from "./model.js";
 import { parseISF } from "./isf.js";
 import { BUNDLED } from "./plugins-bundled.js";
@@ -19,7 +22,11 @@ const OFF = "lumamap:pluginsOff";     // ids apagados (también de los incluidos
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 
 const plugins = new Map();            // id -> { plugin, bundled, enabled }
-const shaders = new Map();            // id del shader -> { id, plugin, name, isf }
+const shaders = new Map();            // id del shader -> { id, plugin, name, isf, use }
+/** Efectos de cámara y filtros de imagen de los plugins: [{ id, cat, pack, name, shader, plugin, use }]. */
+export const CAM_FX = [];
+export const CAM_CAT = "📷 Efectos de cámara";
+const USES = ["camera", "video", "both"];
 const listeners = new Set();
 export const onPluginsChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 const changed = () => { for (const f of listeners) { try { f(); } catch {} } };
@@ -64,7 +71,9 @@ export function validatePlugin(p) {
   for (const s of (Array.isArray(p.shaders) ? p.shaders : []).slice(0, 50)) {
     if (typeof s?.isf !== "string" || s.isf.length > 60000) continue;
     const isf = parseISF(s.isf, str(s.name) || "Shader");   // lanza si no es compatible
-    out.shaders.push({ name: str(s.name) || isf.name, isf: s.isf });
+    const sh = { name: str(s.name) || isf.name, isf: s.isf };
+    if (isf.usesCamera) sh.use = USES.includes(s.use) ? s.use : "both";
+    out.shaders.push(sh);
   }
   if (!out.effects.length && !out.animations.length && !out.shaders.length) throw new Error("El plugin no añade nada que LumaMap entienda (efectos, animaciones o shaders).");
   return out;
@@ -101,17 +110,22 @@ function register(entry) {
   p.animations.forEach((a, i) => ANIM_LIBRARY.push({ id: `p:${p.id}:a${i}`, cat, name: a.name, gen: a.gen, color: a.color, color2: a.color2, speed: a.speed, scale: a.scale, fx: a.fx, plugin: p.id }));
   p.shaders.forEach((s, i) => {
     const sid = `${p.id}/${i}`;
-    shaders.set(sid, { id: sid, plugin: p.id, name: s.name, isf: parseISF(s.isf, s.name) });
-    ANIM_LIBRARY.push({ id: `p:${p.id}:s${i}`, cat, name: s.name, shader: sid, plugin: p.id });
+    const isf = parseISF(s.isf, s.name);
+    shaders.set(sid, { id: sid, plugin: p.id, name: s.name, isf, use: s.use || null });
+    const e = { id: `p:${p.id}:s${i}`, cat, name: s.name, shader: sid, plugin: p.id };
+    // Con cámara/video de entrada: solo en «Efectos de cámara» (y como filtro de fotos y videos si sirve).
+    if (isf.usesCamera) CAM_FX.push({ ...e, cat: CAM_CAT, pack: p.name, use: s.use || "both" });
+    else ANIM_LIBRARY.push(e);
   });
   if ((p.effects.length) && !FX_CATEGORIES.includes(cat)) FX_CATEGORIES.push(cat);
-  if ((p.animations.length || p.shaders.length) && !ANIM_CATEGORIES.includes(cat)) ANIM_CATEGORIES.push(cat);
+  if ((p.animations.length || ANIM_LIBRARY.some(a => a.cat === cat)) && !ANIM_CATEGORIES.includes(cat)) ANIM_CATEGORIES.push(cat);
 }
 function unregister(id) {
   const cut = (arr, keep) => { for (let i = arr.length - 1; i >= 0; i--) if (!keep(arr[i])) arr.splice(i, 1); };
   for (const e of FX_LIBRARY) if (e.plugin === id) delete FX_PRESETS[e.name];
   cut(FX_LIBRARY, e => e.plugin !== id);
   cut(ANIM_LIBRARY, a => a.plugin !== id);
+  cut(CAM_FX, a => a.plugin !== id);
   for (const [k, s] of shaders) if (s.plugin === id) shaders.delete(k);
   cut(FX_CATEGORIES, c => FX_LIBRARY.some(e => e.cat === c));
   cut(ANIM_CATEGORIES, c => ANIM_LIBRARY.some(a => a.cat === c));
@@ -167,3 +181,9 @@ export function listPlugins() {
 }
 /** Shader de un plugin activo (o null). */
 export const getShader = (id) => { loadPlugins(); return shaders.get(id) || null; };
+
+/** Efectos de cámara que sirven para un tipo de contenido: "camera" (todos), "video" o "image" (filtros). */
+export function camFxFor(kind) {
+  loadPlugins();
+  return CAM_FX.filter(a => kind === "camera" || (kind === "video" ? a.use !== "camera" : a.use === "both"));
+}

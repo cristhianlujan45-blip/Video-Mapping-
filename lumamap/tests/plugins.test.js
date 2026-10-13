@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test, report } from "./harness.js";
 import { parseISF, evalSize } from "../web/js/isf.js";
-import { validatePlugin, pluginFromFile, cleanFx, loadPlugins, installPlugin, setPluginEnabled, removePlugin, listPlugins, getShader } from "../web/js/plugins.js";
+import { validatePlugin, pluginFromFile, cleanFx, loadPlugins, installPlugin, setPluginEnabled, removePlugin, listPlugins, getShader, CAM_FX, CAM_CAT, camFxFor } from "../web/js/plugins.js";
 import { BUNDLED } from "../web/js/plugins-bundled.js";
 import { FX_LIBRARY, FX_PRESETS, ANIM_LIBRARY, ANIM_CATEGORIES, GENERATORS } from "../web/js/model.js";
 
@@ -93,6 +93,22 @@ await test("instalar un shader .fs suelto, apagarlo y quitarlo: entra y sale de 
   assert.ok(FX_PRESETS["Neón rosa"]);
   assert.throws(() => installPlugin(JSON.stringify(BUNDLED[0])), /ya viene incluido/);
   assert.ok(listPlugins().length >= 3);
+});
+await test("efectos de cámara: solo en «Efectos de cámara» (no en animaciones) y como filtro de fotos/videos solo si sirven", () => {
+  loadPlugins();
+  // Ningún shader que necesita cámara/video está entre las animaciones; todos están en su sitio.
+  assert.deepEqual(ANIM_LIBRARY.filter(a => a.shader && getShader(a.shader)?.isf.usesCamera).map(a => a.name), []);
+  assert.ok(CAM_FX.length >= 34, String(CAM_FX.length));
+  assert.ok(CAM_FX.every(a => a.cat === CAM_CAT && getShader(a.shader)?.isf.usesCamera));
+  assert.ok(!ANIM_CATEGORIES.includes("🧩 Pro 50: cámara artística") && !ANIM_CATEGORIES.includes("🧩 Cámara reactiva al audio"), "sin categorías de cámara en animaciones");
+  const names = (k) => camFxFor(k).map(a => a.name);
+  assert.equal(camFxFor("camera").length, CAM_FX.length, "con la cámara, todos");
+  for (const n of ["Explosión de cámara", "Time Warp Scan", "Ecos de colores", "HUD de glifos"]) { assert.ok(names("camera").includes(n)); assert.ok(!names("video").includes(n) && !names("image").includes(n), n + " es solo de cámara"); }
+  assert.ok(names("video").includes("Datamosh") && !names("image").includes("Datamosh"), "datamosh necesita movimiento");
+  for (const n of ["Cámara térmica", "Pintura al óleo", "VHS", "Pop art", "Nube de puntos 3D"]) assert.ok(names("image").includes(n) && names("video").includes(n), n + " sirve de filtro");
+  // Un shader de terceros con imagen de entrada va a cámara y sirve de filtro (por defecto «both»); "use" raro → both.
+  const p = validatePlugin({ "lumamap-plugin": 1, id: "f", shaders: [{ name: "x", use: "rara", isf: `/*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ] }*/ void main(){ gl_FragColor = IMG_NORM_PIXEL(inputImage, isf_FragNormCoord); }` }] });
+  assert.equal(p.shaders[0].use, "both");
 });
 await test("un .json que no es plugin o un texto cualquiera se rechaza con un mensaje claro", () => {
   assert.throws(() => pluginFromFile("hola", "x.json"), /ni un shader ISF/);

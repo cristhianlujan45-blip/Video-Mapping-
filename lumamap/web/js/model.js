@@ -512,25 +512,25 @@ P("Luz", "Brillo suave", { blur: 0.5, brightness: 1.25, contrast: 1.1 });
 P("Luz", "Estroboscopio lento", { strobe: 3 });
 P("Luz", "Estroboscopio", { strobe: 6 });
 P("Luz", "Estroboscopio rápido", { strobe: 12 });
-// Cámara (también para video e imagen)
-P("Cámara", "Espejo selfie", { flipX: true });
-P("Cámara", "Contorno neón", { edges: 1, saturation: 1.5 });
-P("Cámara", "Contorno sobre imagen", { edges: 0.5 });
-P("Cámara", "Dibujo a lápiz", { edges: 1, saturation: 0, invert: true, contrast: 1.3 });
-P("Cámara", "Cómic", { edges: 0.5, posterize: 4, saturation: 1.6 });
-P("Cámara", "Relieve", { emboss: 1 });
-P("Cámara", "Nitidez", { sharpen: 1 });
-P("Cámara", "Quitar fondo verde", { chromaKey: 0.35, keyColor: "#00ff00", keySoft: 0.12 });
-P("Cámara", "Quitar fondo azul", { chromaKey: 0.35, keyColor: "#0044ff", keySoft: 0.12 });
-P("Cámara", "Quitar el negro", { lumaKey: 0.12, lumaSoft: 0.08 });
-P("Cámara", "Solo lo brillante", { lumaKey: 0.5, lumaSoft: 0.15 });
-P("Cámara", "Silueta neón", { threshold: 0.4, edges: 1, duotone: 1, duoA: "#000000", duoB: "#00e5ff" });
-P("Cámara", "Térmica", { colormap: "thermal", blur: 0.3 });
-P("Cámara", "Visión nocturna", { colormap: "night", vignette: 0.9, noise: 0.12 });
-P("Cámara", "Pixel art", { pixelate: 0.7, posterize: 5, saturation: 1.4 });
-P("Cámara", "Caleidoscopio", { kaleido: 6 });
-P("Cámara", "Fantasma", { invert: true, saturation: 0, lumaKey: 0.3, lumaSoft: 0.2 });
-P("Cámara", "Holograma", { duotone: 1, duoA: "#000814", duoB: "#00e5ff", scanlines: 0.7, glitch: 0.2, chroma: 0.008 });
+// Cámara, fotos y videos: filtros rápidos que van con cualquier imagen (la cámara en vivo o lo que subes)
+P("Cámara, fotos y videos", "Espejo selfie", { flipX: true });
+P("Cámara, fotos y videos", "Contorno neón", { edges: 1, saturation: 1.5 });
+P("Cámara, fotos y videos", "Contorno sobre imagen", { edges: 0.5 });
+P("Cámara, fotos y videos", "Dibujo a lápiz", { edges: 1, saturation: 0, invert: true, contrast: 1.3 });
+P("Cámara, fotos y videos", "Cómic", { edges: 0.5, posterize: 4, saturation: 1.6 });
+P("Cámara, fotos y videos", "Relieve", { emboss: 1 });
+P("Cámara, fotos y videos", "Nitidez", { sharpen: 1 });
+P("Cámara, fotos y videos", "Quitar fondo verde", { chromaKey: 0.35, keyColor: "#00ff00", keySoft: 0.12 });
+P("Cámara, fotos y videos", "Quitar fondo azul", { chromaKey: 0.35, keyColor: "#0044ff", keySoft: 0.12 });
+P("Cámara, fotos y videos", "Quitar el negro", { lumaKey: 0.12, lumaSoft: 0.08 });
+P("Cámara, fotos y videos", "Solo lo brillante", { lumaKey: 0.5, lumaSoft: 0.15 });
+P("Cámara, fotos y videos", "Silueta neón", { threshold: 0.4, edges: 1, duotone: 1, duoA: "#000000", duoB: "#00e5ff" });
+P("Cámara, fotos y videos", "Térmica", { colormap: "thermal", blur: 0.3 });
+P("Cámara, fotos y videos", "Visión nocturna", { colormap: "night", vignette: 0.9, noise: 0.12 });
+P("Cámara, fotos y videos", "Pixel art", { pixelate: 0.7, posterize: 5, saturation: 1.4 });
+P("Cámara, fotos y videos", "Caleidoscopio", { kaleido: 6 });
+P("Cámara, fotos y videos", "Fantasma", { invert: true, saturation: 0, lumaKey: 0.3, lumaSoft: 0.2 });
+P("Cámara, fotos y videos", "Holograma", { duotone: 1, duoA: "#000814", duoB: "#00e5ff", scanlines: 0.7, glitch: 0.2, chroma: 0.008 });
 
 // Estilos de imagen («looks» como los de Ladybug): letras, puntos, píxeles y paletas.
 P("Estilos", "Retro Matrix", { style: "matrix", styleSize: 0.55, contrast: 1.3 });

@@ -66,7 +66,7 @@ const r = await page.evaluate(async () => {
   out.glErr |= gl.getError();
   // Shaders ISF de los plugins incluidos: compilan, dibujan y se mueven.
   const { ShaderCache } = await import("./js/isf.js");
-  const { loadPlugins, listPlugins, getShader } = await import("./js/plugins.js");
+  const { loadPlugins, listPlugins, getShader, CAM_FX } = await import("./js/plugins.js");
   loadPlugins();
   const sc = new ShaderCache();
   out.shaders = [];
@@ -76,7 +76,7 @@ const r = await page.evaluate(async () => {
   cg.fillStyle = grd; cg.fillRect(0, 0, 320, 180); cg.fillStyle = "#120302"; cg.beginPath(); cg.arc(160, 75, 24, 0, 7); cg.fill(); cg.fillRect(126, 100, 68, 80);
   const quiet = { fft: new Uint8Array(256), wave: new Uint8Array(256).fill(128) };
   const loud = { fft: new Uint8Array(256).map((_, k) => k < 40 ? 255 : 120), wave: new Uint8Array(256).map((_, k) => 128 + Math.round(100 * Math.sin(k / 6))) };
-  for (const a of M.ANIM_LIBRARY.filter(x => x.shader)) {
+  for (const a of [...M.ANIM_LIBRARY.filter(x => x.shader), ...CAM_FX]) {
     const sh = getShader(a.shader);
     const pick = (e) => { const c = document.createElement("canvas"); c.width = 128; c.height = 72; const g2 = c.getContext("2d"); g2.drawImage(e.canvas, 0, 0, 128, 72); return g2.getImageData(0, 0, 128, 72).data; };
     const images = {}; for (const i of sh.isf.inputs) if (i.type === "image") images[i.name] = camImg;

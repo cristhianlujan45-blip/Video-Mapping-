@@ -611,10 +611,10 @@ export const VIRAL = [
     "lumamap-plugin": 1, id: "virales-camara", name: "Virales Pro: cámara y video", version: "1.0", author: "LumaMap",
     description: "Los efectos que más se ven en redes y shows, sobre la cámara o tus videos: ventanas de Windows 98, datamosh, pixel sort, Time Warp Scan, ecos, cortes desplazados, pared de video, espejo infinito, caleidoscopio, glitch de bloques, puzzle deslizante, HUD de glifos y pop art.",
     shaders: [
-      { name: "Ventanas Windows 98", isf: WIN98 }, { name: "Datamosh", isf: DATAMOSH }, { name: "Pixel sort", isf: PIXELSORT },
-      { name: "Time Warp Scan", isf: TIMEWARP }, { name: "Ecos de colores", isf: ECHO }, { name: "Cortes desplazados", isf: SLICES },
+      { name: "Ventanas Windows 98", isf: WIN98 }, { name: "Datamosh", isf: DATAMOSH, use: "video" }, { name: "Pixel sort", isf: PIXELSORT },
+      { name: "Time Warp Scan", isf: TIMEWARP, use: "camera" }, { name: "Ecos de colores", isf: ECHO, use: "camera" }, { name: "Cortes desplazados", isf: SLICES },
       { name: "Pared de video", isf: VIDEOWALL }, { name: "Espejo infinito", isf: INFINITE }, { name: "Caleidoscopio de cámara", isf: KALEIDO },
-      { name: "Glitch de bloques", isf: BLOCKGLITCH }, { name: "Puzzle deslizante", isf: PUZZLE }, { name: "HUD de glifos", isf: HUD },
+      { name: "Glitch de bloques", isf: BLOCKGLITCH }, { name: "Puzzle deslizante", isf: PUZZLE }, { name: "HUD de glifos", isf: HUD, use: "camera" },
       { name: "Pop art", isf: POPART },
     ],
   },

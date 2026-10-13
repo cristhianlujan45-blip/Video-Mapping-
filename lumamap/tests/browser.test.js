@@ -875,7 +875,7 @@ await test("móvil por cable USB: la página abierta por el cable manda la cáma
   assert.deepEqual(phoneErrors, [], JSON.stringify(phoneErrors));
   await page.evaluate(() => { const a = window.__lumamap; a.S.project.settings.interactive.camId = ""; document.querySelectorAll("#notices .notice").forEach(n => n.remove()); a.openTab(null); });
 });
-await test("plugins: se instala un shader ISF desde el menú, aparece en las animaciones con sus controles y se proyecta", async () => {
+await test("plugins: se instala un shader ISF desde el menú, aparece en las animaciones con sus controles y se proyecta; los efectos de cámara van a la cámara y como filtro de fotos", async () => {
   const fsFile = path.join(os.tmpdir(), "ondas-test.fs");
   fs.writeFileSync(fsFile, `/*{ "DESCRIPTION": "Ondas de prueba", "CREDIT": "Test", "INPUTS": [
     { "NAME": "freq", "TYPE": "float", "DEFAULT": 8.0, "MIN": 1.0, "MAX": 30.0, "LABEL": "Frecuencia" },
@@ -911,9 +911,12 @@ void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_Fr
     return { err: sc.error(sh.id), green: s / (64 * 36) };
   }, id);
   assert.equal(drawn.err, ""); assert.ok(drawn.green > 20, "pinta en verde " + drawn.green);
+  // Los efectos de cámara no son animaciones: no salen en su biblioteca, sino en Contenido → Cámara.
+  assert.equal(await page.locator("#panelBody .chip", { hasText: "Cámara reactiva" }).count(), 0, "sin efectos de cámara entre las animaciones");
+  await page.locator("#panelBody").getByRole("button", { name: /📷 Efectos de cámara \(\d+\) y filtros/ }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.lookSel().source.type), "camera");
   // Plugin de cámara reactiva: la cámara (la de prueba del navegador) entra en el shader de verdad.
-  await page.locator("#panelBody .chip", { hasText: "🧩 Cámara reactiva al audio" }).click();
-  await page.locator("#panelBody .tile", { hasText: "Explosión de cámara" }).first().click();
+  await page.locator("#panelBody .sec", { hasText: "📷 Efectos de cámara" }).locator(".tile", { hasText: "Explosión de cámara" }).click();
   await page.locator("#panelBody .sec", { hasText: "Explosión de cámara" }).getByText("📷 Cámara").waitFor();
   await page.waitForFunction(() => { const sc = window.__lumamap.compositor().shaders; return [...sc.out.values()].some(e => e.version > 5 && e.tex.has("inputImage")); }, null, { timeout: 30000 });
   const cam = await page.evaluate(() => { const sc = window.__lumamap.compositor().shaders, e = [...sc.out.values()].find(x => x.tex.has("inputImage"));
@@ -921,6 +924,33 @@ void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_Fr
     const d = g.getImageData(0, 0, 64, 36).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2];
     return { light: s / (64 * 36 * 3), w: e.tex.get("inputImage").w, err: [...sc.errors.values()].join(" ") }; });
   assert.equal(cam.err, ""); assert.ok(cam.w >= 320, "llega la cámara " + cam.w); assert.ok(cam.light > 5, "dibuja " + cam.light);
+  // «Quitar el efecto» deja la cámara tal cual.
+  await page.locator("#panelBody").getByRole("button", { name: /Quitar el efecto/ }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.lookSel().source.type), "camera");
+  // Una foto subida: «🎨 Filtros para esta foto» con los que sirven (sin los de solo cámara ni los que necesitan movimiento).
+  const png = path.join(os.tmpdir(), "lumamap-filtro.png");
+  makePng(png);
+  const [chooser2] = await Promise.all([page.waitForEvent("filechooser"), page.evaluate(() => { window.__lumamap.actions.importMedia("selected"); })]);
+  await chooser2.setFiles(png);
+  await page.waitForFunction(() => { const a = window.__lumamap, s = a.lookSel().source; return s.type === "media" && a.S.project.media.some(m => m.id === s.mediaId && m.kind === "image" && !m.pending); });
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("content"); });
+  const filt = page.locator("#panelBody .sec", { hasText: "🎨 Filtros para esta foto" });
+  await filt.waitFor();
+  for (const n of ["Explosión de cámara", "Time Warp Scan", "Datamosh"]) assert.equal(await filt.locator(".tile", { hasText: n }).count(), 0, n + " no es filtro de fotos");
+  await filt.locator(".tile", { hasText: "Cámara térmica" }).click();
+  const fsrc = await page.evaluate(() => window.__lumamap.lookSel().source);
+  assert.equal(fsrc.type, "shader"); assert.equal(fsrc.shaderParams.inputImage.kind, "media");
+  // La foto entra en el filtro de verdad (no la cámara) y se dibuja.
+  await page.waitForFunction(() => [...window.__lumamap.compositor().shaders.out.values()].some(e => e.version > 2 && e.tex.get("inputImage")?.w === 64), null, { timeout: 30000 });   // la foto de prueba mide 64 px
+  const filtered = await page.evaluate(() => { const sc = window.__lumamap.compositor().shaders; return [...sc.errors.values()].join(" "); });
+  assert.equal(filtered, "");
+  // También en la pestaña Efectos, y «Quitar el filtro» devuelve la foto tal cual.
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("fx"); });
+  await page.locator("#panelBody summary", { hasText: "🎨 Filtros para esta foto" }).waitFor();
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("content"); });
+  await page.locator("#panelBody").getByRole("button", { name: /Quitar el filtro/ }).click();
+  assert.deepEqual(await page.evaluate(() => { const s = window.__lumamap.lookSel().source; return [s.type, s.mediaId]; }), ["media", fsrc.shaderParams.inputImage.id]);
+  fs.rmSync(png, { force: true });
   await page.evaluate((id) => { const a = window.__lumamap; a.S.project.surfaces = a.S.project.surfaces.filter(s => s.id !== id); a.select(a.S.project.surfaces[0]?.id || null); a.changed({ panel: true }); a.openTab(null); }, id);
   fs.rmSync(fsFile, { force: true });
 });
