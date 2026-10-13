@@ -67,7 +67,7 @@ export const LEVELS = [
     { text: "Abre «Escenas» y crea una segunda escena.", check: (app) => app.S.project.scenes.length >= 2 },
     { text: "Cambia la transición de una escena (corte, disolver, destello…).", check: (app) => app.S.project.scenes.some(s => s.transition && s.transition !== "fade") },
     { text: "Pasa a la escena siguiente (Enter o GO).", start: (app) => ({ id: app.S.project.sceneId }), check: (app, b) => app.S.project.sceneId !== b.id },
-    { text: "Prueba el modo actuación (Show → Modo actuación). Sal con Mayús+Esc.", check: (app) => !!app.S.perfMode },
+    { text: "Prueba el modo actuación (Show → «Actuación y emergencia», o F10). Sal con Mayús+Esc.", check: (app) => !!app.S.perfMode },
   ] },
 ];
 

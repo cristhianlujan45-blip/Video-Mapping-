@@ -1100,7 +1100,7 @@ A.add3DObject = async (look, mode = "new") => {
     const st = await ensure3d(app);
     const file = new File([exportOBJ(look.model)], `${name.replace(/[^\wáéíóúñ -]+/gi, "").trim() || "Objeto"}.obj`, { type: "model/obj" });
     await st.importModel(file);
-    setPro(true); openTab("3d");
+    openTab("3d");
     changed({ panel: true }); commit();
     toast(`«${name}» en el espacio 3D: pon animaciones en sus caras y elige 1-4 proyectores`);
     return;
@@ -2519,7 +2519,7 @@ function setPro(on) {
   if (S.tab === "menu") renderPanel();
 }
 app.setPro = setPro;
-A.togglePro = () => { setPro(!S.pro); toast(S.pro ? "Modo profesional: Control, Luces, 3D, Show y Rendimiento" : "Modo simple"); };
+A.togglePro = () => { setPro(!S.pro); toast(S.pro ? "Modo profesional: Show, Tracking, Control, Rendimiento y Luces completas" : "Modo simple"); };
 /** Calidad de la vista previa del editor (la salida conserva su calidad). */
 A.setPreview = ({ scale, fps } = {}) => {
   if (scale) S.previewScale = scale;
@@ -3194,7 +3194,7 @@ A.remoteInfo = async () => {
       h("p", { class: "hint" }, "El mando remoto desde el navegador de otro teléfono solo está en la app de Windows: en Android se controla por OSC.")) });
   }
   if (!window.LumaDesktop?.remoteInfo) {
-    return dialog({ title: "Mando remoto", content: h("div", {}, hint(location.protocol.startsWith("http") ? `Abre ${location.origin}/controller.html en el teléfono (misma red Wi-Fi).` : "El mando remoto funciona con la app de Windows o con el servidor de LumaMap (npm start).")) });
+    return dialog({ title: "Control desde el móvil", content: h("div", {}, hint(location.protocol.startsWith("http") ? `Abre ${location.origin}/controller.html en el teléfono (misma red Wi-Fi).` : "El mando remoto funciona con la app de Windows o con el servidor de LumaMap (npm start).")) });
   }
   const info = await window.LumaDesktop.remoteInfo();
   const content = h("div", { class: "remoteinfo" },
@@ -3203,7 +3203,7 @@ A.remoteInfo = async () => {
     h("p", {}, "PIN: ", h("b", { class: "big" }, info.pin)),
     h("p", { class: "hint" }, `OSC: envía a la IP de este equipo, puerto UDP ${info.oscPort}. Cualquier dirección se puede asignar con «Aprender»; /lumamap/param/<parámetro> lo fija directamente (p. ej. /lumamap/param/global/master 0.5).`),
     info.error ? h("p", { class: "hint" }, "Error: " + info.error) : null);
-  const r = await dialog({ title: "Mando remoto y OSC", content, buttons: [{ label: "Nuevo PIN", value: "pin" }, { label: "Cerrar", kind: "primary", value: null }] });
+  const r = await dialog({ title: "Control desde el móvil y OSC", content, buttons: [{ label: "Nuevo PIN", value: "pin" }, { label: "Cerrar", kind: "primary", value: null }] });
   if (r === "pin") { await window.LumaDesktop.remoteNewPin(); setTimeout(A.remoteInfo, 1500); }
 };
 

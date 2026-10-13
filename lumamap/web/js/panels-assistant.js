@@ -53,7 +53,7 @@ export async function runFix(app, fix) {
     return applyProposal(app, v);
   }
   if (fix.surface) app.select(fix.surface);
-  if (fix.tab) { if (["show", "3d", "tracking", "control", "perf"].includes(fix.tab)) app.setPro(true); if (app.S.tab !== fix.tab) app.openTab(fix.tab); }
+  if (fix.tab) { if (["show", "tracking", "control", "perf"].includes(fix.tab)) app.setPro(true); if (app.S.tab !== fix.tab) app.openTab(fix.tab); }
   if (fix.lesson) { aiOf(app); app.academy.start(fix.lesson); }
 }
 function proposalCard(app, v) {
@@ -459,7 +459,7 @@ const QUICK = [
 ];
 
 const assistantPanel = {
-  title: () => "🧠 AI Mapping Assistant",
+  title: () => "🧠 Asistente",
   render(app) {
     const ai = aiOf(app);
     if (!ai.state.checkedAt) ai.refresh().then(() => { if (app.S.tab === "assistant") app.renderPanel(); });

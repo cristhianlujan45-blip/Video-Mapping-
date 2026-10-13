@@ -148,7 +148,7 @@ function simpleLights(app) {
   // ---- PLAY ----
   wrap.append(h("div", { class: "lightbar" },
     btn({ label: c.enabled ? "■ DETENER LUCES" : "▶ PLAY LUCES", kind: c.enabled ? "danger wide" : "primary wide", onClick: () => set(() => { c.enabled = !c.enabled; if (c.enabled) D.connect(); }) }),
-    btn({ label: "Apagón", ic: "blackout", kind: D.blackout ? "on" : "", onClick: () => { D.blackout = !D.blackout; app.renderPanel(); } })),
+    btn({ label: "Apagón de luces", ic: "blackout", kind: D.blackout ? "on" : "", onClick: () => { D.blackout = !D.blackout; app.renderPanel(); } })),
     slider({ label: "Brillo de todas las luces", min: 0, max: 1, value: c.master, def: 1, fmt: pct, onInput: (v) => { c.master = v; app.paramTouched?.("dmx/master"); }, param: "dmx/master" }));
   // Estado claro: nunca se aparenta una conexión que no existe.
   const state = !D.desktop ? ["warn", "Modo práctica: las luces se ven en el escenario. Para encender luces reales usa la app de Windows."]
@@ -364,7 +364,7 @@ const lights = {
     // ---------- PLAY ----------
     wrap.append(h("div", { class: "lightbar" },
       btn({ label: c.enabled ? "■ DETENER LUCES" : "▶ PLAY LUCES", kind: c.enabled ? "danger wide" : "primary wide", onClick: () => set(() => { c.enabled = !c.enabled; if (c.enabled) D.connect(); }) }),
-      btn({ label: D.blackout ? "Apagón ON" : "Apagón", ic: "blackout", kind: D.blackout ? "on" : "", onClick: () => { D.blackout = !D.blackout; app.renderPanel(); } })),
+      btn({ label: D.blackout ? "Apagón de luces ON" : "Apagón de luces", ic: "blackout", kind: D.blackout ? "on" : "", onClick: () => { D.blackout = !D.blackout; app.renderPanel(); } })),
       slider({ label: "Master de luces", min: 0, max: 1, value: c.master, def: 1, fmt: pct, onInput: (v) => { c.master = v; app.paramTouched?.("dmx/master"); }, param: "dmx/master" }));
 
     // ---------- 1 · Conectar ----------
@@ -510,8 +510,8 @@ const lights = {
       btn({ ic: "play", kind: "icon", title: "Recuperar", onClick: () => { D.recall(D.snapshot === sn.id ? null : sn.id); app.renderPanel(); } }),
       btn({ ic: "knob", kind: "icon", title: "Asignar a MIDI / tecla / OSC", onClick: () => app.actions.learn("dmx/snapshot/" + sn.id) }),
       btn({ ic: "trash", kind: "icon", onClick: () => set(() => { c.snapshots.splice(c.snapshots.indexOf(sn), 1); if (D.snapshot === sn.id) D.snapshot = null; }) })));
-    wrap.append(fold("snap", `Snapshots (${c.snapshots.length})`, false, snaps,
-      row(btn({ label: "CAPTURAR estado DMX", ic: "photo", onClick: async () => { const n = await prompt("Nombre", `Snapshot ${c.snapshots.length + 1}`); if (n !== null) set(() => D.capture(n)); } }),
+    wrap.append(fold("snap", `Memorias de luces (${c.snapshots.length})`, false, snaps,
+      row(btn({ label: "Guardar cómo están las luces", ic: "photo", onClick: async () => { const n = await prompt("Nombre", `Memoria ${c.snapshots.length + 1}`); if (n !== null) set(() => D.capture(n)); } }),
         D.snapshot ? btn({ label: "Soltar snapshot", onClick: () => { D.recall(null); app.renderPanel(); } }) : null)));
 
     // ---------- Prueba ----------

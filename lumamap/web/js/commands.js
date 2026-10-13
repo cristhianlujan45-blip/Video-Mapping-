@@ -70,8 +70,11 @@ export function buildCommands(app) {
   add("Ver", "zoomIn", "Acercar vista", () => A.zoom(1.25), { keys: "+", ic: "plus" });
   add("Ver", "zoomOut", "Alejar vista", () => A.zoom(0.8), { keys: "-", ic: "fit" });
   add("Ver", "preview", "Vista previa sin guías", () => app.setMode(S.mode === "preview" ? "edit" : "preview"), { keys: "V", ic: "eye" });
-  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["anim", "Panel Animaciones", "wand"], ["live", "Panel En vivo (mezcla)", "live"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas", "scenes"], ["audio", "Panel Audio y ritmo", "audio"]])
+  // Un comando por pestaña, con el mismo nombre que la pestaña.
+  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["anim", "Panel Animaciones", "wand"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas", "scenes"], ["live", "Panel En vivo", "live"], ["audio", "Panel Audio", "audio"], ["interactive", "Panel Interactivo", "body"], ["lights", "Panel Luces", "light"], ["3d", "Panel 3D", "cube"], ["assistant", "Panel Asistente", "ai"]])
     add("Ver", "tab-" + id, label, () => app.openTab(id), { ic });
+  for (const [id, label, ic] of [["show", "Panel Show (cues y timecode)", "timeline"], ["tracking", "Panel Tracking", "tracking"]])
+    add("Ver", "tab-" + id, label, () => { app.setPro(true); app.openTab(id); }, { ic });
 
   add("Proyección", "output", "Proyectar (panel)", () => app.openTab("output"), { keys: "F", ic: "project" });
   add("Proyección", "outWindow", "Abrir ventana de salida", () => A.openWindow(1), { keys: "Ctrl+Shift+F", ic: "screen" });
@@ -80,7 +83,7 @@ export function buildCommands(app) {
   add("En vivo", "randomAll", "Todas las pantallas al azar", () => A.randomAll(), { keys: "Shift+Enter", ic: "shuffle" });
   add("En vivo", "randomSel", "Siguiente al azar en la superficie", () => S.sel && A.randomNext(S.sel), { keys: "Z", ic: "shuffle", needsSel: true });
   add("En vivo", "goSel", "GO en la superficie seleccionada", () => S.sel && A.go(S.sel), { keys: "X", ic: "play", needsSel: true });
-  add("Proyección", "here", "Pantalla completa aquí", () => A.projectHere(!S.projecting), { keys: "P", ic: "fit" });
+  add("Proyección", "here", "Usar esta pantalla como proyector", () => A.projectHere(!S.projecting), { keys: "P", ic: "fit" });
   add("Proyección", "guides", "Guías en el proyector", A.toggleGuides, { keys: "G", ic: "grid" });
   add("Proyección", "blackout", "Apagón", A.blackout, { keys: "B", ic: "blackout" });
   add("Proyección", "mute", "Sonido de los videos", A.toggleMute, { keys: "Ctrl+M", ic: "volume" });
@@ -102,8 +105,8 @@ export function buildCommands(app) {
 
   add("Ayuda", "palette", "Todos los comandos", () => openPalette(app), { keys: "Ctrl+K", ic: "menu" });
   add("Ayuda", "help", "Ayuda y atajos", () => A.help(), { keys: "F1", ic: "help" });
-  add("Ayuda", "midi", "Conectar controlador MIDI", () => A.midi(), { ic: "midi" });
-  add("Ayuda", "remote", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), { ic: "live" });
+  add("Conexiones", "midi", "Conectar controlador MIDI", () => A.midi(), { ic: "midi" });
+  add("Conexiones", "remote", "Control desde el móvil y OSC", () => A.remoteInfo(), { ic: "live" });
   add("Show", "emergency", "EMERGENCIA: salida segura inmediata", A.emergency, { keys: "Ctrl+Shift+E", ic: "blackout" });
   add("Show", "perfMode", "Modo actuación (pantalla limpia, sin ediciones)", () => A.togglePerfMode(), { keys: "F10", ic: "live" });
   add("Ver", "pro", "Modo profesional (activar / desactivar)", A.togglePro, { ic: "knob" });

@@ -217,7 +217,7 @@ function buildMenu() {
         })),
       ] },
       cmd("Abrir pantalla 2", "outWindow2"), cmd("Abrir pantalla 3", "outWindow3"), cmd("Abrir pantalla 4", "outWindow4"),
-      cmd("Pantalla completa aquí", "here", "P"),
+      cmd("Usar esta pantalla como proyector", "here", "P"),
       { type: "separator" },
       cmd("Guías en el proyector", "guides", "G"), cmd("Apagón", "blackout", "B"), cmd("Sonido de los videos", "mute", "Ctrl+M"),
       { label: "Patrón de prueba", submenu: [

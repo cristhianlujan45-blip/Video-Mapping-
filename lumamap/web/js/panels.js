@@ -312,7 +312,7 @@ function pickNext(app, id) {
 const SCREEN_OPTS = [[0, "Todas"], [1, "P1"], [2, "P2"], [3, "P3"], [4, "P4"]];
 
 const live = {
-  title: () => "Mezcla en vivo",
+  title: () => "En vivo",
   render(app) {
     const A = app.actions, S = app.S, P = S.project;
     const wrap = h("div", {});
@@ -562,7 +562,7 @@ const content = {
       }
     }
     if (src.type === "none") {
-      wrap.append(section("Solo borde", hint("La superficie no muestra relleno: ve a Efectos → Borde para crear líneas de neón animadas sobre el contorno."),
+      wrap.append(section("Solo borde", hint("La superficie no muestra relleno: ve a Efectos → «Borde neón» para crear líneas de neón animadas sobre el contorno."),
         btn({ label: "Activar borde neón", ic: "fx", kind: "block", onClick: () => { app.edit(() => { Object.assign(look.fx, { border: 0.015, borderAnim: "chase", borderGlow: 0.8 }); }); app.openTab("fx"); } })));
     }
 
@@ -662,7 +662,7 @@ const fx = {
           sl("styleSize", (v) => v < 0.34 ? "Pequeño" : v < 0.67 ? "Medio" : "Grande"),
           h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Resolución del estilo")),
           segmented({ options: [["1", "Normal"], ["2", "HD ×2"], ["4", "4K ×4"]], value: String(f.styleDetail || 1), small: true, onChange: (v) => app.edit(() => { f.styleDetail = +v; }) }),
-          hint("HD y 4K ponen más letras, puntos y píxeles (más finos). Se nota sobre todo con la composición en 4K (Proyector → Calidad)."),
+          hint("HD y 4K ponen más letras, puntos y píxeles (más finos). Se nota sobre todo con la composición en 4K (Proyectar → «Calidad y resolución»)."),
           sl("styleGlow", pct),
           swatches({ label: "Color (Matrix, números, dither)", value: f.styleColor || STYLES.find(x => x[0] === f.style)?.[2] || "#39ff6a", palette: ["#39ff6a", "#3dffb0", "#ffffff", "#ff4fd8", "#c6ff1a", "#ffb000", "#00e5ff", "#ff3b3b"], onChange: set("styleColor") })) : null),
       fold("Borde neón (líneas sobre el contorno)", f.border > 0,
@@ -745,7 +745,7 @@ const shape = {
       section("Ajuste",
         hint("Arrastra los puntos amarillos. Con dos dedos sobre la forma la escalas y giras. Usa la cruceta para mover el punto rojo píxel a píxel."),
         toggle({ label: "Unir esquinas que coinciden", hint: "Mueve juntas las caras de un cubo o fachada", value: S.linkCorners, onChange: (v) => { S.linkCorners = v; } }),
-        row(btn({ ic: "flipH", label: "Espejo", kind: "wide", onClick: () => A.flip("h") }), btn({ ic: "flipV", label: "Voltear", kind: "wide", onClick: () => A.flip("v") }), btn({ ic: "rotate", label: "90°", kind: "wide", onClick: A.rotate90 })),
+        row(btn({ ic: "flipH", label: "Espejo ↔", kind: "wide", onClick: () => A.flip("h") }), btn({ ic: "flipV", label: "Voltear ↕", kind: "wide", onClick: () => A.flip("v") })),
         row(s.type === "quad" ? btn({ ic: "straight", label: "Enderezar", kind: "wide", onClick: A.straighten }) : null, btn({ ic: "fit", label: "Pantalla completa", kind: "wide", onClick: A.fillFrame }))),
       section("Girar la superficie",
         hint("Arrastra el círculo azul que aparece encima de la superficie para girarla a cualquier ángulo, o usa los botones."),
@@ -820,7 +820,7 @@ const scenes = {
     });
     const cur = app.scene();
     return h("div", {},
-      hint("Las escenas usan el mismo mapeo con distinto contenido. Tócalas en directo para cambiar."),
+      hint(S.pro ? "Las escenas usan el mismo mapeo con distinto contenido. En la pestaña Show son tus cues (las mismas), con timecode y automatización." : "Las escenas usan el mismo mapeo con distinto contenido. Tócalas en directo para cambiar."),
       row(btn({ label: "Anterior", ic: "left", kind: "wide", onClick: () => A.stepScene(-1) }), btn({ label: "Siguiente", ic: "right", kind: "wide primary", onClick: () => A.stepScene(1) })),
       h("div", { style: { height: "10px" } }),
       list,
@@ -973,7 +973,7 @@ const output = {
     }
     wrap.append(section("Esta pantalla",
       hint("Para proyector en modo espejo, Chromecast o cable HDMI duplicando la pantalla. La interfaz se oculta; toca para ver los controles."),
-      btn({ label: "Pantalla completa aquí", ic: "fit", kind: "bigbtn", onClick: () => A.projectHere(true) })));
+      btn({ label: "Usar esta pantalla como proyector", ic: "fit", kind: "bigbtn", onClick: () => A.projectHere(true) })));
     wrap.append(section("En directo",
       toggle({ label: "Guías en el proyector", hint: "Muestra contornos y puntos en la pared para alinear", value: S.guides, onChange: (v) => { S.guides = v; }, param: "global/guides" }),
       slider({ label: "Brillo general", min: 0, max: 1, value: S.master, def: 1, fmt: pct, onInput: (v) => { S.master = v; }, param: "global/master" }),
@@ -1034,7 +1034,7 @@ const menu = {
       h("div", { class: "badge", html: icon(ic) }), h("div", { class: "name" }, label, sub ? h("small", {}, sub) : null));
     return h("div", {},
       section("Modo",
-        toggle({ label: "Modo profesional", hint: "Añade Control (MIDI, teclado, macros), Show (cues, timecode, automatización), 3D (objetos y proyectores), Tracking (cuerpo, manos, zonas y reglas), Luces (DMX, Art-Net, sACN, pixel mapping) y Rendimiento. El uso de siempre no cambia.", value: S.pro, onChange: (v) => app.setPro(v) })),
+        toggle({ label: "Modo profesional", hint: "Añade las pestañas Show (cues, timecode, automatización), Tracking (cuerpo, manos, zonas y reglas), Control (MIDI, macros, monitor) y Rendimiento, y la vista completa de Luces (DMX, Art-Net, sACN, pixel mapping). El uso de siempre no cambia.", value: S.pro, onChange: (v) => app.setPro(v) })),
       section("Proyecto", h("div", { class: "list" },
         item("plus", "Nuevo", A.newProject, "Desde una plantilla"),
         item("folder", "Abrir", A.open, "Proyectos guardados en este dispositivo"),
@@ -1042,16 +1042,20 @@ const menu = {
         item("copy", "Guardar como…", () => A.save(true)),
         item("download", "Exportar archivo .lumamap", A.exportProject, "Incluye videos e imágenes: para copia o para otro equipo"),
         item("upload", "Importar archivo", A.importProject),
-        item("screen", `Resolución · ${S.project.width}×${S.project.height}`, A.setResolution))),
+        item("screen", `Resolución de salida · ${S.project.width}×${S.project.height}`, A.setResolution),
+        item("save", "Copias de seguridad", () => A.backups(), "Se guarda una copia cada 5 minutos · recuperar una anterior"))),
       section("Crear", h("div", { class: "list" },
         item("folder", "Biblioteca de archivos", () => openMediaLibrary(app), canConvert() ? "Tus videos y fotos · los pesados se convierten solos en segundo plano" : "Tus videos, fotos y GIF"),
         item("gif", "GIF animados", () => A.searchGifs(), "Se buscan solos mientras escribes"),
         item("cube", "Crear objeto 3D («hazme un carro»)", () => A.create3D(), "Escribe qué quieres y proyéctalo, también como holograma"),
         item("body", "Holograma (como Tupac, tul o pirámide)", () => A.hologramWizard(), "Varios proyectores, quita el fondo de la persona solo"),
-        item("plugin", "Plugins", () => openPlugins(app), "Más efectos, animaciones y shaders ISF (como en Resolume)"))),
-      section("Show", h("div", { class: "list" },
-        item("wand", "Todos los comandos", A.palette, "Busca cualquier acción escribiendo · Ctrl+K"),
-        item("camera", S.rec ? "Detener grabación" : "Grabar video de la salida", A.record, "Guarda el show en video (con la música si el micrófono está activo)"),
+        item("plugin", "Plugins", () => openPlugins(app), "Más efectos, animaciones y shaders ISF (como en Resolume)")),
+        toggle({ label: "Optimizar videos al importarlos", hint: (window.LumaDesktop || window.LumaNative)
+          ? "Convierte solo lo que hace falta (4K, HEVC, ProRes, bitrate alto…) a un H.264 ligero del tamaño de la salida, con la tarjeta gráfica. Lo que ya es ligero entra al instante."
+          : "En la app de Windows y Android los videos pesados se convierten solos al importarlos.",
+          value: app.autoOptimize(), onChange: (v) => app.setAutoOptimize(v) })),
+      section("Grabar y capturar", h("div", { class: "list" },
+        item("camera", S.rec ? "Detener grabación" : "Grabar video de la salida", A.record, "Guarda el show en video (con la música si el micrófono está activo) · Ctrl+R"),
         item("photo", "Capturar imagen de la salida", A.snapshot, "PNG a la resolución de salida"))),
       section("Referencia para dibujar formas",
         hint("Una foto de la pared tomada desde el proyector ayuda a trazar las formas. Solo se ve en el editor."),
@@ -1060,18 +1064,13 @@ const menu = {
         S.ref.url || S.ref.camera ? h("div", {},
           slider({ label: "Opacidad de la referencia", min: 0.05, max: 1, value: S.ref.opacity, def: 0.5, fmt: pct, onInput: (v) => { S.ref.opacity = v; } }),
           btn({ label: "Quitar referencia", kind: "block", onClick: A.refClear })) : null),
-      section("Videos",
-        toggle({ label: "Optimizar videos al importarlos", hint: (window.LumaDesktop || window.LumaNative)
-          ? "Convierte solo lo que hace falta (4K, HEVC, ProRes, bitrate alto…) a un H.264 ligero del tamaño de la salida, con la tarjeta gráfica. Lo que ya es ligero entra al instante."
-          : "En la app de Windows y Android los videos pesados se convierten solos al importarlos.",
-          value: app.autoOptimize(), onChange: (v) => app.setAutoOptimize(v) })),
       section("Conexiones", h("div", { class: "list" },
         item("camera", "Móvil o cámara para lo interactivo", () => openPhoneCam(app), window.LumaDesktop ? "Android por cable USB (se activa solo), o cualquier móvil por Wi-Fi" : "Cualquier móvil por Wi-Fi"),
         item("midi", "Conectar controlador MIDI", () => { A.midi(); if (S.pro) app.openTab("control"); }, S.pro ? "Asigna cualquier control con clic derecho → Aprender" : "Activa el Modo profesional para asignar knobs y faders"),
-        item("live", "Mando remoto (teléfono) y OSC", () => A.remoteInfo(), "Controla el show desde el teléfono o una mesa OSC"))),
+        item("live", "Control desde el móvil y OSC", () => A.remoteInfo(), "Maneja el show desde el navegador del teléfono o desde una mesa OSC"))),
       section("Ayuda y sistema", h("div", { class: "list" },
         item("help", "Ayuda y atajos", () => A.help()),
-        item("save", "Copias de seguridad", () => A.backups(), "Se guarda una copia cada 5 minutos · recuperar una anterior"),
+        item("wand", "Todos los comandos", A.palette, "Busca cualquier acción escribiendo · Ctrl+K"),
         item("gauge", "Prueba de velocidad", () => A.speedTest(), "Mide este equipo y elige la calidad para que todo vaya fluido"),
         window.LumaDesktop ? item("gauge", "Analizar el equipo y calidad", () => A.hardwareProfile(false), "GPU, CPU, pantallas, cámaras y códecs por hardware") : null,
         app.updateInfo?.canRollback ? item("undo", "Volver a la versión anterior", () => A.rollbackUpdate(), "Restaura la versión instalada antes de la última actualización") : null,

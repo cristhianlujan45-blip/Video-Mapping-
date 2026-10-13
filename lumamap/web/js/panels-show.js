@@ -66,7 +66,7 @@ const showPanel = {
       sh.tcSource === "ltc" ? h("div", {}, row(ins, btn({ label: SE.ltc ? "Reiniciar LTC" : "Escuchar LTC", ic: "audio", onClick: async () => { const ok = await SE.startLtc(sh.ltcDevice); toast(ok ? "Escuchando LTC" : "LTC: " + SE.ltcError, ok ? "" : "err"); app.renderPanel(); } })),
         hint(SE.ltc ? (SE.external?.source === "ltc" ? `Recibiendo LTC a ${SE.external.fps} fps` : "Escuchando… (sin LTC todavía)") : "Conecta la salida de LTC a una entrada de audio (línea).")) : null,
       sh.tcSource === "mtc" ? hint("Activa MIDI en el panel Control. El MTC llega por cualquier entrada MIDI.") : null,
-      sh.tcSource === "osc" ? hint("Envía /lumamap/timecode con \"hh:mm:ss:ff\" o segundos al puerto OSC (Menú → Mando remoto y OSC).") : null,
+      sh.tcSource === "osc" ? hint("Envía /lumamap/timecode con \"hh:mm:ss:ff\" o segundos al puerto OSC (☰ → Conexiones → Control desde el móvil y OSC).") : null,
       sh.tcSource === "internal" ? row(hint("Reloj interno: avanza con Play y se pone a cero con STOP."), btn({ label: "Poner a 0", kind: "small", onClick: () => SE.resetInternal() })) : null,
       toggle({ label: "Disparar las cues por timecode", hint: "Cada escena con timecode entra sola al llegar a su tiempo (también al saltar hacia atrás)", value: sh.chase, onChange: (v) => set(() => { sh.chase = v; SE.lastChased = null; }) })));
 
