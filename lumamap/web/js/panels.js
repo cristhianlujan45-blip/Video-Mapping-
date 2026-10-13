@@ -11,6 +11,8 @@ import { hexToIsf, isfToHex } from "./isf.js";
 import { openPlugins } from "./panels-plugins.js";
 import { ffglControls } from "./panels-ffgl.js";
 import { vjSection } from "./panels-vj.js";
+import { signalsSection } from "./panels-signals.js";
+import { myPanelSection } from "./panels-mypanel.js";
 import { deckSection } from "./panels-deck.js";
 import { openPhoneCam } from "./panels-phonecam.js";
 import { canConvert } from "./convqueue.js";
@@ -280,7 +282,7 @@ function cameraPicker(app, value, onChange) {
 }
 
 /** Miniatura de un contenido (para las cubiertas A / B del mezclador). */
-function sourceThumb(app, src, fx) {
+export function sourceThumb(app, src, fx) {
   if (src.type === "gen") {
     const key = `k:${src.gen}:${src.color}:${src.color2}:${src.speed}:${src.scale}:${fx ? JSON.stringify(fx) : ""}`;
     return { img: () => animThumb({ id: key, gen: src.gen, color: src.color, color2: src.color2, speed: src.speed, scale: src.scale, fx }), label: GENERATORS.find(g => g.id === src.gen)?.name || "Animación" };
@@ -317,6 +319,7 @@ const live = {
     const A = app.actions, S = app.S, P = S.project;
     const wrap = h("div", {});
     if (!P.surfaces.length) return needSelection(app, "Añade superficies (una por pantalla o zona) y aquí podrás poner una animación distinta en cada una y mezclarlas en vivo.");
+    wrap.append(myPanelSection(app));
     wrap.append(deckSection(app));
     wrap.append(vjSection(app));
     wrap.append(section("Todas las pantallas",
@@ -799,7 +802,8 @@ const layers = {
         btn({ ic: "up", kind: "icon", title: "Subir", onClick: () => A.moveLayer(s.id, 1) }),
         btn({ ic: "down", kind: "icon", title: "Bajar", onClick: () => A.moveLayer(s.id, -1) })));
     }
-    return h("div", {}, hint("La de arriba se dibuja encima de las demás."), list);
+    return h("div", {}, hint("La de arriba se dibuja encima de las demás."), list,
+      btn({ label: "🔗 Ver como red de nodos", kind: "block", title: "La cadena de cada superficie: fuente → señales → efectos → forma → mezcla → salida (como TouchDesigner)", onClick: () => app.openNodes() }));
   },
 };
 
@@ -906,7 +910,8 @@ const audio = {
           btn({ label: "1", kind: "wide primary", title: "Marca el primer tiempo ahora", onClick: () => au.downbeat() })),
         hint("Sin micrófono: toca TAP 4 veces al ritmo. «1» marca el primer tiempo del compás. ½× y 2× corrigen si va al doble o a la mitad."),
         slider({ label: "Sincronía (adelanto de la imagen)", min: -150, max: 250, step: 5, value: au.offset, def: 60, fmt: (v) => v + " ms", onInput: (v) => au.setOffset(v) }),
-        hint("Si los destellos llegan tarde respecto al sonido, sube este valor; si llegan antes, bájalo.")));
+        hint("Si los destellos llegan tarde respecto al sonido, sube este valor; si llegan antes, bájalo.")),
+      signalsSection(app));
 
     const s = app.surf();
     if (s) {

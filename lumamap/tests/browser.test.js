@@ -4,7 +4,7 @@
 import { createServer, startHttps } from "../server/index.js";
 import { test, report, setOnFail, setParts } from "./harness.js";
 // Tanda 2 (PART=2): móviles, plugins, VJ y lo de Resolume; la tanda 1 (PART=1) es el resto.
-setParts(/^(móvil como cámara|móvil por cable|plugins:|VJ automático|como Resolume|plugins en 4K|comparador|móvil: nada amontonado)/);
+setParts(/^(móvil como cámara|móvil por cable|plugins:|VJ automático|como Resolume|plugins en 4K|comparador|móvil: nada amontonado|como TouchDesigner)/);
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
@@ -1030,6 +1030,53 @@ await test("plugins en 4K: con la composición en 4K el shader se dibuja a 2160 
   assert.deepEqual(r.auto, [3840, 2160], "auto en el PC: 4K");
   assert.deepEqual(r.hd, [1920, 1080], "elegido 1080p");
 });
+await test("como TouchDesigner: señales que siguen los graves (con monitor en vivo), red de nodos de la superficie y Mi panel", async () => {
+  // 1 · Señal que sigue los graves → mueve el brillo general, y se ve en «Señales en vivo».
+  await page.evaluate(() => {
+    const a = window.__lumamap, au = a.audio();
+    window.__realUpdate = au.update.bind(au);
+    au.update = () => ({ bass: 0.8, mid: 0.2, high: 0.1, level: 0.8, beat: 0, count: 0, bpm: 120, phase: 0, pos: 0, live: true, locked: false });
+    a.S.project.settings.lfos = [{ id: "lfo-test-bass", param: "global/master", shape: "bass", beats: 4, lo: 0, hi: 1, on: true, smooth: 0, gain: 1 }];
+    a.openTab("audio");
+  });
+  try {
+    await page.waitForFunction(() => { const c = window.__lumamap.params.mods.get("global/master")?.get("lfo:lfo-test-bass"); return c && Math.abs(c.value - 0.8) < 0.02; }, null, { timeout: 10000, polling: 100 });
+    const mon = page.locator("#panelBody canvas.sigmon");
+    await mon.waitFor();
+    await page.waitForTimeout(600);
+    const lit = await mon.evaluate((c) => { const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return n; });
+    assert.ok(lit > 200, "la gráfica dibuja las señales: " + lit);
+    assert.match(await page.locator("#panelBody .sigleg").textContent(), /Brillo general/);
+  } finally {
+    await page.evaluate(() => { const a = window.__lumamap; a.audio().update = window.__realUpdate; a.S.project.settings.lfos = []; a.openTab(null); });
+  }
+  // 2 · Red de nodos: refleja la cadena real (un efecto nuevo aparece) y cada nodo lleva a su panel.
+  const id = await page.evaluate(() => { const a = window.__lumamap, s = a.S.project.surfaces[0]; a.select(s.id); a.edit(() => { a.lookSel().fx.brightness = 1.5; }); a.openNodes(); return s.id; });
+  const net = page.locator(".nodes .nodenet");
+  await net.waitFor();
+  const heads = await net.locator(".nodehead").allTextContents();
+  assert.ok(heads.length >= 6, heads.join("|"));
+  assert.equal(heads[0].toLowerCase(), "fuente"); assert.equal(heads.at(-1).toLowerCase(), "salida");
+  assert.match(await net.locator('.node[data-fam="fx"]').first().textContent(), /Color.*Brillo/);
+  await net.locator('.node[data-fam="shape"]').click();
+  await page.waitForFunction(() => window.__lumamap.S.tab === "shape", null, { timeout: 5000 });
+  await page.evaluate((id) => { const a = window.__lumamap; a.select(id); a.edit(() => { a.lookSel().fx.brightness = 1; }); a.openTab(null); }, id);
+  // 3 · Mi panel: un deslizador y un botón elegidos por el usuario, que de verdad mueven el show.
+  await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.S.project.settings.panel = [{ param: "global/master", label: "" }, { param: "global/blackout", label: "Negro total" }]; }); if (a.S.blackout) a.actions.blackout(); a.openTab("live"); });
+  const mp = page.locator("#panelBody .mpgrid");
+  await mp.waitFor();
+  await mp.locator("input[type=range]").first().evaluate((r) => { r.value = "0.3"; r.dispatchEvent(new Event("input", { bubbles: true })); });
+  assert.ok(Math.abs(await page.evaluate(() => window.__lumamap.S.master) - 0.3) < 0.02);
+  await mp.getByRole("button", { name: "Negro total" }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.blackout), true);
+  await mp.getByRole("button", { name: "Negro total" }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.blackout), false);
+  // Lo mismo llega al mando del móvil.
+  const st = await page.evaluate(async () => { const { panelState } = await import("./js/mypanel.js"); const { describe } = await import("./js/params.js"); const a = window.__lumamap; return panelState(a.S.project.settings.panel, (id) => describe(a, id)); });
+  assert.deepEqual(st.map(x => [x.id, x.name, x.kind]), [["global/master", "Brillo general", "float"], ["global/blackout", "Negro total", "bool"]]);
+  await page.evaluate(() => { const a = window.__lumamap; a.S.master = 1; a.edit(() => { a.S.project.settings.panel = []; }); a.openTab(null); });
+});
+
 await test("comparador antes/después en Efectos: a un lado de la línea el original, al otro con el efecto (y no sale en la proyección)", async () => {
   await page.bringToFront();
   // Solo se ve esta superficie (otras pruebas dejan rojo en las demás, p. ej. la paleta del VJ).

@@ -29,7 +29,7 @@
 <body>
 <h1>LumaMap · Mando</h1>
 <div id="net">conectando…</div>
-<div id="pinbox"><div class="lbl">Escribe el PIN que muestra LumaMap (Menú → Mando remoto)</div><input id="pin" inputmode="numeric" maxlength="6"><button id="pinok" style="height:52px;font-size:18px;padding:0 24px">Conectar</button></div>
+<div id="pinbox"><div class="lbl">Escribe el PIN que muestra LumaMap (☰ → Conexiones → Control desde el móvil)</div><input id="pin" inputmode="numeric" maxlength="6"><button id="pinok" style="height:52px;font-size:18px;padding:0 24px">Conectar</button></div>
 <div id="ui" style="display:contents">
 <div id="state">—</div>
 <div class="grid">
@@ -47,6 +47,8 @@
   <div><div class="lbl">Crossfader A ⟷ B (superficie seleccionada)</div><input id="mix" type="range" min="0" max="1" step="0.01" value="0"></div>
   <div class="wrap"><button data-p="global/goAll">GO todas</button><button data-p="global/randomAll">Todas al azar</button><button data-p="global/tap">TAP</button></div>
 </section>
+<h2 id="mph" style="display:none">Mi panel</h2>
+<section id="mypanel" style="display:none"></section>
 <h2>Macros</h2>
 <div id="macros" class="wrap"></div>
 <h2>Luces</h2>
@@ -87,6 +89,7 @@ function start() {
       if (document.activeElement !== $("mix")) $("mix").value = st.mix ?? 0;
       if (document.activeElement !== $("lmaster")) $("lmaster").value = L.master ?? 1;
       $("mix").disabled = !st.hasNext;
+      myPanel(st.panel || []);
     },
   });
   remote.connect();
@@ -98,6 +101,35 @@ function list(id, items) {
   el.dataset.sig = sig; el.innerHTML = "";
   for (const it of items) { const b = document.createElement("button"); b.textContent = it.label; if (it.on) b.className = "on"; b.onclick = it.run; el.append(b); }
   if (!items.length) el.innerHTML = `<span class="lbl">—</span>`;
+}
+// «Mi panel»: los controles que se eligieron en LumaMap (En vivo → Mi panel).
+function myPanel(items) {
+  const box = $("mypanel"), sig = JSON.stringify(items.map(i => [i.id, i.name, i.kind, i.min, i.max]));
+  $("mph").style.display = box.style.display = items.length ? "" : "none";
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig; box.innerHTML = "";
+    for (const it of items) {
+      if (it.kind === "float") {
+        const w = document.createElement("div"), l = document.createElement("div"), r = document.createElement("input");
+        l.className = "lbl"; l.textContent = it.name;
+        Object.assign(r, { type: "range", min: it.min, max: it.max, step: (it.max - it.min) / 200 });
+        r.dataset.id = it.id;
+        r.addEventListener("input", () => remote.sendControl("param", Number(r.value), it.id));
+        w.append(l, r); box.append(w);
+      } else {
+        const b = document.createElement("button");
+        b.textContent = it.name; b.dataset.id = it.id;
+        b.onclick = () => remote.sendControl("param", it.kind === "bool" ? undefined : 1, it.id);
+        box.append(b);
+      }
+    }
+  }
+  for (const it of items) {
+    const el = box.querySelector(`[data-id="${CSS.escape(it.id)}"]`);
+    if (!el) continue;
+    if (el.tagName === "INPUT") { if (document.activeElement !== el) el.value = it.value; }
+    else if (it.kind === "bool") el.classList.toggle("on", !!it.value);
+  }
 }
 document.querySelectorAll("[data-c]").forEach(b => b.addEventListener("click", () => remote.sendControl(b.dataset.c)));
 document.querySelectorAll("[data-p]").forEach(b => b.addEventListener("click", () => remote.sendControl("param", undefined, b.dataset.p)));

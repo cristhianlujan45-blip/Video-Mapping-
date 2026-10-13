@@ -3,7 +3,7 @@
 // mesa de clips (cuantizar al golpe, autopiloto, datos limpios).
 import { test, report } from "./harness.js";
 import assert from "node:assert/strict";
-import { shapeAt, createLfoClock, normalizeLfos, newLfo } from "../web/js/lfo.js";
+import { shapeAt, createLfoClock, normalizeLfos, newLfo, soundAt, isSoundShape } from "../web/js/lfo.js";
 import { stepTransport, normalizePlay, isPlain } from "../web/js/transport.js";
 import { normalizeDeck, quantizeAt, nextCol, cleanClip, usedCols } from "../web/js/deck.js";
 import * as M from "../web/js/model.js";
@@ -37,6 +37,34 @@ await test("LFO: lo guardado se limpia (formas y números raros fuera)", () => {
   assert.deepEqual({ shape: n[0].shape, beats: n[0].beats, lo: n[0].lo, hi: n[0].hi, on: n[0].on }, { shape: "sine", beats: 64, lo: 0, hi: 1, on: true });
   const p = M.normalizeProject(JSON.parse(JSON.stringify({ ...M.createProject(), settings: { lfos: [{ param: "global/master" }] } })));
   assert.equal(p.settings.lfos.length, 1);
+});
+
+await test("señales (como los CHOP): golpe que se apaga, ruido sin saltos, azar en cada golpe", () => {
+  assert.equal(shapeAt("hit", 0), 1);
+  assert.ok(shapeAt("hit", 0.5) < 0.1 && shapeAt("hit", 0.5) > 0, "se apaga dentro del ciclo");
+  for (let k = 0; k < 200; k++) { const a = shapeAt("noise", k / 50), b = shapeAt("noise", (k + 1) / 50); assert.ok(Math.abs(a - b) < 0.1, "el ruido suave no salta"); assert.ok(a >= 0 && a <= 1); }
+  assert.equal(shapeAt("randbeat", 2.1), shapeAt("randbeat", 2.9), "mismo valor dentro de un ciclo");
+  assert.notEqual(shapeAt("randbeat", 2.5), shapeAt("randbeat", 3.5), "otro valor en el siguiente");
+});
+
+await test("señales que siguen el sonido (graves, medios, agudos, volumen) con sensibilidad y suavizado", () => {
+  assert.ok(isSoundShape("bass") && !isSoundShape("sine"));
+  assert.equal(soundAt("bass", { bass: 0.3 }, 2), 0.6);
+  assert.equal(soundAt("high", { high: 0.8 }, 2), 1, "nunca pasa de 1");
+  const c = createLfoClock(), l = { ...newLfo("global/master"), shape: "bass", gain: 1 };
+  let got = null;
+  c.tick(0, 120, [l], () => {}, true, { bass: 0 });
+  c.tick(0.016, 120, [l], (_, w) => { got = w; }, true, { bass: 0.9 });
+  assert.ok(Math.abs(got - 0.9) < 1e-9, "sin suavizado llega al instante");
+  const s = { ...newLfo("global/master"), shape: "bass", smooth: 1 }, c2 = createLfoClock();
+  c2.tick(0, 120, [s], () => {}, true, { bass: 0 });
+  c2.tick(0.016, 120, [s], (_, w) => { got = w; }, true, { bass: 1 });
+  assert.ok(got > 0 && got < 0.1, "con suavizado sube poco a poco: " + got);
+  for (let t = 0.032; t < 3; t += 0.016) c2.tick(t, 120, [s], (_, w) => { got = w; }, true, { bass: 1 });
+  assert.ok(got > 0.95, "y termina llegando: " + got);
+  assert.ok(c2.values.has(s.id), "el valor queda para el monitor de señales");
+  const n = normalizeLfos([{ param: "global/master", shape: "high", smooth: 7, gain: 99 }])[0];
+  assert.deepEqual([n.shape, n.smooth, n.gain], ["high", 1, 4]);
 });
 
 await test("transporte: bucle normal no hace nada; entrada/salida vuelve a la entrada", () => {

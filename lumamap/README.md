@@ -44,6 +44,29 @@ Comparado función por función con Resolume Arena 7. Lo que faltaba se ha añad
 **Plugins FFGL de Resolume (.dll)** — solo en la app de Windows. LumaMap busca solo en las carpetas de Resolume (Documentos\Resolume Arena\Extra Effects / Extra Sources) y en las que añadas, prueba cada .dll y te dice cuáles cargan. «Usar en la superficie seleccionada» y en Contenido aparecen sus controles (números, interruptores, listas, texto, disparos); los efectos procesan un video/foto de la biblioteca o la cámara. Cada plugin corre en su propio proceso (`ffglhost.exe`): si uno se cuelga o se cae, LumaMap sigue y lo reinicia. Límites honestos: hasta 960×540 a 30 fps por plugin (la imagen viaja entre procesos), los de 32 bits no cargan (se avisa), los parámetros de audio (FFT) de un plugin: EN DESARROLLO. En Android no es posible (los .dll son programas de Windows); allí funcionan los shaders ISF.
 
 
+## LumaMap frente a TouchDesigner
+
+TouchDesigner es un entorno de programación visual por nodos (operadores TOP, CHOP, SOP, POP, DAT, COMP)
+muy potente pero difícil: casi todo se construye a mano. LumaMap va al revés: lo habitual ya viene hecho y
+se maneja con botones, y de TouchDesigner toma las ideas que más ayudan sin pedir programar.
+
+| TouchDesigner | En LumaMap | Estado |
+|---|---|---|
+| Redes de nodos (ver cómo viaja la imagen) | **🔗 Red de nodos**: la cadena real de cada superficie (fuente → señales → efectos → forma → mezcla → salida) con colores por familia; tocar un nodo abre donde se cambia (Capas → «Ver como red de nodos», o Ctrl+K) | ✅ nuevo |
+| CHOP: LFO, Audio Analysis, Lag, Noise, Trigger | **〰 Señales** en cualquier deslizador (mantener pulsado o clic derecho): ondas al tempo, ruido suave, golpe que se apaga, azar en cada golpe, seguir graves/medios/agudos/volumen, sensibilidad y **suavizado (lag)** | ✅ nuevo |
+| Visor de canales CHOP | **📈 Señales en vivo** (pestaña Audio): gráfica de graves, medios, agudos, golpe y cada señal; pausar o quitar | ✅ nuevo |
+| Panel COMP (paneles de control a medida) | **🎚 Mi panel** (En vivo): eliges cualquier control (brillo, opacidad, efectos, GO, apagón, luces…), a tamaño grande y también en el mando del móvil | ✅ nuevo |
+| TOP (efectos de imagen en GPU), GLSL TOP | 137 efectos + 18 estilos + 105 shaders ISF (GLSL) con controles; feedback de varias pasadas | ✅ |
+| SOP / POP (geometría 3D, instancias) | Espacio 3D con objetos, caras animadas y proyectores virtuales; nube de puntos | ✅ (sin modelado por nodos) |
+| Perform mode | Modo actuación (F10) con GO/apagón/emergencia | ✅ |
+| MIDI, OSC, DMX/Art-Net/sACN, timecode | Motor de parámetros con MIDI Learn, OSC, DMX/Art-Net/sACN, MTC/LTC, mandos de juego | ✅ |
+| Kinect / RealSense / MediaPipe | Tracking de cuerpo y manos con cualquier cámara, cámaras de profundidad, zonas y reglas | ✅ |
+| Timeline y cues | Show: cues, timecode y automatización | ✅ |
+| Palette (componentes listos) | Biblioteca de animaciones, efectos, plugins, experiencias interactivas y loops | ✅ |
+| Python / expresiones / scripts | No: LumaMap no ejecuta código (por seguridad); las reglas «cuando… entonces…» y las macros cubren lo habitual | ❌ (a propósito) |
+| Construir cualquier sistema desde cero con nodos | No: los nodos de LumaMap muestran y abren la cadena, no se cablean a mano | ❌ (a propósito: fácil antes que infinito) |
+| NDI, Spout, Syphon | EN DESARROLLO | ⏳ |
+
 ## Modo simple y modo profesional
 
 Por defecto LumaMap se usa como siempre (modo simple). En **☰ → Modo

@@ -34,8 +34,10 @@ import { spectrum256 } from "./isf.js";
 import { startDeviceNotices, cameraPlugged } from "./phoneusb-ui.js";
 import { openMediaLibrary } from "./panels-library.js";
 import { openDeck } from "./panels-deck.js";
+import { openNodes } from "./panels-nodes.js";
+import { panelState } from "./mypanel.js";
 import { loadPlugins, getShader } from "./plugins.js";
-import { createLfoClock, newLfo, LFO_SHAPES, LFO_BEATS } from "./lfo.js";
+import { createLfoClock, newLfo, LFO_SHAPES, LFO_BEATS, SOUND_SHAPES, isSoundShape } from "./lfo.js";
 import { quantizeAt, nextCol } from "./deck.js";
 import { setupQueue, maybeQueue, canConvert, resumePending, cancelJob, IMAGE_CONVERT } from "./convqueue.js";
 import { ParamEngine, describe, applyModList, registerParams } from "./params.js";
@@ -227,6 +229,7 @@ A.learn = async (id) => {
 /* ---- «Animar al ritmo» (LFO al tempo) ---- */
 const lfoClock = createLfoClock();
 app.lfoBeat = () => lfoClock.beat;
+app.lfoValues = () => lfoClock.values;
 function lfoEditor(d) {
   const box = h("div", { class: "lfoed" });
   const lfos = () => S.project.settings.lfos;
@@ -239,11 +242,15 @@ function lfoEditor(d) {
       return;
     }
     const pct = (v) => Math.round(v * 100) + "%";
+    const sound = isSoundShape(l.shape);
     box.replaceChildren(
       h("div", { class: "lbl" }, "〰 Animar al ritmo"),
       chips(LFO_SHAPES, l.shape, (v) => { l.shape = v; }),
-      h("div", { class: "lbl" }, "Un ciclo cada (golpes)"),
-      chips(LFO_BEATS, l.beats, (v) => { l.beats = v; }),
+      h("div", { class: "lbl" }, "…o que siga el sonido (micrófono o música)"),
+      chips(SOUND_SHAPES, l.shape, (v) => { l.shape = v; if (!audio.active) A.toggleMic(); }),
+      sound ? slider({ label: "Sensibilidad", min: 0.25, max: 4, step: 0.05, value: l.gain || 1, def: 1, fmt: (v) => v.toFixed(2) + "×", onInput: (v) => { l.gain = v; save(); } })
+        : h("div", {}, h("div", { class: "lbl" }, "Un ciclo cada (golpes)"), chips(LFO_BEATS, l.beats, (v) => { l.beats = v; })),
+      slider({ label: "Suavizado (sin saltos)", min: 0, max: 1, step: 0.01, value: l.smooth || 0, def: 0, fmt: (v) => v ? Math.round(v * 600) + " ms" : "no", onInput: (v) => { l.smooth = v; save(); } }),
       d.kind === "float" ? slider({ label: "Desde", min: 0, max: 1, step: 0.01, value: l.lo, def: 0, fmt: pct, onInput: (v) => { l.lo = v; save(); } }) : null,
       d.kind === "float" ? slider({ label: "Hasta", min: 0, max: 1, step: 0.01, value: l.hi, def: 1, fmt: pct, onInput: (v) => { l.hi = v; save(); } }) : null,
       h("div", { class: "row" },
@@ -650,6 +657,7 @@ function deckTick() {
   } else deckState.autoAt = null;
 }
 app.openDeck = () => openDeck(app);
+app.openNodes = () => openNodes(app);
 // MIDI/OSC/teclado: lanzar columnas o casillas y el autopiloto.
 registerParams("deck", (app, id, p) => {
   const D = S.project.settings.deck, mk = (o) => ({ id, group: "Mesa de clips", min: 0, max: 1, def: 0, ...o });
@@ -2864,7 +2872,7 @@ function tick(now) {
     const d = describe(app, l.param);
     if (!d || d.kind === "trigger") return;
     params.modulateExt("lfo:" + l.id, l.param, d.kind === "bool" ? (w >= 0.5 ? 1 : 0) : d.min + (d.max - d.min) * w, "lfo");
-  }, S.playing);
+  }, S.playing, S.levels);
   deckTick();
   S.mods = params.modList(now);
   const RP = applyModList(S.project, S.master, S.mods);
@@ -3139,7 +3147,8 @@ async function connectRemote() {
       master: S.master, sel: S.sel, mix: S.sel ? (lookSel()?.mix || 0) : 0, hasNext: !!lookSel()?.next,
       macros: C.macros.map(m => ({ id: m.id, name: m.name })),
       lights: { enabled: D.enabled, master: D.master, blackout: !!dmx?.blackout, snapshots: D.snapshots.map(s => ({ id: s.id, name: s.name })), active: dmx?.snapshot || null },
-      timecode: S.timecode ? fmtTimecode(S.timecode) : null, cue: S.cueName || null });
+      timecode: S.timecode ? fmtTimecode(S.timecode) : null, cue: S.cueName || null,
+      panel: panelState(S.project.settings.panel, (id) => describe(app, id)) });
   }, 500);
 }
 

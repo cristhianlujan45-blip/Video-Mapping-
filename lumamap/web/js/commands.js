@@ -109,6 +109,7 @@ export function buildCommands(app) {
   add("Conexiones", "remote", "Control desde el móvil y OSC", () => A.remoteInfo(), { ic: "live" });
   add("Show", "emergency", "EMERGENCIA: salida segura inmediata", A.emergency, { keys: "Ctrl+Shift+E", ic: "blackout" });
   add("Show", "perfMode", "Modo actuación (pantalla limpia, sin ediciones)", () => A.togglePerfMode(), { keys: "F10", ic: "live" });
+  add("Ver", "nodes", "Red de nodos (la cadena de cada superficie, como TouchDesigner)", () => app.openNodes(), { ic: "layers" });
   add("Ver", "pro", "Modo profesional (activar / desactivar)", A.togglePro, { ic: "knob" });
   add("Ver", "tab-control", "Panel Control (MIDI, macros, monitor)", () => { app.setPro(true); app.openTab("control"); }, { ic: "knob" });
   add("Ver", "tab-perf", "Panel Rendimiento", () => { app.setPro(true); app.openTab("perf"); }, { ic: "gauge" });
