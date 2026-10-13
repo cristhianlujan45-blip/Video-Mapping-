@@ -711,6 +711,12 @@ export function normalizeStage3d(d) {
   d = { ...D, ...(d || {}) };
   d.objects = Array.isArray(d.objects) ? d.objects.filter(o => o && o.id) : [];
   d.projectors = Array.isArray(d.projectors) ? d.projectors.filter(p => p && p.id) : [];
+  // Calibración con el proyector real (panels-3dcalib.js): solo puntos bien formados.
+  for (const p of d.projectors) if (p.calib) {
+    const ok = (a, n) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
+    if (!Array.isArray(p.calib.points)) delete p.calib;
+    else p.calib.points = p.calib.points.filter(q => q && q.id && ok(q.w, 3) && ok(q.uv, 2));
+  }
   d.faces = Array.isArray(d.faces) ? d.faces.filter(f => f && f.id).map(f => ({ ...f, face3d: true, locked: true, mask: { enabled: false, invert: false, feather: 0.01, points: [], ...(f.mask || {}) } })) : [];
   d.snap = { ...D.snap, ...(d.snap || {}) };
   return d;

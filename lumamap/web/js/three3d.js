@@ -316,6 +316,62 @@ export class Stage3D {
     }
     for (const [id, n] of this.pnodes) if (!pseen.has(id)) { n.cam.removeFromParent(); n.helper.removeFromParent(); this.pnodes.delete(id); this.dropProjectorView(id); }
     this.grid.visible = this.showGrid !== false;
+    this.syncCalibMarks();
+  }
+
+  /* ---------------- Calibración con el proyector real ---------------- */
+  /** Bolitas en los vértices elegidos para calibrar (se ven a través del objeto; no salen por el proyector). */
+  syncCalibMarks() {
+    const cp = this.data.projectors.find(p => p.calib?.on), pts = cp?.calib.points || [];
+    const sig = JSON.stringify([pts.map(p => p.w), cp?.calib.sel]);
+    if (sig === this._calibSig) return;
+    this._calibSig = sig;
+    if (!this.calibGroup) { this.calibGroup = new THREE.Group(); this.calibGroup.renderOrder = 10; this.scene.add(this.calibGroup); }
+    for (const c of [...this.calibGroup.children]) { c.geometry.dispose(); c.material.dispose(); c.removeFromParent(); }
+    const b = this.bounds(), r = Math.max(0.01, (b.r || 1) * 0.025);
+    for (const p of pts) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), new THREE.MeshBasicMaterial({ color: p.id === cp.calib.sel ? 0xffd60a : 0xff2d8a, depthTest: false, transparent: true }));
+      m.position.fromArray(p.w); this.calibGroup.add(m);
+    }
+  }
+  /** Aristas del objeto en el mundo (para dibujar la malla sobre la imagen del proyector real). */
+  edgesNow() {
+    const sig = JSON.stringify(this.data.objects.map(o => [o.id, o.pos, o.rot, o.scale, o.hidden, o.kind, o.parent]));
+    if (this._edges && this._edgesSig === sig && this._edges.n === this.nodes.size) return this._edges.list;
+    const list = [];
+    for (const n of this.nodes.values()) if (n.obj.visible && n.data.kind !== "group") list.push(...worldEdges(n.obj));
+    this._edges = { list, n: this.nodes.size }; this._edgesSig = sig;
+    return list;
+  }
+  /** Encima de lo que ve el proyector: la malla del objeto y las cruces de calibración (se ven en el proyector real). */
+  overlayCalib(p, cam, bmp, v) {
+    const W = p.res[0], H = p.res[1];
+    if (!v.ov || v.ov.width !== W || v.ov.height !== H) v.ov = new OffscreenCanvas(W, H);
+    const g = v.ov.getContext("2d"), cal = p.calib?.on ? p.calib : null;
+    g.globalAlpha = 1; g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+    g.globalAlpha = cal ? 0.35 : 1; g.drawImage(bmp, 0, 0, W, H); g.globalAlpha = 1;
+    bmp.close();
+    const lw = Math.max(1, H / 540);
+    g.lineWidth = lw * 1.5; g.strokeStyle = "rgba(0,229,255,0.95)"; g.beginPath();
+    const A = new THREE.Vector3(), B = new THREE.Vector3();
+    for (const [a, b] of this.edgesNow()) {
+      A.copy(a).project(cam); B.copy(b).project(cam);
+      if (A.z > 1 || B.z > 1 || A.z < -1 || B.z < -1) continue;
+      g.moveTo((A.x + 1) / 2 * W, (1 - A.y) / 2 * H); g.lineTo((B.x + 1) / 2 * W, (1 - B.y) / 2 * H);
+    }
+    g.stroke();
+    if (cal) {
+      const s = H / 22;
+      g.font = `bold ${Math.round(s * 0.6)}px system-ui, sans-serif`;
+      cal.points.forEach((pt, i) => {
+        const x = pt.uv[0] * W, y = pt.uv[1] * H, on = pt.id === cal.sel;
+        g.strokeStyle = on ? "#ffd60a" : "#ff2d8a"; g.lineWidth = lw * (on ? 3 : 2);
+        g.beginPath(); g.moveTo(x - s, y); g.lineTo(x + s, y); g.moveTo(x, y - s); g.lineTo(x, y + s); g.stroke();
+        g.beginPath(); g.arc(x, y, s * 0.35, 0, Math.PI * 2); g.stroke();
+        g.fillStyle = g.strokeStyle; g.fillText(String(i + 1), x + s * 0.45, y - s * 0.45);
+      });
+    }
+    return v.ov.transferToImageBitmap();
   }
 
   /* ---------------- Atlas con el contenido de las caras ---------------- */
@@ -414,6 +470,7 @@ export class Stage3D {
     this.grid.visible = this.axes.visible = false;
     for (const n of this.pnodes.values()) { n.helper.visible = false; n.body.visible = false; }
     if (this.gizmo) this.gizmo.getHelper().visible = false;
+    if (this.calibGroup) this.calibGroup.visible = false;
     for (const id of used) {
       const n = this.pnodes.get(id), p = this.data.projectors.find(x => x.id === id);
       if (!n || !p) continue;
@@ -429,7 +486,8 @@ export class Stage3D {
       const bg = this.scene.background; this.scene.background = new THREE.Color(0);
       v.renderer.render(this.scene, n.cam);
       this.scene.background = bg;
-      const bmp = v.canvas.transferToImageBitmap();
+      let bmp = v.canvas.transferToImageBitmap();
+      if (p.calib?.on || p.wire) bmp = this.overlayCalib(p, n.cam, bmp, v);   // malla y cruces para alinear con el proyector real
       if (v.el) v.old.push(v.el);
       while (v.old.length > 3) v.old.shift().close();   // las salidas pueden estar subiendo la anterior
       v.el = bmp; v.key = ++this.frame;
@@ -437,6 +495,7 @@ export class Stage3D {
     this.grid.visible = helpersWere[0]; this.axes.visible = helpersWere[1];
     for (const n of this.pnodes.values()) { n.helper.visible = this.showHelpers !== false; n.body.visible = true; }
     if (this.gizmo) this.gizmo.getHelper().visible = true;
+    if (this.calibGroup) this.calibGroup.visible = true;
   }
 
   /** Cada fotograma del editor. */
@@ -589,6 +648,19 @@ export class Stage3D {
     const ray = new THREE.Raycaster();
     const cam = this.viewCamera();
     ray.setFromCamera(new THREE.Vector2(vp.split !== "none" ? x * 2 + 1 : x, y), cam);
+    // Calibrando: el clic elige el vértice (esquina) del objeto más cercano a donde se tocó.
+    if (this.calibPick) {
+      const hit = ray.intersectObjects(this.root.children, true).find(h => h.object.visible);
+      if (!hit) return;
+      let o = hit.object;
+      while (o && !o.userData.lumaId) o = o.parent;
+      const n = o && this.nodes.get(o.userData.lumaId);
+      const verts = n ? worldVertices(n.obj) : [];
+      let best = null, bd = Infinity;
+      for (const v of verts) { const dd = v.distanceToSquared(hit.point); if (dd < bd) { bd = dd; best = v; } }
+      if (best) this.calibPick(best.toArray().map(c => +c.toFixed(6)));
+      return;
+    }
     const targets = [...this.root.children, ...[...this.pnodes.values()].map(n => n.body)];
     const hit = ray.intersectObjects(targets, true).find(h => h.object.visible);
     if (!hit) { this.select(null); this.app.renderPanel(); return; }

@@ -2,13 +2,23 @@
 // Buscar GIF animados en internet y traerlos a la proyección.
 //  - Openverse y Wikimedia Commons: gratis, sin cuenta ni clave, licencia libre
 //    (hay que citar al autor). Se buscan a la vez y se ve lo que llegue primero.
-//  - GIPHY: el catálogo grande de GIF; opcional, necesita una clave gratuita.
+//  - GIPHY: el catálogo grande de GIF y stickers (con fondo transparente). Viene integrado con la
+//    clave de la app de LumaMap en GIPHY; cada uno puede poner la suya (Más opciones).
 //  - Un enlace pegado (de GIPHY, Tenor u otra web) también vale.
 // Las palabras en español se traducen solas al inglés (casi todo está etiquetado en inglés).
 // Las descargas pasan por la app de Windows (proceso principal) o la de Android
 // (NetGet.kt) para que CORS no las bloquee; en el navegador se intenta con fetch.
 
-export const GIF_SOURCES = [["all", "Todo (gratis)"], ["openverse", "Openverse"], ["commons", "Wikimedia"], ["giphy", "GIPHY (con clave)"]];
+export const GIF_SOURCES = [["all", "Todo"], ["giphy", "GIPHY"], ["stickers", "Stickers (fondo transparente)"], ["openverse", "Openverse (licencia libre)"], ["commons", "Wikimedia (licencia libre)"]];
+/** Fuentes de «Todo»: GIPHY primero (el catálogo grande) y las libres a la vez. */
+export const ALL_SOURCES = ["giphy", "openverse", "commons"];
+/**
+ * Clave de la app de LumaMap en GIPHY (developers.giphy.com). Las claves de GIPHY son de cliente:
+ * van dentro de cada app que las usa y GIPHY limita su uso por clave, no son una contraseña.
+ * Si se agota su cupo, cada uno puede usar la suya en «Más opciones».
+ */
+export const GIPHY_KEY = "LCo2BwmZzXTBAFraMfAjiHOzpOzJAUKS";
+const isGiphy = (src) => src === "giphy" || src === "stickers";
 export const GIF_IDEAS = ["🔥 fuego", "💨 humo", "✨ neón", "💖 corazones", "⭐ estrellas", "🎉 confeti", "🎆 fuegos artificiales", "🌧 lluvia", "🌊 agua", "💃 baile", "💎 brillo", "🌌 espacio", "🪐 planetas", "🦋 mariposas", "🌸 flores", "❄️ nieve", "🌀 hipnótico", "🔁 bucle"];
 /** Lo que se busca al abrir (sin escribir nada). */
 export const GIF_DEFAULT = "animación";
@@ -79,7 +89,7 @@ export class GifError extends Error {
 }
 export function explain(code, status) {
   return {
-    key: "La clave de GIPHY no es válida (o se acabó su cupo). Revísala o usa Openverse.",
+    key: "GIPHY no acepta la clave (o se acabó su cupo por esta hora). Prueba en un rato, pon tu propia clave en «Más opciones» o usa las fuentes libres.",
     timeout: "Internet tardó demasiado. Prueba otra vez.",
     blocked: "Sin conexión a internet, o este navegador no deja descargar de ese sitio. En la app de Windows o Android sí funciona.",
     "too-big": "Ese GIF es demasiado grande (más de 16 MB). Elige otro.",
@@ -101,17 +111,25 @@ export function parseOpenverse(j) {
     page: r.foreign_landing_url || "",
   }));
 }
-export function giphyUrl(q, key, page = 1) {
-  const off = (page - 1) * 30;
-  return q.trim()
-    ? `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&limit=30&offset=${off}&rating=g&lang=es`
-    : `https://api.giphy.com/v1/gifs/trending?api_key=${encodeURIComponent(key)}&limit=30&offset=${off}&rating=g`;
+/** Búsqueda en GIPHY (en español: GIPHY entiende el idioma) o lo más visto si no se escribe nada. kind: "gifs" | "stickers". */
+export function giphyUrl(q, key, page = 1, kind = "gifs") {
+  const off = (page - 1) * 30, k = kind === "stickers" ? "stickers" : "gifs";
+  return String(q || "").trim()
+    ? `https://api.giphy.com/v1/${k}/search?api_key=${encodeURIComponent(key)}&q=${encodeURIComponent(q.trim())}&limit=30&offset=${off}&rating=g&lang=es`
+    : `https://api.giphy.com/v1/${k}/trending?api_key=${encodeURIComponent(key)}&limit=30&offset=${off}&rating=g`;
 }
-export function parseGiphy(j) {
+/**
+ * Resultados de GIPHY. Para proyectar se usa la mejor versión que quepa: el original en WebP
+ * (color completo y transparencia suave, mucho más ligero) o en GIF; si pesa mucho, la reducida.
+ */
+export function parseGiphy(j, { sticker = false } = {}) {
   return (j?.data || []).map(g => {
-    const im = g.images || {}, big = im.original && +im.original.size <= MAX_BYTES ? im.original : im.downsized_large || im.downsized || im.original;
-    return { id: "gp:" + g.id, title: g.title || "GIF", thumb: im.fixed_width_small?.url || im.fixed_width?.url || im.preview_gif?.url || big?.url, url: big?.url,
-      w: +(big?.width || 0), h: +(big?.height || 0), credit: "GIPHY" + (g.username ? " · " + g.username : ""), page: g.url || "" };
+    const im = g.images || {}, o = im.original || {};
+    const big = o.url && +o.size <= MAX_BYTES ? o : im.downsized_large || im.downsized || o;
+    const webp = o.webp && +(o.webp_size || 0) > 0 && +o.webp_size <= MAX_BYTES ? o.webp : null;
+    return { id: "gp:" + g.id, title: g.title || (sticker ? "Sticker" : "GIF"), thumb: im.fixed_width_small?.url || im.fixed_width?.url || im.preview_gif?.url || big?.url,
+      url: webp || big?.url, alt: webp ? big?.url : undefined, sticker: sticker || undefined,
+      w: +(o.width || big?.width || 0), h: +(o.height || big?.height || 0), credit: "GIPHY" + (g.username ? " · " + g.username : ""), page: g.url || "" };
   }).filter(g => g.url);
 }
 
@@ -141,13 +159,14 @@ export function parseCommons(j) {
  * Busca en varias fuentes a la vez y va entregando lo que llega (onItems(items, fuente)).
  * Devuelve { items, more, errors } cuando han respondido todas.
  */
-export async function searchAll(q, { page = 1, onItems = () => {}, fetchImpl, sources = ["openverse", "commons"] } = {}) {
+export async function searchAll(q, { page = 1, onItems = () => {}, fetchImpl, sources = ALL_SOURCES, key = GIPHY_KEY } = {}) {
   const en = toEnglish(q) || toEnglish(GIF_DEFAULT);
   const seen = new Set(), all = [], errors = [];
   let more = false;
   await Promise.all(sources.map(async (src) => {
     try {
-      const r = await searchGifs(en, { source: src, page, fetchImpl });
+      // GIPHY entiende el español (y sin palabras da lo más visto); las fuentes libres van en inglés.
+      const r = await searchGifs(isGiphy(src) ? q : en, { source: src, page, fetchImpl, key });
       const fresh = r.items.filter(it => !seen.has(it.url) && seen.add(it.url));
       all.push(...fresh); more = more || r.more;
       if (fresh.length) onItems(fresh, src);
@@ -158,15 +177,15 @@ export async function searchAll(q, { page = 1, onItems = () => {}, fetchImpl, so
 }
 
 /** Busca GIF: { items, more }. */
-export async function searchGifs(q, { source = "openverse", key = "", page = 1, fetchImpl } = {}) {
+export async function searchGifs(q, { source = "openverse", key = GIPHY_KEY, page = 1, fetchImpl } = {}) {
   if (source === "commons") {
     const j = await netJson(commonsUrl(q, page), { fetchImpl });
     return { items: parseCommons(j), more: !!j?.continue };
   }
-  if (source === "giphy") {
+  if (isGiphy(source)) {
     if (!key) throw new GifError("key");
-    const j = await netJson(giphyUrl(q, key, page), { fetchImpl });
-    const items = parseGiphy(j);
+    const j = await netJson(giphyUrl(q, key, page, source === "stickers" ? "stickers" : "gifs"), { fetchImpl });
+    const items = parseGiphy(j, { sticker: source === "stickers" });
     return { items, more: (j?.pagination?.total_count || 0) > page * 30 };
   }
   if (!q.trim()) q = "animated";
@@ -193,7 +212,11 @@ export function sniffAnim(bytes) {
 
 /** Descarga un GIF y lo devuelve como archivo listo para importar. */
 export async function downloadGif(item, { fetchImpl } = {}) {
-  let url = directGifUrl(item.url);
+  try { return await downloadOne(item, item.url, { fetchImpl }); }
+  catch (e) { if (item.alt && e instanceof GifError && e.code !== "not-public") return downloadOne(item, item.alt, { fetchImpl }); throw e; }   // WebP que no llega → el GIF
+}
+async function downloadOne(item, link, { fetchImpl } = {}) {
+  let url = directGifUrl(link);
   try { new URL(url); } catch { throw new GifError("bad-url"); }
   if (!/^https:/i.test(url)) throw new GifError("not-https");
   const r = await netGet(url, { fetchImpl });

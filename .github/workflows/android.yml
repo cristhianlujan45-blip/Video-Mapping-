@@ -222,7 +222,13 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Windows, Android y todas las pruebas tienen que pasar. El Mac también, salvo cuando GitHub no
+    # llega a darle una máquina (trabajo cancelado sin empezar): entonces se publica lo demás y se
+    # dejan los .dmg anteriores (que sí pasaron sus pruebas). Un fallo real del Mac sigue bloqueando.
+    if: >-
+      always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.build.result == 'success' && needs.windows.result == 'success' && needs.e2e.result == 'success' &&
+      (needs.mac.result == 'success' || needs.mac.result == 'cancelled')
     needs: [build, windows, mac, e2e]
     runs-on: ubuntu-latest
     permissions:
@@ -232,14 +238,25 @@ jobs:
         with:
           path: out
       - name: Rename downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           mkdir release
           cp out/lumamap-windows-installer/*.exe release/LumaMap-Setup.exe
           cp out/lumamap-android/lumamap-release.apk release/LumaMap-Android.apk
           cp out/lujan-mapping-debug-apk/*.apk release/LujanMapping-Android.apk
-          cp out/lumamap-mac/LumaMap-Mac-arm64.dmg release/LumaMap-Mac-AppleSilicon.dmg
-          cp out/lumamap-mac/LumaMap-Mac-x64.dmg release/LumaMap-Mac-Intel.dmg
           BASE="https://github.com/${{ github.repository }}/releases/download/lumamap-latest"
+          if [ -f out/lumamap-mac/LumaMap-Mac-arm64.dmg ] && [ -f out/lumamap-mac/LumaMap-Mac-x64.dmg ]; then
+            cp out/lumamap-mac/LumaMap-Mac-arm64.dmg release/LumaMap-Mac-AppleSilicon.dmg
+            cp out/lumamap-mac/LumaMap-Mac-x64.dmg release/LumaMap-Mac-Intel.dmg
+            MAC_JSON="{ \"version\": \"2.3.${LUMAMAP_BUILD}\", \"arm64\": \"${BASE}/LumaMap-Mac-AppleSilicon.dmg\", \"x64\": \"${BASE}/LumaMap-Mac-Intel.dmg\" }"
+          else
+            # Sin Mac nuevo: se quedan los .dmg publicados y su versión (el actualizador no ofrece uno que no existe).
+            echo "::warning::El Mac no tuvo máquina en GitHub: se publican Windows y Android y se mantienen los .dmg anteriores."
+            gh release download lumamap-latest -p version.json -O prev.json || echo '{}' > prev.json
+            MAC_JSON=$(python3 -c "import json;print(json.dumps(json.load(open('prev.json')).get('mac') or {}))")
+          fi
           NOTES=$(echo "${{ github.event.head_commit.message }}" | head -n1 | sed 's/"/\\"/g')
           SHA=$(sha256sum release/LumaMap-Setup.exe | cut -d' ' -f1)
           SIZE=$(stat -c%s release/LumaMap-Setup.exe)
@@ -251,7 +268,7 @@ jobs:
             "notes": "${NOTES}",
             "android": { "versionCode": $((1000 + LUMAMAP_BUILD)), "url": "${BASE}/LumaMap-Android.apk" },
             "windows": { "version": "2.3.${LUMAMAP_BUILD}", "url": "${BASE}/LumaMap-Setup.exe", "sha256": "${SHA}", "size": ${SIZE} },
-            "mac": { "version": "2.3.${LUMAMAP_BUILD}", "arm64": "${BASE}/LumaMap-Mac-AppleSilicon.dmg", "x64": "${BASE}/LumaMap-Mac-Intel.dmg" }
+            "mac": ${MAC_JSON}
           }
           JSON
           cat release/version.json

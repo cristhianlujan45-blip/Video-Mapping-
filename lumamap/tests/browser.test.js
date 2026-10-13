@@ -4,7 +4,7 @@
 import { createServer, startHttps } from "../server/index.js";
 import { test, report, setOnFail, setParts } from "./harness.js";
 // Tanda 2 (PART=2): móviles, plugins, VJ y lo de Resolume; la tanda 1 (PART=1) es el resto.
-setParts(/^(móvil como cámara|móvil por cable|plugins:|VJ automático|como Resolume|plugins en 4K|comparador|móvil: nada amontonado|como TouchDesigner)/);
+setParts(/^(3D para proyectar|móvil como cámara|móvil por cable|plugins:|VJ automático|como Resolume|plugins en 4K|comparador|móvil: nada amontonado|como TouchDesigner)/);
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
@@ -672,13 +672,15 @@ await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al 
   await page.evaluate(() => { window.__lumamap.S.project.settings.control.mappings = []; window.__lumamap.paramMappingsChanged(); window.__lumamap.openTab(null); });
 });
 
-await test("GIF animados: botón de arriba, busca solo al escribir (en español), dos fuentes gratis a la vez, entra en vivo o como capa", async () => {
+await test("GIF animados: botón de arriba, busca solo al escribir (en español), GIPHY integrado y dos fuentes libres a la vez, entra en vivo o como capa", async () => {
   const gif = fs.readFileSync(new URL("./fixtures/anim.gif", import.meta.url));
   const asked = [];
   await page.route("https://api.openverse.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*", "cache-control": "no-store" },
     body: JSON.stringify({ page_count: 1, results: [{ id: "g1", title: "Fuego animado", url: "https://upload.example.org/fuego.gif", thumbnail: "https://upload.example.org/fuego.gif", creator: "Ana", license: "by", license_version: "4.0" }] }) }); });
   await page.route("https://commons.wikimedia.org/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*", "cache-control": "no-store" },
     body: JSON.stringify({ query: { pages: { "5": { pageid: 5, index: 1, title: "File:Llamas.gif", imageinfo: [{ url: "https://upload.example.org/llamas.gif", thumburl: "https://upload.example.org/llamas.gif", mime: "image/gif", size: 9000, metadata: [{ name: "frameCount", value: 8 }], extmetadata: { Artist: { value: "Luis" }, LicenseShortName: { value: "CC0" } } }] } } } }) }); });
+  await page.route("https://api.giphy.com/**", (r) => { asked.push(r.request().url()); r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*", "cache-control": "no-store" },
+    body: JSON.stringify({ pagination: { total_count: 1 }, data: [{ id: "gp1", title: "Llamas GIPHY", username: "marta", images: { original: { url: "https://upload.example.org/giphy-fuego.gif", size: "9000", width: "64", height: "36" }, fixed_width_small: { url: "https://upload.example.org/giphy-fuego.gif" } } }] }) }); });
   await page.route("https://upload.example.org/**", (r) => r.fulfill({ status: 200, contentType: "image/gif", headers: { "access-control-allow-origin": "*", "cache-control": "no-store" }, body: gif }));
   await page.bringToFront();
   const id = await page.evaluate(() => { const a = window.__lumamap; a.S.liveFade = 0.3; a.openTab(null); return a.S.project.surfaces[0].id; });
@@ -693,11 +695,15 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.evaluate(async () => (await import("./js/panels-gif.js")).clearGifMemo());
   asked.length = 0;
   await page.locator(".gifsearch input[type=search]").fill("fuego ");
-  for (let t = 0; t < 250 && !(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u))); t++) await page.waitForTimeout(100);
-  await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 2, null, { timeout: 30000, polling: 100 });
+  for (let t = 0; t < 250 && !(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u)) && asked.some(u => /giphy.*q=fuego/.test(u))); t++) await page.waitForTimeout(100);
+  await page.waitForFunction(() => document.querySelectorAll(".gifsearch .gifcell:not(.sk)").length === 3, null, { timeout: 30000, polling: 100 });
   if (!asked.length) console.log("DIAG-GIF2", await page.evaluate(() => JSON.stringify({ val: document.querySelector(".gifsearch input[type=search]")?.value, cells: document.querySelectorAll(".gifsearch .gifcell").length,
     text: document.querySelector(".gifsearch")?.innerText.slice(0, 300), online: navigator.onLine, desk: !!window.LumaDesktop, native: !!window.LumaNative })));
   assert.ok(asked.some(u => /openverse.*q=fire/.test(u)) && asked.some(u => /commons.*fire/.test(u)), "buscó «fire» en las dos: " + asked.join(" "));
+  // GIPHY con la clave integrada, en español, y con su atribución.
+  assert.ok(asked.some(u => /api\.giphy\.com\/v1\/gifs\/search\?api_key=LCo2.*q=fuego/.test(u)), "GIPHY en español: " + asked.join(" "));
+  assert.match(await page.locator(".gifsearch .giphyattr").textContent(), /Powered by GIPHY/);
+  assert.match(await page.locator(".gifcell", { hasText: "marta" }).locator("small").textContent(), /GIPHY · marta/);
   assert.ok(!/\bnull\b/.test(await page.locator(".gifsearch").textContent()), "sin textos sueltos");
   const fuego = page.locator(".gifcell", { hasText: "Ana" });
   assert.match(await fuego.locator("small").textContent(), /Ana · CC BY 4.0/);
@@ -715,7 +721,7 @@ await test("GIF animados: botón de arriba, busca solo al escribir (en español)
   await page.locator(".gifcell", { hasText: "Luis" }).click();
   await page.waitForFunction((n0) => window.__lumamap.S.project.surfaces.length === n0 + 1, n0, { timeout: 40000, polling: 100 });
   assert.match(await page.evaluate(() => window.__lumamap.S.project.surfaces.at(-1).name), /^GIF /);
-  await page.unroute("https://api.openverse.org/**"); await page.unroute("https://commons.wikimedia.org/**"); await page.unroute("https://upload.example.org/**");
+  await page.unroute("https://api.openverse.org/**"); await page.unroute("https://commons.wikimedia.org/**"); await page.unroute("https://api.giphy.com/**"); await page.unroute("https://upload.example.org/**");
   await page.evaluate(() => window.__lumamap.openTab(null));
 });
 
@@ -1148,6 +1154,85 @@ await test("como TouchDesigner: señales que siguen los graves (con monitor en v
   const st = await page.evaluate(async () => { const { panelState } = await import("./js/mypanel.js"); const { describe } = await import("./js/params.js"); const a = window.__lumamap; return panelState(a.S.project.settings.panel, (id) => describe(a, id)); });
   assert.deepEqual(st.map(x => [x.id, x.name, x.kind]), [["global/master", "Brillo general", "float"], ["global/blackout", "Negro total", "bool"]]);
   await page.evaluate(() => { const a = window.__lumamap; a.S.master = 1; a.edit(() => { a.S.project.settings.panel = []; }); a.openTab(null); });
+});
+
+await test("3D para proyectar: lente por relación de proyección, ajuste fino, y calibrar el proyector con el real por puntos (clic en una esquina, arrastrar la cruz, calcular)", async () => {
+  const surfBefore = await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("3d"); return a.S.project.surfaces.map(s => s.id); });
+  const panel = page.locator("#panelBody");
+  await panel.locator(".sec", { hasText: "1 · Objeto" }).waitFor({ timeout: 30000 });
+  await panel.locator(".chip", { hasText: "+ Cubo" }).first().click();
+  await panel.locator(".chip", { hasText: /^1 proyector$/ }).click();
+  const sec = panel.locator(".sec", { hasText: "4 · Alinear con el proyector real" });
+  await sec.waitFor();
+  const proj = () => page.evaluate(() => JSON.parse(JSON.stringify(window.__lumamap.S.project.stage3d.projectors[0])));
+  // Lente: «Estándar 1.5» pone el FOV de esa relación de proyección.
+  await sec.locator("summary", { hasText: "Lente y ajuste fino" }).click();
+  await sec.locator(".chip", { hasText: "Estándar 1.5" }).click();
+  const want = await page.evaluate(async () => { const C = await import("./js/calib3d.js"), p = window.__lumamap.S.project.stage3d.projectors[0]; return C.fovFromThrow(1.5, p.res); });
+  assert.ok(Math.abs((await proj()).fov - want) < 0.01, "FOV de la lente 1.5");
+  // Ajuste fino: «→» mueve el proyector 2 cm hacia SU derecha.
+  const p0 = await proj();
+  await page.locator("#panelBody .sec", { hasText: "4 · Alinear" }).locator("summary", { hasText: "Lente y ajuste fino" }).evaluate(s => { s.parentElement.open = true; });
+  await page.locator('#panelBody .calibgrid button[title="A la derecha"]').click();
+  const p1 = await proj();
+  assert.ok(Math.abs(Math.hypot(...p1.pos.map((v, i) => v - p0.pos[i])) - 0.02) < 1e-4, "se movió 2 cm: " + JSON.stringify([p0.pos, p1.pos]));
+  // Calibrar por puntos.
+  await page.locator("#panelBody").getByRole("button", { name: /Calibrar por puntos/ }).click();
+  await page.locator("#panelBody .calibpad").waitFor();
+  // Un clic DE VERDAD en el 3D, cerca de una esquina del cubo: se marca ese vértice.
+  const corners = await page.evaluate(async () => {
+    const T = await import("./vendor/three/three.module.min.js"), st = window.__lumamap.stage3d, o = window.__lumamap.S.project.stage3d.objects[0];
+    const box = new T.Box3().setFromObject(st.nodes.get(o.id).obj), out = [];
+    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) out.push([x, y, z]);
+    return out;
+  });
+  const target = corners.reduce((b, c) => (c[1] > b[1] || (c[1] === b[1] && c[2] > b[2]) ? c : b));   // una esquina de arriba, de delante
+  const at = await page.evaluate(async (w) => {
+    const T = await import("./vendor/three/three.module.min.js"), st = window.__lumamap.stage3d, cam = st.viewCamera(), r = st.vp.canvas.getBoundingClientRect();
+    const v = new T.Vector3(...w).project(cam), c = new T.Vector3(...w).multiplyScalar(0.97).project(cam);   // un poco hacia dentro de la cara
+    return { x: r.left + (c.x + 1) / 2 * r.width, y: r.top + (1 - c.y) / 2 * r.height };
+  }, target);
+  await page.mouse.click(at.x, at.y);
+  await page.waitForFunction(() => window.__lumamap.S.project.stage3d.projectors[0].calib.points.length === 1, null, { timeout: 5000 });
+  const first = (await proj()).calib.points[0].w;
+  assert.ok(corners.some(c => Math.hypot(c[0] - first[0], c[1] - first[1], c[2] - first[2]) < 1e-4), "el clic eligió una esquina del cubo: " + JSON.stringify(first));
+  // El resto de esquinas (como si se tocaran), y el proyector «real» un poco movido, girado y con otra lente.
+  const truth = await page.evaluate(async (corners) => {
+    const a = window.__lumamap, st = a.stage3d, p = a.S.project.stage3d.projectors[0], C = await import("./js/calib3d.js");
+    for (const w of corners) st.calibPick(w);
+    const truth = { ...p, pos: [p.pos[0] + 0.12, p.pos[1] - 0.08, p.pos[2] + 0.2], rot: [p.rot[0] + 2, p.rot[1] - 3, p.rot[2] + 0.5], fov: p.fov * 1.06, shift: [0.01, 0.06] };
+    // Donde de verdad caen las esquinas en el proyector real (lo que el usuario hace arrastrando las cruces), salvo la primera.
+    p.calib.points.slice(1).forEach(q => { q.uv = C.projectPoint(truth, q.w); });
+    a.changed({ panel: true });
+    return { pos: truth.pos, uv0: C.projectPoint(truth, p.calib.points[0].w) };
+  }, corners);
+  assert.equal((await proj()).calib.points.length, 8, "8 esquinas, sin repetir la del clic");
+  // La primera cruz se lleva a su sitio arrastrando en el recuadro (y se afina con las flechas del teclado).
+  const pad = page.locator("#panelBody .calibpad");
+  await page.evaluate(() => { const p = window.__lumamap.S.project.stage3d.projectors[0]; p.calib.sel = p.calib.points[0].id; });
+  const box = await pad.boundingBox(), q0 = (await proj()).calib.points[0].uv;
+  await page.mouse.move(box.x + q0[0] * box.width, box.y + q0[1] * box.height);
+  await page.mouse.down();
+  await page.mouse.move(box.x + truth.uv0[0] * box.width, box.y + truth.uv0[1] * box.height, { steps: 6 });
+  await page.mouse.up();
+  await pad.focus(); await page.keyboard.press("ArrowRight"); await page.keyboard.press("ArrowLeft");
+  await page.evaluate((uv) => { window.__lumamap.S.project.stage3d.projectors[0].calib.points[0].uv = uv; }, truth.uv0);   // lo que el ojo deja exacto
+  // Mientras se calibra, el proyector real recibe su imagen con la malla y las cruces.
+  await page.waitForFunction(() => { const st = window.__lumamap.stage3d, id = window.__lumamap.S.project.stage3d.projectors[0].id; return !!st.projectorView(id)?.el; }, null, { timeout: 10000 });
+  await page.evaluate(() => window.__lumamap.commit());   // los puntos quedan en su paso del historial (deshacer = solo el cálculo)
+  await page.locator("#panelBody").getByRole("button", { name: /^Calcular \(8\/6\)/ }).click();
+  await page.evaluate(() => window.__lumamap.commit());
+  await page.locator("#panelBody .calibres.ok").waitFor();
+  const done = await proj();
+  assert.ok(Math.hypot(...done.pos.map((v, i) => v - truth.pos[i])) < 0.002, "encontró dónde está el proyector real: " + JSON.stringify([done.pos, truth.pos]));
+  assert.ok(done.calib.rms < 0.5, "error medio " + done.calib.rms);
+  // Deshacer vuelve al proyector de antes; «Terminar» deja de calibrar.
+  await page.evaluate(() => window.__lumamap.actions.undo());
+  assert.ok(Math.hypot(...(await proj()).pos.map((v, i) => v - truth.pos[i])) > 0.05, "deshacer");
+  await page.locator("#panelBody").getByRole("button", { name: "Terminar" }).click();
+  assert.equal((await proj()).calib.on, false);
+  assert.equal(await page.evaluate(() => window.__lumamap.stage3d.calibPick), null);
+  await page.evaluate(async (keep) => { const a = window.__lumamap; (await import("./js/panels-3d.js")).closeWorkspace(a); a.edit(() => { a.S.project.stage3d.objects = []; a.S.project.stage3d.projectors = []; a.S.project.stage3d.faces = []; a.S.project.surfaces = a.S.project.surfaces.filter(s => keep.includes(s.id)); }); a.select(keep[0] || null); a.openTab(null); }, surfBefore);
 });
 
 await test("comparador antes/después en Efectos: a un lado de la línea el original, al otro con el efecto (y no sale en la proyección)", async () => {

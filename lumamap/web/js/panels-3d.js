@@ -7,6 +7,7 @@ import { h, section, row, btn, segmented, toggle, hint, toast, dialog, closeDial
 import { animThumb } from "./thumbs.js";
 import { icon } from "./icons.js";
 import * as M from "./model.js";
+import { alignSection } from "./panels-3dcalib.js";
 
 let Mod = null;   // módulo three3d.js (carga diferida)
 
@@ -168,7 +169,7 @@ async function editKeys() {
 
 /* ---------------- Panel ---------------- */
 const panel3d = {
-  title: () => "3D · objetos y proyectores",
+  title: () => "3D · mapping sobre objetos reales",
   render(app) {
     const S = app.S, wrap = h("div", { class: "p3d" });
     const st = app.stage3d;
@@ -216,6 +217,7 @@ const panel3d = {
         h("button", { class: "chip", onclick: () => app.actions.hologramWizard() }, "🎤 Holograma de escenario (como Tupac)"),
         h("button", { class: "chip", onclick: () => app.actions.create3D() }, "🧊 Crear objeto 3D con texto")),
       d.projectors.length ? row(btn({ label: "Ver desde un proyector", kind: "wide", onClick: () => st.viewFromProjector(null) }), btn({ label: "Vista libre", kind: "wide", onClick: () => { st.vp.viewFrom = null; st.frameSelection(); } })) : null));
+    easy.append(alignSection(app, st));
     wrap.append(easy);
     const adv = h("details", { class: "fold" }, h("summary", {}, "Avanzado (posiciones exactas, rejilla, snap, atajos)"));
     wrap.append(adv);

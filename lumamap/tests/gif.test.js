@@ -41,7 +41,33 @@ await test("GIPHY: sin clave avisa claro; con clave usa el original (o uno más 
   assert.match(f.asked[0], /api_key=K/); assert.match(f.asked[0], /rating=g/);
   assert.deepEqual(r.items.map(i => i.url), ["https://media.giphy.com/x.gif", "https://media.giphy.com/y_d.gif"]);
   const bad = fakeFetch([[/giphy/, { message: "Invalid key" }, 401]]);
-  await assert.rejects(() => G.searchGifs("neon", { source: "giphy", key: "mala", fetchImpl: bad }), (e) => e.code === "key" && /clave de GIPHY/.test(e.message));
+  await assert.rejects(() => G.searchGifs("neon", { source: "giphy", key: "mala", fetchImpl: bad }), (e) => e.code === "key" && /GIPHY no acepta la clave/.test(e.message));
+});
+
+await test("GIPHY integrado: clave incluida, en español, tendencias sin palabras, stickers y la mejor calidad (WebP con el GIF de reserva)", async () => {
+  assert.match(G.GIPHY_KEY, /^[A-Za-z0-9]{32}$/);
+  const f = fakeFetch([[/api\.giphy\.com\/v1\/(gifs|stickers)/, { pagination: { total_count: 50 }, data: [
+    { id: "w", title: "Fuego", username: "ana", images: { original: { url: "https://media.giphy.com/w.gif", size: "3000000", width: "480", height: "480", webp: "https://media.giphy.com/w.webp", webp_size: "900000" }, fixed_width_small: { url: "https://media.giphy.com/w_s.gif" } } }] }]]);
+  // Sin clave propia se usa la integrada; el español va tal cual (GIPHY lo entiende).
+  let r = await G.searchGifs("fuego azul", { source: "giphy", fetchImpl: f });
+  assert.match(f.asked[0], new RegExp("api_key=" + G.GIPHY_KEY)); assert.match(f.asked[0], /gifs\/search\?.*q=fuego%20azul.*lang=es/);
+  assert.equal(r.items[0].url, "https://media.giphy.com/w.webp"); assert.equal(r.items[0].alt, "https://media.giphy.com/w.gif"); assert.equal(r.items[0].credit, "GIPHY · ana");
+  // Sin palabras: lo más visto.
+  await G.searchGifs("", { source: "giphy", fetchImpl: f });
+  assert.match(f.asked[1], /gifs\/trending\?/);
+  // Stickers (fondo transparente).
+  r = await G.searchGifs("estrellas", { source: "stickers", fetchImpl: f });
+  assert.match(f.asked[2], /stickers\/search\?/); assert.equal(r.items[0].sticker, true);
+  // «Todo»: GIPHY (en español) y las libres (en inglés) a la vez.
+  const all = fakeFetch([[/giphy/, { data: [{ id: "g", images: { original: { url: "https://media.giphy.com/g.gif", size: "100" } } }] }],
+    [/openverse/, { page_count: 1, results: [{ id: "o", url: "https://x.org/o.gif" }] }], [/wikimedia/, { query: { pages: {} } }]]);
+  const a = await G.searchAll("fuego", { fetchImpl: all });
+  assert.ok(all.asked.some(u => /giphy.*q=fuego/.test(u)) && all.asked.some(u => /openverse.*q=fire/.test(u)), all.asked.join(" "));
+  assert.equal(a.items.length, 2);
+  // Si el WebP no llega (o no es animado), se baja el GIF.
+  const dl = fakeFetch([[/w\.webp/, new TextEncoder().encode("<html>"), 200, "text/html"], [/w\.gif/, gif, 200, "image/gif"]]);
+  const file = await G.downloadGif({ url: "https://media.giphy.com/w.webp", alt: "https://media.giphy.com/w.gif", title: "Fuego" }, { fetchImpl: dl });
+  assert.equal(file.type, "image/gif");
 });
 
 await test("enlaces: una página de GIPHY se convierte en el GIF; solo se descargan GIF/WebP de verdad", async () => {

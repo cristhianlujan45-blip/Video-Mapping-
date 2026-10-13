@@ -1,15 +1,18 @@
 // web/js/panels-gif.js
-// Ventana «GIF animados»: se abre con GIF ya cargados, busca sola mientras escribes
-// (en español; se traduce solo), en varias fuentes gratis a la vez (sin cuentas ni
-// claves), carga más al bajar y, al tocar uno, entra en la proyección: con fundido en
+// Ventana «GIF animados»: se abre con GIF ya cargados (lo más visto en GIPHY), busca sola
+// mientras escribes (en español), en GIPHY y en las fuentes libres a la vez (sin cuentas:
+// la clave de GIPHY viene integrada), stickers con fondo transparente, carga más al bajar
+// y, al tocar uno, entra en la proyección: con fundido en
 // la superficie elegida, como capa encima, como «siguiente» o solo a la biblioteca.
 // El GIF se empieza a descargar al pasar el ratón por encima: el toque es inmediato.
 import { h, row, btn, segmented, hint, toast, dialog, closeDialog } from "./ui.js";
-import { GIF_SOURCES, GIF_IDEAS, GIF_DEFAULT, searchAll, searchGifs, downloadGif, GifError, toEnglish } from "./gifsearch.js";
+import { GIF_SOURCES, GIF_IDEAS, GIF_DEFAULT, GIPHY_KEY, searchAll, searchGifs, downloadGif, GifError, toEnglish } from "./gifsearch.js";
 
 const ui = { q: "", source: "all", mode: "" };
 const KEY = "lumamap.giphyKey", CACHE_KEY = "lumamap:gifcache";
-const getKey = () => { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } };
+const ownKey = () => { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } };
+/** La clave propia si se puso una; si no, la integrada de LumaMap. */
+const getKey = () => ownKey() || GIPHY_KEY;
 const setKey = (k) => { try { k ? localStorage.setItem(KEY, k) : localStorage.removeItem(KEY); } catch {} };
 // Resultados ya buscados (en memoria) y los del arranque (guardados: la ventana abre al instante).
 const memo = new Map();
@@ -43,12 +46,10 @@ export function openGifSearch(app, opts = {}) {
 
   const drawKey = () => {
     keyBox.replaceChildren();
-    if (ui.source !== "giphy") return;
-    const k = getKey();
-    if (k) { keyBox.append(row(hint("GIPHY listo (clave guardada en este equipo)."), btn({ label: "Quitar clave", onClick: () => { setKey(""); drawKey(); } }))); return; }
-    const ki = h("input", { class: "text-in", placeholder: "Pega aquí tu clave de GIPHY" });
-    keyBox.append(hint("GIPHY es opcional y necesita una clave gratuita (developers.giphy.com → «Create an App» → «API»). Las otras fuentes no necesitan nada."),
-      row(ki, btn({ label: "Guardar", kind: "primary", onClick: () => { const v = ki.value.trim(); if (!v) return; setKey(v); drawKey(); run(1); } })));
+    if (ownKey()) { keyBox.append(row(hint("GIPHY con tu propia clave (guardada en este equipo)."), btn({ label: "Volver a la integrada", onClick: () => { setKey(""); clearGifMemo(); drawKey(); run(1); } }))); return; }
+    const ki = h("input", { class: "text-in", placeholder: "Tu clave de GIPHY (opcional)" });
+    keyBox.append(hint("GIPHY ya funciona con la clave integrada de LumaMap. Si algún día se agota su cupo, puedes usar la tuya (developers.giphy.com → «Create an App» → «API»)."),
+      row(ki, btn({ label: "Usar mi clave", onClick: () => { const v = ki.value.trim(); if (!v) return; setKey(v); clearGifMemo(); drawKey(); run(1); } })));
   };
 
   async function add(item, cell) {
@@ -80,8 +81,9 @@ export function openGifSearch(app, opts = {}) {
 
   async function run(p = 1) {
     ui.q = input.value.trim();
-    if (ui.source === "giphy" && !getKey()) { drawKey(); status.textContent = "Falta la clave de GIPHY (o elige «Todo (gratis)», que no necesita nada)."; return; }
-    const id = ++searchId, q = ui.q || GIF_DEFAULT, key = `${ui.source}|${toEnglish(q)}|${p}`;
+    const giphy = ui.source === "giphy" || ui.source === "stickers";
+    // Sin palabras: GIPHY enseña lo más visto (tendencias); las fuentes libres, «animación».
+    const id = ++searchId, q = ui.q || (giphy || ui.source === "all" ? "" : GIF_DEFAULT), key = `${ui.source}|${giphy ? q : toEnglish(q || GIF_DEFAULT)}|${p}`;
     page = p;
     // Mientras llega la búsqueda nueva se ven los anteriores (o recuadros de carga si no hay).
     if (p === 1 && !memo.has(key) && !grid.querySelector(".gifcell:not(.sk)")) skeleton();
@@ -97,12 +99,12 @@ export function openGifSearch(app, opts = {}) {
       show(r.items); more = r.more; finish(id, null);
       return;
     }
-    status.textContent = p === 1 ? `Buscando «${q}»…` : "Cargando más…";
+    status.textContent = p === 1 ? (q ? `Buscando «${q}»…` : "Cargando lo más visto…") : "Cargando más…";
     let first = true;
     try {
       const r = ui.source === "all"
-        ? await searchAll(q, { page: p, onItems: (items) => { if (p === 1 && first) { first = false; if (id === searchId) grid.replaceChildren(); } show(items); } })
-        : await searchGifs(ui.source === "giphy" ? q : toEnglish(q), { source: ui.source, key: getKey(), page: p }).then(r => { if (p === 1) grid.replaceChildren(); show(r.items); return r; });
+        ? await searchAll(q, { page: p, key: getKey(), onItems: (items) => { if (p === 1 && first) { first = false; if (id === searchId) grid.replaceChildren(); } show(items); } })
+        : await searchGifs(giphy ? q : toEnglish(q), { source: ui.source, key: getKey(), page: p }).then(r => { if (p === 1) grid.replaceChildren(); show(r.items); return r; });
       if (id !== searchId) return;
       if (p === 1 && first && ui.source === "all") grid.replaceChildren();   // sin resultados: fuera los anteriores
       memo.set(key, { items: r.items, more: r.more });
@@ -116,7 +118,7 @@ export function openGifSearch(app, opts = {}) {
     grid.querySelectorAll(".sk").forEach(e => e.remove());
     const n = grid.querySelectorAll(".gifcell").length;
     status.textContent = err ? (err instanceof GifError ? err.message : "No se pudo buscar. " + (err?.message || ""))
-      : n ? `Toca un GIF para añadirlo${more ? " · baja para ver más" : ""}. Licencia libre: cita al autor si la licencia lo pide.`
+      : n ? `Toca un GIF para añadirlo${more ? " · baja para ver más" : ""}.${ui.source === "stickers" ? " Los stickers tienen fondo transparente: quedan muy bien como «Capa nueva encima»." : ""} En los de licencia libre, cita al autor si la licencia lo pide.`
       : "No hay resultados. Prueba con otra palabra (fuego, neón, estrellas…).";
   }
   // Más resultados solos al llegar abajo.
@@ -129,10 +131,11 @@ export function openGifSearch(app, opts = {}) {
   const content = h("div", { class: "gifsearch" },
     row(input, btn({ label: "Buscar", ic: "search", kind: "primary", onClick: () => run(1) })),
     h("div", { class: "chips" }, ...GIF_IDEAS.map(q => h("button", { class: "chip", onclick: () => { input.value = q.replace(/^\S+\s/, ""); run(1); } }, q))),
+    row(h("div", { class: "lbl" }, "Dónde buscar"), segmented({ options: GIF_SOURCES, value: ui.source, small: true, onChange: (v) => { ui.source = v; run(1); } })),
     row(h("div", { class: "lbl" }, "Al tocar un GIF"), segmented({ options: modes, value: ui.mode, small: true, onChange: (v) => { ui.mode = v; } })),
     status, grid,
-    h("details", { class: "fold" }, h("summary", {}, "Más opciones (otras fuentes, pegar un enlace)"),
-      segmented({ options: GIF_SOURCES, value: ui.source, small: true, onChange: (v) => { ui.source = v; drawKey(); run(1); } }),
+    h("small", { class: "giphyattr" }, "Powered by GIPHY"),
+    h("details", { class: "fold" }, h("summary", {}, "Más opciones (tu clave de GIPHY, pegar un enlace)"),
       keyBox,
       row(link, btn({ label: "Añadir enlace", ic: "plus", onClick: () => { const u = link.value.trim(); if (u) add({ id: "link:" + u, url: u, title: "GIF" }); } }))));
   drawKey();
