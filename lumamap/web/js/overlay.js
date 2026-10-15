@@ -2,6 +2,7 @@
 // Dibujo 2D sobre el render: patrones de prueba del proyector y guías de
 // alineación (contornos, puntos). Se usa en el editor y en la salida.
 import { surfaceOutline, gridCornerIdx, edgeHandles } from "./math.js";
+import { isGray, drawGray } from "./graycode.js";
 
 /** Distancia (px de pantalla) del asa de giro al borde superior. */
 export const ROT_OFF = 44;
@@ -13,6 +14,7 @@ export const PATTERNS = [
 
 export function drawPattern(ctx, name, W, H) {
   const c = ctx;
+  if (isGray(name)) return drawGray(c, name, W, H);   // luz estructurada (calibrar el 3D con la cámara)
   if (name === "white" || name === "black" || name === "red" || name === "green" || name === "blue") {
     c.fillStyle = { white: "#fff", black: "#000", red: "#f00", green: "#0f0", blue: "#00f" }[name];
     c.fillRect(0, 0, W, H);

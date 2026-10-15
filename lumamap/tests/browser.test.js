@@ -1233,7 +1233,7 @@ await test("Escenas y show: una sola pestaña (Show abre Escenas) con línea de 
     a.actions.goScene(P.scenes[0].id, { instant: true }); a.openTab(null); }, ids.before);
 });
 
-await test("3D para proyectar: lente por relación de proyección, ajuste fino, y calibrar el proyector con el real por puntos (clic en una esquina, arrastrar la cruz, calcular)", async () => {
+await test("3D para proyectar: lente por relación de proyección, ajuste fino, y calibrar el proyector con el real por puntos (clic en una esquina, arrastrar la cruz o tocarla en la foto de la cámara con luz estructurada, calcular)", async () => {
   const surfBefore = await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("3d"); return a.S.project.surfaces.map(s => s.id); });
   const panel = page.locator("#panelBody");
   await panel.locator(".sec", { hasText: "1 · Objeto" }).waitFor({ timeout: 30000 });
@@ -1293,6 +1293,35 @@ await test("3D para proyectar: lente por relación de proyección, ajuste fino, 
   await page.mouse.move(box.x + truth.uv0[0] * box.width, box.y + truth.uv0[1] * box.height, { steps: 6 });
   await page.mouse.up();
   await pad.focus(); await page.keyboard.press("ArrowRight"); await page.keyboard.press("ArrowLeft");
+  // Con la cámara (luz estructurada): una cámara simulada ve la imagen del proyector real (las
+  // franjas que salen de verdad por las salidas); se escanea y se toca la esquina en la foto.
+  await page.evaluate(async () => {
+    const a = window.__lumamap, st = a.stage3d, G = await import("./js/graycode.js");
+    st.camSettle = 5;
+    st.camGrab = async () => {
+      const w = 320, h = 240, img = new ImageData(w, h), pat = a.S.pattern;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const u = (x - 40) / 240, v = (y - 30) / 180;   // la imagen del proyector ocupa este trozo de la foto
+        let on = 0;
+        if (u >= 0 && u < 1 && v >= 0 && v < 1) {
+          if (pat === "white") on = 1;
+          else if (pat?.startsWith("gray:")) { const [, ax, k, b, inv] = pat.split(":"); on = G.grayBit(Math.floor((ax === "x" ? u : v) * (1 << +b)), +k, +b) ^ +inv; }
+        }
+        const i = (y * w + x) * 4, l = 25 + 200 * on; img.data[i] = img.data[i + 1] = img.data[i + 2] = l; img.data[i + 3] = 255;
+      }
+      return img;
+    };
+  });
+  await page.locator("#panelBody").getByRole("button", { name: "Escanear con la cámara" }).click();
+  const photo = page.locator("#panelBody .calibcam");
+  await photo.waitFor({ timeout: 30000 });
+  assert.equal(await page.evaluate(() => window.__lumamap.S.pattern), null, "al terminar se quitan las franjas");
+  await photo.scrollIntoViewIfNeeded();
+  const pb = await photo.boundingBox();
+  await page.mouse.click(pb.x + (40 + truth.uv0[0] * 240) / 320 * pb.width, pb.y + (30 + truth.uv0[1] * 180) / 240 * pb.height);
+  const byCam = (await proj()).calib.points[0];
+  assert.ok(Math.abs(byCam.uv[0] - truth.uv0[0]) < 0.006 && Math.abs(byCam.uv[1] - truth.uv0[1]) < 0.008, "la cruz fue sola a la esquina: " + JSON.stringify([byCam.uv, truth.uv0]));
+  assert.ok(Array.isArray(byCam.cam), "el punto se marca en la foto");
   await page.evaluate((uv) => { window.__lumamap.S.project.stage3d.projectors[0].calib.points[0].uv = uv; }, truth.uv0);   // lo que el ojo deja exacto
   // Mientras se calibra, el proyector real recibe su imagen con la malla y las cruces.
   await page.waitForFunction(() => { const st = window.__lumamap.stage3d, id = window.__lumamap.S.project.stage3d.projectors[0].id; return !!st.projectorView(id)?.el; }, null, { timeout: 10000 });

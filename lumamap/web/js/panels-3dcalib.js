@@ -6,7 +6,11 @@
 //   · Ajuste fino con botones (mover, acercar, girar, inclinar, zoom, lens shift), en directo.
 //   · Calibrar por puntos (como CamSchnappr de TouchDesigner): tocas esquinas del objeto en el
 //     3D, llevas cada cruz a esa esquina en el objeto real y LumaMap calcula el proyector.
+//   · Con la cámara (luz estructurada, graycode.js): el proyector muestra franjas, la cámara las
+//     ve y luego tocas cada esquina en la foto: la cruz va sola a su sitio, sin mover nada a ojo.
 import { h, section, row, btn, segmented, toggle, hint, toast } from "./ui.js";
+import { scanGray, lookupUV } from "./graycode.js";
+import { getCamera } from "./sources.js";
 import { calibrate, projectPoint, fovFromThrow, throwFromFov, eulerToMat } from "./calib3d.js";
 import * as M from "./model.js";
 
@@ -91,6 +95,90 @@ function nudge(app, cal, dx, dy, W, H) {
   app.changed(); app.commitSoon();
 }
 
+
+/* ---------------- Con la cámara (luz estructurada) ---------------- */
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+/** Fotógrafo de la cámara elegida: cada llamada da la imagen actual (ImageData). */
+async function cameraGrabber(key) {
+  const cam = await getCamera(key || "default"), v = cam.el;
+  for (let i = 0; i < 40 && (v.readyState < 2 || !v.videoWidth); i++) await wait(100);
+  if (!v.videoWidth) throw new Error("La cámara no da imagen");
+  const w = Math.min(960, v.videoWidth), hh = Math.round(w * v.videoHeight / v.videoWidth);
+  const c = document.createElement("canvas"); c.width = w; c.height = hh;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  return async () => { g.drawImage(v, 0, 0, w, hh); return g.getImageData(0, 0, w, hh); };
+}
+/** Escanea: franjas en las salidas, fotos de la cámara y el mapa cámara → proyector. */
+async function runScan(app, st, status) {
+  if (st.camBusy) return;
+  st.camBusy = true;
+  try {
+    const grab = st.camGrab || await cameraGrabber(st.camKey);
+    const r = await scanGray({ showPattern: (p) => app.actions.showPattern(p), grabFrame: grab, settle: st.camSettle ?? 450, firstSettle: st.camSettle ?? 900,
+      onStep: (i, n) => { if (status.isConnected) status.textContent = `Escaneando… ${i}/${n} (no muevas la cámara ni el objeto)`; } });
+    if (r.map.coverage < 0.01) {
+      st.camScan = null;
+      toast(r.map.contrast < 25 ? "La cámara no ve cambiar la proyección: apúntala al objeto y comprueba que el proyector sale por su pantalla." : "La cámara casi no distingue las franjas: menos luz en la sala o la cámara más cerca.", "err");
+    } else {
+      st.camScan = { map: r.map, photo: r.photo, at: Date.now() };
+      toast(`Escaneo listo: la cámara ve el ${Math.round(r.map.coverage * 100)} % de la imagen. Ahora toca cada esquina en la foto.`);
+    }
+  } catch (e) { toast("No se pudo escanear: " + (e.message || e), "err"); }
+  finally { st.camBusy = false; app.renderPanel(); }
+}
+/** La foto de la cámara: tocar una esquina coloca la cruz del punto elegido en su sitio. */
+function camPhoto(app, st, cal) {
+  const { map, photo } = st.camScan, W = photo.width, H = photo.height;
+  // Lo que la cámara no ve iluminado por el proyector, más oscuro (se prepara una vez por escaneo).
+  if (!st.camScan.base) {
+    const shade = new ImageData(new Uint8ClampedArray(photo.data), W, H);
+    for (let i = 0; i < W * H; i++) if (Number.isNaN(map.u[i])) for (let c = 0; c < 3; c++) shade.data[i * 4 + c] *= 0.35;
+    const b = document.createElement("canvas"); b.width = W; b.height = H; b.getContext("2d").putImageData(shade, 0, 0);
+    st.camScan.base = b;
+  }
+  const base = st.camScan.base;
+  const cv = h("canvas", { class: "calibcam", width: W, height: H, title: "Toca aquí la esquina del punto elegido" });
+  const g = cv.getContext("2d");
+  const draw = () => {
+    g.drawImage(base, 0, 0);
+    cal.points.forEach((q, i) => {
+      if (!q.cam) return;
+      const on = q.id === cal.sel;
+      g.strokeStyle = on ? "#ffd60a" : "#00e5ff"; g.lineWidth = Math.max(2, W / 320);
+      g.beginPath(); g.arc(q.cam[0], q.cam[1], W / 60, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = g.strokeStyle; g.font = `bold ${Math.round(W / 40)}px system-ui`; g.fillText(`${i + 1}`, q.cam[0] + W / 50, q.cam[1] - W / 60);
+    });
+  };
+  draw();
+  cv.addEventListener("click", (e) => {
+    const q = cal.points.find(x => x.id === cal.sel);
+    if (!q) return toast("Toca primero una esquina del objeto en la vista 3D (así se elige el punto)", "err");
+    const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    const uv = lookupUV(map, x, y, Math.max(2, Math.round(W / 200)));
+    if (!uv) return toast("Ahí la cámara no ve la proyección (zona oscura): toca un poco más dentro del objeto iluminado", "err");
+    q.uv = [clamp01(uv[0]), clamp01(uv[1])]; q.cam = [Math.round(x * 10) / 10, Math.round(y * 10) / 10];
+    delete cal.rms;
+    app.changed({ panel: true }); app.commitSoon();
+    toast(`Punto ${cal.points.indexOf(q) + 1} colocado con la cámara`);
+  });
+  return cv;
+}
+function cameraBox(app, st, cal) {
+  const status = h("small", { class: "dim" }, st.camScan ? `Último escaneo: la cámara ve el ${Math.round(st.camScan.map.coverage * 100)} % de la imagen.` : "");
+  const sel = h("select", { class: "text-in small", title: "Cámara que ve el objeto" }, h("option", { value: "default" }, "Cámara principal"));
+  navigator.mediaDevices?.enumerateDevices?.().then((ds) => {
+    for (const d of ds.filter(x => x.kind === "videoinput" && x.deviceId)) sel.append(h("option", { value: d.deviceId, selected: st.camKey === d.deviceId }, d.label || "Cámara"));
+  }).catch(() => {});
+  sel.addEventListener("change", () => { st.camKey = sel.value; st.camScan = null; app.renderPanel(); });
+  return h("div", { class: "calibcambox" },
+    h("b", {}, "📷 Con la cámara (más fácil y exacto)"),
+    hint("Pon una cámara (o el móvil como cámara) que vea el objeto con la proyección encima y no la muevas. LumaMap proyecta unas franjas (unos 20 s) y luego, en vez de arrastrar cada cruz, tocas su esquina en la foto."),
+    row(sel, btn({ label: st.camBusy ? "Escaneando…" : st.camScan ? "Volver a escanear" : "Escanear con la cámara", kind: "wide primary", disabled: !!st.camBusy, onClick: () => runScan(app, st, status) })),
+    status,
+    st.camScan ? camPhoto(app, st, cal) : null,
+    st.camScan ? hint("Elige el punto tocando su esquina en el 3D y tócala aquí en la foto. Lo oscuro es lo que la cámara no ve iluminado.") : null);
+}
+
 /** Mover el proyector en SUS ejes (derecha, arriba, hacia atrás) o girarlo, con el paso elegido. */
 function adjust(app, p, what, sign) {
   const [dm, dg] = STEPS[ui.step], R = eulerToMat(p.rot);
@@ -167,8 +255,9 @@ export function alignSection(app, st) {
       h("ol", { class: "calibsteps" },
         h("li", {}, `Saca ${cur.name} por P${cur.screen} y lleva esa salida al proyector real (botón de arriba y «Proyectar»).`),
         h("li", {}, "En la vista 3D toca una esquina del objeto: se marca el vértice más cercano y sale una cruz en el proyector real."),
-        h("li", {}, "Arrastra la cruz en este recuadro (o con las flechas) hasta que caiga justo en esa esquina del objeto real."),
+        h("li", {}, "Toca esa esquina en la foto de la cámara (si escaneaste) o arrastra la cruz en el recuadro negro (o con las flechas) hasta que caiga justo en la esquina del objeto real."),
         h("li", {}, `Repite con ${need} esquinas o más, repartidas y no todas en la misma cara. Luego «Calcular».`)),
+      cameraBox(app, st, cal),
       calibPad(app, st, cur),
       row(btn({ label: "←", kind: "small", onClick: () => nudge(app, cal, -1, 0, W, H) }), btn({ label: "→", kind: "small", onClick: () => nudge(app, cal, 1, 0, W, H) }),
         btn({ label: "↑", kind: "small", onClick: () => nudge(app, cal, 0, -1, W, H) }), btn({ label: "↓", kind: "small", onClick: () => nudge(app, cal, 0, 1, W, H) }),
