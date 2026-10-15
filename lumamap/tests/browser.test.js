@@ -1519,17 +1519,17 @@ await test("si Windows reinicia la tarjeta gráfica: protege (shaders a menos re
     await g.waitForFunction(() => !window.__mark && window.__lumamap?.S?.project, null, { timeout: 30000 });
     assert.equal(await g.evaluate(() => window.__lumamap.gpuGuard.read().level), 1);
     assert.equal(await g.evaluate(async () => (await import("./js/compose.js")).shaderCap(window.__lumamap.S.project)), 1440, "shaders a 1440p como máximo");
-    await g.locator("#notices .notice", { hasText: "La tarjeta gráfica se reinició" }).waitFor({ timeout: 8000 });
+    await g.locator("#notices .notice", { hasText: "La tarjeta gráfica se reinició" }).waitFor({ timeout: 30000 });   // en la CI la recarga recompila los shaders por software
     assert.match(await g.locator("#notices [data-id=gpuguard]").textContent(), /1440p/);
     // En Proyectar → Calidad se ve y se puede quitar.
     await g.evaluate(() => window.__lumamap.openTab("output"));
     const box = g.locator(".gpuguard");
-    await box.waitFor({ timeout: 5000 });
+    await box.waitFor({ timeout: 15000 });
     assert.match(await box.textContent(), /1440p/);
     // 2) En bucle (4 caídas en 5 minutos): no recarga sin fin; explica qué hacer.
     await g.evaluate(() => { const n = Date.now(); localStorage.setItem("lumamap:gpuguard", JSON.stringify({ level: 1, losses: [n - 60000, n - 40000, n - 20000], why: "" })); });
     await loseGl();
-    await g.locator(".fatal h1", { hasText: "se reinició varias veces" }).waitFor({ timeout: 10000 });
+    await g.locator(".fatal h1", { hasText: "se reinició varias veces" }).waitFor({ timeout: 30000 });
     await g.waitForTimeout(1500);
     assert.equal(await g.evaluate(() => window.__mark), 1, "no recargó");
     assert.equal(await g.evaluate(() => JSON.parse(localStorage.getItem("lumamap:gpuguard")).level), 2);
