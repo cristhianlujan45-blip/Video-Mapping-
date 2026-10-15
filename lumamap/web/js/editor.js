@@ -56,6 +56,7 @@ import { Remote } from "./remote.js";
 import { startNetOut, netOutAvailable } from "./netout.js";
 import { planShow, frameAt, videoTimeAt, OfflineAnalyser, pickVideoCodec, pickAudioCodec, bitrateFor } from "./exportshow.js";
 import { Mp4Muxer, MemorySink } from "./mp4mux.js";
+import { openNews, maybeShowNews } from "./whatsnew.js";
 import { recordLoss, readGuard, resetGuard, Watchdog, GUARD_CAPS } from "./gpuguard.js";
 import * as Updater from "./updater.js";
 
@@ -2657,6 +2658,10 @@ function buildChrome() {
   if (nb) nb.innerHTML = icon("ai") + "<span>¿Qué hago ahora?</span>";
   const gb = document.querySelector('[data-act="gif"]');
   if (gb) gb.innerHTML = icon("gif") + "<span>GIF</span>";
+  const ndb = document.querySelector('[data-act="nodes"]');
+  if (ndb) ndb.innerHTML = icon("layers") + "<span>Nodos</span>";
+  const nwb = document.querySelector('[data-act="news"]');
+  if (nwb) nwb.innerHTML = "✨<span>Novedades</span>";
   document.querySelectorAll("#top [data-act]").forEach(b => b.addEventListener("click", () => {
     const a = b.dataset.act;
     if (a === "menu") openTab("menu");
@@ -2668,6 +2673,8 @@ function buildChrome() {
     else if (a === "palette") openPalette(app);
     else if (a === "next") whatNow(app);
     else if (a === "gif") A.searchGifs();
+    else if (a === "nodes") app.openNodes();
+    else if (a === "news") openNews(app);
     else if (a === "record") A.record();
   }));
   buildDock();
@@ -3600,6 +3607,8 @@ async function init() {
     if (S.tab === "interactive") renderPanel();
   });
   startDeviceNotices(app);
+  app.openNews = () => openNews(app);
+  maybeShowNews(app);   // lo nuevo, una vez después de actualizar
   // Arrastrar y soltar desde los paneles: la superficie bajo el dedo/ratón recibe lo soltado;
   // en un hueco vacío se crea una superficie nueva ahí mismo.
   const stagePoint = (x, y) => {

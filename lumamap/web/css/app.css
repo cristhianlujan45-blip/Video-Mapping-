@@ -748,3 +748,15 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .netouturls code { font-size: 12px; padding: 4px 6px; background: var(--bg3); border-radius: 6px; cursor: copy; word-break: break-all; }
 .netoutstat { color: var(--dim); }
 .gpuguard{border:1px solid #ffb020;border-radius:8px;padding:6px 8px;margin:6px 0;background:color-mix(in srgb,#ffb020 10%,transparent);} .gpuguard b{color:#ffb020;font-size:13px;}
+/* Barra de arriba: «Nodos» y «Novedades» (en pantallas estrechas solo el icono / dentro de ☰). */
+#top .tb.nodesbtn, #top .tb.newsbtn{width:auto;padding:0 10px;gap:6px;display:flex;align-items:center;font-weight:600;font-size:13px;}
+@media (max-width:900px){ #top .tb.nodesbtn span, #top .tb.newsbtn span{display:none;} }
+@media (max-width:700px){ #top .tb.nodesbtn, #top .tb.newsbtn{display:none;} }
+@media (max-height:520px) and (orientation:landscape){ #top .tb.nodesbtn, #top .tb.newsbtn{display:none;} }
+/* Ventana de novedades */
+.news .newsgrp{margin-top:10px;}
+.news .newsgrp h4{margin:6px 0;font-size:14px;}
+.news .newsitem{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:8px 10px;border:1px solid var(--line,#333);border-radius:10px;margin-bottom:6px;}
+.news .newsitem small{display:block;color:var(--dim);font-size:12px;margin-top:2px;}
+/* Sección a la que se acaba de llevar al usuario */
+.sec.flash, details.flash{outline:2px solid var(--acc);outline-offset:3px;border-radius:10px;transition:outline-color .4s;}

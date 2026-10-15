@@ -1506,6 +1506,44 @@ await test("Escenas y show: exportar el show a video (MP4 fotograma a fotograma,
     assert.deepEqual(errs, []);
   } finally { await ectx.close(); }
 });
+await test("novedades: tras actualizar salen solas con la versión, y cada «Abrir» lleva a la función (nodos, señales, línea de tiempo, exportar); botón «Nodos» arriba", async () => {
+  const nctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  // Alguien que ya usaba LumaMap (hay datos suyos de antes) y acaba de actualizar.
+  await nctx.addInitScript(() => { if (!sessionStorage.getItem("t")) { sessionStorage.setItem("t", "1"); localStorage.setItem("lumamap:camFacing", "environment"); } });
+  const g = await nctx.newPage();
+  const errs = [];
+  g.on("pageerror", e => errs.push(e.message));
+  try {
+    await g.goto(base);
+    await g.waitForFunction(() => window.__lumamap?.S?.project, null, { timeout: 30000 });
+    const dlg = g.locator("#modal.show");
+    // Si sale antes la bienvenida, se cierra; luego salen las novedades.
+    await g.waitForFunction(() => /Novedades|Bienvenid/.test(document.querySelector("#modal.show h2")?.textContent || ""), null, { timeout: 30000 });
+    if (/Bienvenid/.test(await dlg.locator("h2").textContent())) await g.evaluate(() => document.getElementById("modal")._close(null));
+    await dlg.locator("h2", { hasText: "Novedades" }).waitFor({ timeout: 30000 });
+    assert.match(await dlg.textContent(), /Tienes LumaMap/);
+    for (const t of ["Red de nodos", "Señales en vivo", "Mi panel", "Línea de tiempo del show", "Exportar el show a video", "Calibrar el proyector con la cámara"]) assert.ok(await dlg.locator(".newsitem", { hasText: t }).count(), t);
+    // Señales: lleva a la pestaña Audio y a su sección, resaltada.
+    await dlg.locator(".newsitem", { hasText: "Señales en vivo" }).getByRole("button", { name: "Abrir" }).click();
+    await g.waitForFunction(() => window.__lumamap.S.tab === "audio" && !!document.querySelector("#panelBody .sec.flash"), null, { timeout: 10000 });
+    assert.match(await g.locator("#panelBody .sec.flash h3").textContent(), /Señales en vivo/);
+    // Ya vistas: al recargar no salen otra vez; se abren desde ☰ o con el botón de arriba.
+    await g.reload(); await g.waitForFunction(() => window.__lumamap?.S?.project, null, { timeout: 30000 });
+    await g.waitForTimeout(3500);
+    assert.equal(await g.locator("#modal.show h2", { hasText: "Novedades" }).count(), 0, "no se repiten");
+    await g.locator('#top [data-act="news"]').click();
+    await dlg.locator(".newsitem", { hasText: "Línea de tiempo del show" }).getByRole("button", { name: "Abrir" }).click();
+    await g.waitForFunction(() => window.__lumamap.S.tab === "scenes" && /Línea de tiempo/.test(document.querySelector("#panelBody .sec.flash h3")?.textContent || ""), null, { timeout: 10000 });
+    await g.locator('#top [data-act="news"]').click();
+    await dlg.locator(".newsitem", { hasText: "Exportar el show a video" }).getByRole("button", { name: "Abrir" }).click();
+    await dlg.locator("h2", { hasText: "Exportar el show a video" }).waitFor({ timeout: 10000 });
+    await g.evaluate(() => document.getElementById("modal")._close(null));
+    // Botón «Nodos» siempre visible arriba: abre la red de nodos.
+    await g.locator('#top [data-act="nodes"]').click();
+    await g.waitForFunction(() => /nodos/i.test(document.querySelector("#modal.show h2")?.textContent || ""), null, { timeout: 10000 });
+    assert.deepEqual(errs, []);
+  } finally { await nctx.close(); }
+});
 await test("si Windows reinicia la tarjeta gráfica: protege (shaders a menos resolución), avisa y no recarga en bucle", async () => {
   const gctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const g = await gctx.newPage();

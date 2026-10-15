@@ -1135,6 +1135,7 @@ const menu = {
         item("midi", "Conectar controlador MIDI", () => { A.midi(); if (S.pro) app.openTab("control"); }, S.pro ? "Asigna cualquier control con clic derecho → Aprender" : "Activa el Modo profesional para asignar knobs y faders"),
         item("live", "Control desde el móvil y OSC", () => A.remoteInfo(), "Maneja el show desde el navegador del teléfono o desde una mesa OSC"))),
       section("Ayuda y sistema", h("div", { class: "list" },
+        item("info", "✨ Novedades de esta versión", () => app.openNews?.(), "Lo nuevo (nodos y señales como TouchDesigner, exportar a 4K, calibrar con la cámara…) con un botón para ir a cada cosa"),
         item("help", "Ayuda y atajos", () => A.help()),
         item("wand", "Todos los comandos", A.palette, "Busca cualquier acción escribiendo · Ctrl+K"),
         item("help", `🎓 Tutorial guiado: ${tutorialOn() ? "activado" : "desactivado"}`, () => { const on = !tutorialOn(); setTutorial(on, app); toast(on ? "Tutorial activado: consejos la primera vez que abras algo nuevo" : "Tutorial desactivado"); app.renderPanel(); },
@@ -1146,7 +1147,7 @@ const menu = {
         window.LumaDesktop?.repairInstall ? item("restart", "Reparar instalación", () => A.repairInstall(), "Reinstala esta versión sin tocar tus proyectos") : null,
         window.LumaDesktop?.openLogs ? item("folder", "Abrir registros", () => A.openLogs(), "Para diagnosticar problemas") : null,
         item("download", "Buscar actualizaciones", () => A.checkUpdates(false), `Versión instalada: ${app.version().version} · también se comprueba sola al abrir`),
-        item("info", "Acerca de LumaMap", () => dialog({ title: "LumaMap 2", content: h("p", {}, "Video mapping táctil para Android, tablet y navegador. Código abierto (MIT). Funciona sin internet.") })))),
+        item("info", "Acerca de LumaMap", () => dialog({ title: "LumaMap 2", content: h("div", {}, h("p", {}, h("b", {}, `Versión ${app.version().version}`)), h("p", {}, "Video mapping táctil para Windows, Mac, Android, tablet y navegador. Código abierto (MIT). Funciona sin internet.")) })))),
     );
   },
 };
