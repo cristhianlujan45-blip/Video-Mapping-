@@ -1055,6 +1055,10 @@ const output = {
       hint("Ultra y Súper suavizan los bordes (supermuestreo); Rápida ayuda en equipos lentos."),
       h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Resolución de los plugins (shaders)")),
       segmented({ options: [["auto", "Auto"], ["720", "720p"], ["1080", "1080p"], ["1440", "2K"], ["2160", "4K"]], value: String(O.shaderRes || "auto"), small: true, onChange: (v) => setO("shaderRes")(v === "auto" ? "auto" : +v) }),
+      (() => { const g = app.gpuGuard?.read(); if (!g?.level) return null;
+        return h("div", { class: "gpuguard" }, h("b", {}, `🛡 Protección de la tarjeta gráfica: shaders a ${[0, 1440, 1080, 720][g.level]}p como máximo`),
+          hint(`Se activó sola porque ${g.why || "la tarjeta se reinició"}. Así no vuelve a pasar. Si actualizaste el controlador o cambiaste de equipo, puedes quitarla.`),
+          btn({ label: "Quitar la protección", kind: "small", onClick: () => { app.gpuGuard.reset(); app.renderPanel(); } })); })(),
       hint("Auto: hasta 4K en el PC y 1080p en el móvil (para que vaya fluido). Nunca más que la composición.")));
     wrap.append(fold("Color del proyector", false,
       slider({ label: "Brillo", min: 0, max: 2, value: O.brightness, def: 1, fmt: pct, onInput: setO("brightness") }),

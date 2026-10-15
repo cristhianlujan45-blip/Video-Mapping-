@@ -1401,6 +1401,48 @@ await test("si la tarjeta gráfica no puede con el dibujo: pantalla clara con el
     assert.ok(await g.locator("#gpuCopy").count() && await g.locator("#gpuRetry").count());
   } finally { await gctx.close(); }
 });
+await test("si Windows reinicia la tarjeta gráfica: protege (shaders a menos resolución), avisa y no recarga en bucle", async () => {
+  const gctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const g = await gctx.newPage();
+  const errs = [];
+  g.on("pageerror", e => errs.push(e.message));
+  const ready = () => g.waitForFunction(() => window.__lumamap?.S?.project && document.querySelector("#gl"), null, { timeout: 30000 });
+  const loseGl = () => g.evaluate(() => { window.__mark = 1; document.querySelector("#gl").getContext("webgl2").getExtension("WEBGL_lose_context").loseContext(); });
+  try {
+    await g.goto(base); await ready();
+    assert.equal(await g.evaluate(() => window.__lumamap.gpuGuard.read().level), 0);
+    // 1) Una caída: guarda, sube la protección y recarga sola (el autoguardado lo restaura).
+    await loseGl();
+    await g.waitForFunction(() => !window.__mark && window.__lumamap?.S?.project, null, { timeout: 30000 });
+    assert.equal(await g.evaluate(() => window.__lumamap.gpuGuard.read().level), 1);
+    assert.equal(await g.evaluate(async () => (await import("./js/compose.js")).shaderCap(window.__lumamap.S.project)), 1440, "shaders a 1440p como máximo");
+    await g.locator("#notices .notice", { hasText: "La tarjeta gráfica se reinició" }).waitFor({ timeout: 8000 });
+    assert.match(await g.locator("#notices [data-id=gpuguard]").textContent(), /1440p/);
+    // En Proyectar → Calidad se ve y se puede quitar.
+    await g.evaluate(() => window.__lumamap.openTab("output"));
+    const box = g.locator(".gpuguard");
+    await box.waitFor({ timeout: 5000 });
+    assert.match(await box.textContent(), /1440p/);
+    // 2) En bucle (4 caídas en 5 minutos): no recarga sin fin; explica qué hacer.
+    await g.evaluate(() => { const n = Date.now(); localStorage.setItem("lumamap:gpuguard", JSON.stringify({ level: 1, losses: [n - 60000, n - 40000, n - 20000], why: "" })); });
+    await loseGl();
+    await g.locator(".fatal h1", { hasText: "se reinició varias veces" }).waitFor({ timeout: 10000 });
+    await g.waitForTimeout(1500);
+    assert.equal(await g.evaluate(() => window.__mark), 1, "no recargó");
+    assert.equal(await g.evaluate(() => JSON.parse(localStorage.getItem("lumamap:gpuguard")).level), 2);
+    // «Seguir con la protección»: vuelve a abrir con la protección puesta y sin contar las caídas viejas.
+    await g.locator("#gpuAgain").click();
+    await g.waitForFunction(() => !window.__mark && window.__lumamap?.S?.project, null, { timeout: 30000 });
+    assert.deepEqual(await g.evaluate(() => { const x = window.__lumamap.gpuGuard.read(); return [x.level, x.losses.length]; }), [2, 0]);
+    // Quitar la protección (botón de Proyectar → Calidad).
+    await g.evaluate(() => document.getElementById("modal")?._close?.(null));   // la bienvenida (perfil nuevo)
+    await g.evaluate(() => window.__lumamap.openTab("output"));
+    await g.locator(".gpuguard button", { hasText: "Quitar la protección" }).click();
+    assert.equal(await g.evaluate(() => window.__lumamap.gpuGuard.read().level), 0);
+    assert.equal(await g.locator(".gpuguard").count(), 0);
+    assert.deepEqual(errs, []);
+  } finally { await gctx.close(); }
+});
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 
 await browser.close();

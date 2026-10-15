@@ -9,6 +9,7 @@ import { Link } from "./link.js";
 import { drawPattern, drawGuides, applyOutputCSS, drawSoftEdge } from "./overlay.js";
 import { normalizeProject, usedMediaIds, screenFilter, defaultScreen } from "./model.js";
 import { applyModList } from "./params.js";
+import { recordLoss, readGuard, LOOP_LOSSES } from "./gpuguard.js";
 
 const glCanvas = document.getElementById("out");
 /** Número de pantalla de esta salida (?screen=N); la de Android/Presentation es la 1. */
@@ -42,7 +43,18 @@ if (!webgl2Supported()) {
 const renderer = new Renderer(glCanvas);
 // La GPU se reinició (controlador, memoria, cambio de pantalla): la salida se recarga sola
 // en un momento y vuelve a pedir el proyecto al editor, en vez de quedarse en negro.
-glCanvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); setTimeout(() => location.reload(), 400); });
+// Cada caída sube la protección (shaders a menos resolución); si se cae en bucle, no recarga sin fin.
+glCanvas.addEventListener("webglcontextlost", (e) => {
+  e.preventDefault();
+  const r = recordLoss("salida: contexto WebGL perdido");
+  if (r.loop) {
+    hud.innerHTML = "La tarjeta gráfica se reinició varias veces seguidas. Mira el aviso en el editor (no se recarga sola para no caer en bucle)."; hud.style.display = "block";
+    // Cuando en el editor eligen «Seguir con la protección» (borra las caídas), esta salida vuelve sola.
+    addEventListener("storage", (ev) => { if (ev.key === "lumamap:gpuguard" && readGuard().losses.length < LOOP_LOSSES) location.reload(); });
+    return;
+  }
+  setTimeout(() => location.reload(), 400);
+});
 const QS = new URLSearchParams(location.search);
 /**
  * Motor compartido: si esta ventana la abrió el editor (mismo proceso), se

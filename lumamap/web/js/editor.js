@@ -13,7 +13,7 @@ import { Link, nativeBridge } from "./link.js";
 import { drawGuides, drawPattern, applyOutputCSS, drawSoftEdge, ROT_OFF } from "./overlay.js";
 import { roundPt, newStrokeId, hitStroke } from "./drawing.js";
 import { icon } from "./icons.js";
-import { h, btn, toast, dialog, closeDialog, prompt, confirmDlg, tiles, hint, setDropTarget, slider } from "./ui.js";
+import { h, btn, toast, notice, dialog, closeDialog, prompt, confirmDlg, tiles, hint, setDropTarget, slider } from "./ui.js";
 import { PANELS, TABS, showHelp } from "./panels.js";
 import { buildCommands, keymap, keyOf, openPalette, openContextMenu, closeContextMenu } from "./commands.js";
 import {
@@ -54,6 +54,7 @@ import { TimerEngine } from "./timers.js";
 import { buildProjectContext } from "./ai/context.js";
 import { Remote } from "./remote.js";
 import { startNetOut, netOutAvailable } from "./netout.js";
+import { recordLoss, readGuard, resetGuard, Watchdog, GUARD_CAPS } from "./gpuguard.js";
 import * as Updater from "./updater.js";
 
 const $ = (s) => document.querySelector(s);
@@ -1869,6 +1870,23 @@ A.snapshot = () => {
   o.canvas.toBlob((b) => { saveBlob(`lumamap-${stamp()}.png`, b); toast("Imagen guardada"); o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); }, "image/png");
 };
 
+/* ---- Protección de la tarjeta gráfica (gpuguard.js) ---- */
+/** ¿Hay algo pesado para la GPU en pantalla? (shaders de plugins, objetos 3D). */
+let heavyMemo = { at: 0, v: false };
+function heavyOnScreen() {
+  const now = performance.now();
+  if (now - heavyMemo.at < 500) return heavyMemo.v;   // se mira dos veces por segundo
+  const sc = S.project.scenes.find(s => s.id === S.project.sceneId);
+  const v = !!sc && S.project.surfaces.some(s => !s.hidden && ["shader", "model3d", "projector3d"].includes(sc.looks[s.id]?.source?.type));
+  heavyMemo = { at: now, v };
+  return v;
+}
+const gpuWatch = new Watchdog({ onStep: (level) => {
+  window.LumaDesktop?.log?.("gpu", `Tirones serios con shaders: protección de la tarjeta al nivel ${level} (máx. ${GUARD_CAPS[level]}p)`);
+  toast(`🛡 La tarjeta gráfica iba al límite: bajé los shaders a ${GUARD_CAPS[level]}p para que no se reinicie. Proyectar → Calidad para cambiarlo.`);
+} });
+app.gpuGuard = { read: readGuard, reset: () => { resetGuard(); toast("Protección de la tarjeta quitada: shaders a la resolución elegida"); }, watch: gpuWatch };
+
 /** Salida por red (MJPEG): la proyección para OBS, vMix, TouchDesigner o un navegador de la red. */
 const NETOUT_KEY = "lumamap:netout";
 A.netOutCfg = () => { try { return { height: 720, fps: 25, ...JSON.parse(localStorage.getItem(NETOUT_KEY) || "{}") }; } catch { return { height: 720, fps: 25 }; } };
@@ -2924,6 +2942,9 @@ function tick(now) {
   if (!document.hidden && !S.previewSkip) { drawOverlay(v, view); drawCompare(ovCtx(), v, DPR()); drawLoupe(v, view); }
   params.tickFeedback(now);
   if (S.netOut) S.netOut.tick(now);   // salida por red: un fotograma cuando toca
+  // Protección de la tarjeta: con shaders en pantalla, tirones muy largos → menos resolución antes de que Windows la reinicie.
+  gpuWatch.hidden = document.hidden;
+  gpuWatch.frame(now, heavyOnScreen());
   const rb = $("#recBadge");
   if (S.rec) {
     renderOff(S.rec.o, now);
@@ -3324,6 +3345,20 @@ async function gpuFailed(title, detail) {
   document.getElementById("gpuReset")?.addEventListener("click", () => G.reset());
 }
 
+/** La tarjeta se cayó varias veces seguidas: en vez de recargar sin fin, se explica y se ofrece qué hacer. */
+async function gpuLoopScreen() {
+  const G = window.LumaDesktop?.gpu, st = G ? await G.status().catch(() => null) : null;
+  const g = readGuard();
+  document.body.innerHTML = `<div class="fatal"><div><h1>La tarjeta gráfica se reinició varias veces</h1>
+    <p>Windows reinicia el controlador cuando un dibujo tarda demasiado. Tu proyecto está guardado. Ya bajé la resolución de los shaders a ${GUARD_CAPS[g.level]}p.</p>
+    <p>Qué hacer: 1) actualiza el controlador de la tarjeta (NVIDIA, AMD o Intel); 2) cierra otros programas pesados; 3) si sigue, prueba el modo gráfico compatible.</p>
+    <p><small>Tarjeta: ${String(gpuName()).replace(/[&<>]/g, "")}${st ? ` · modo gráfico: ${st.name}` : ""}</small></p>
+    <p><button class="btn primary" id="gpuAgain">Seguir con la protección</button>${st?.next ? ` <button class="btn" id="gpuCompat">Probar el modo gráfico «${st.next}»</button>` : ""}</p></div></div>`;
+  document.getElementById("gpuAgain").onclick = () => { const x = readGuard(); x.losses = []; writeGuardSafe(x); location.reload(); };
+  document.getElementById("gpuCompat")?.addEventListener("click", () => G.fallback("La tarjeta se reinició varias veces con el modo " + st.name));
+}
+function writeGuardSafe(g) { try { localStorage.setItem("lumamap:gpuguard", JSON.stringify(g)); } catch {} }
+
 async function init() {
   if (!webgl2Supported()) {
     gpuFailed("WebGL2 no disponible", "Este dispositivo o su controlador no ofrece WebGL2 (la aceleración por hardware puede estar desactivada).");
@@ -3335,6 +3370,10 @@ async function init() {
     gpuFailed("Error de GPU", e.message || String(e));
     return;
   }
+  // Dibujo por software (SwiftShader, WARP, llvmpipe): no hay controlador que Windows pueda
+  // reiniciar, así que el vigilante de tirones no baja nada (iría lento igual).
+  try { const gl = renderer.gl, ext = gl.getExtension("WEBGL_debug_renderer_info");
+    gpuWatch.soft = /swiftshader|llvmpipe|softpipe|basic render|software/i.test(String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER))); } catch {}
   // Si la app tuvo que cambiar de modo gráfico, se dice (y se puede volver al normal desde aquí).
   window.LumaDesktop?.gpu?.status().then((st) => { if (st && st.mode !== "normal") setTimeout(() => toast(`Modo gráfico compatible activo (${st.name}): tu tarjeta no pudo con el normal.`), 2500); }).catch(() => {});
   pool = new MediaPool();
@@ -3477,12 +3516,22 @@ async function init() {
     } catch {}
   }, 4000);
 
-  // La GPU se reinició (controlador, memoria): se guarda y se recarga; el autoguardado lo restaura.
+  // La GPU se reinició (controlador, memoria): se guarda, se sube la protección (shaders a menos
+  // resolución) y se recarga; el autoguardado lo restaura. Si se cae en bucle, no recarga sin fin.
   $("#gl").addEventListener("webglcontextlost", (e) => {
     e.preventDefault();
-    window.LumaDesktop?.log?.("gpu", "Contexto WebGL perdido: se recarga el editor");
-    Store.saveProject(Store.AUTOSAVE, savable()).catch(() => {}).finally(() => setTimeout(() => location.reload(), 800));
+    const r = recordLoss("editor: contexto WebGL perdido");
+    window.LumaDesktop?.log?.("gpu", `Contexto WebGL perdido: protección al nivel ${r.level} (shaders máx. ${GUARD_CAPS[r.level]}p)${r.loop ? " · en bucle: no se recarga" : ""}`);
+    Store.saveProject(Store.AUTOSAVE, savable()).catch(() => {}).finally(() => {
+      if (r.loop) gpuLoopScreen(); else setTimeout(() => location.reload(), 800);
+    });
   });
+  // Tras una caída: se explica qué pasó y qué se hizo (una vez).
+  { const g = readGuard(); const last = g.losses.at(-1) || 0;
+    if (g.level && Date.now() - last < 120000) setTimeout(() => notice({ id: "gpuguard", kind: "warn",
+      text: `🛡 La tarjeta gráfica se reinició (Windows reinicia el controlador si un dibujo tarda demasiado). Tu proyecto está a salvo.`,
+      sub: `Para que no vuelva a pasar, los shaders van ahora a ${GUARD_CAPS[g.level]}p como máximo. Si sigue pasando, actualiza el controlador de la tarjeta (NVIDIA, AMD o Intel).`,
+      actions: [{ label: "Ver en Calidad", onClick: () => openTab("output") }] }), 1500); }
   addEventListener("error", (e) => window.LumaDesktop?.log?.("renderer", `${e.message} @ ${e.filename}:${e.lineno}`));
   addEventListener("unhandledrejection", (e) => window.LumaDesktop?.log?.("renderer", "Promesa rechazada: " + (e.reason?.stack || e.reason)));
   // Resultado de una actualización / rollback (lo deja el actualizador independiente).

@@ -37,6 +37,11 @@ if (process.env.LUMAMAP_USER_DATA) app.setPath("userData", process.env.LUMAMAP_U
 
 // Portátiles con dos GPU: usar la dedicada (la integrada solo si no hay otra).
 app.commandLine.appendSwitch("force_high_performance_gpu");
+// Si el controlador de la tarjeta se reinicia una vez (Windows lo hace si un dibujo tarda
+// demasiado), Chromium bloquea WebGL para la app y al recargar sale «Error de GPU» aunque la
+// tarjeta ya esté bien. LumaMap se protege sola (gpuguard.js baja la resolución de los shaders),
+// así que no hace falta ese bloqueo.
+app.disableDomainBlockingFor3DAPIs();
 
 // Modo gráfico: el motor de dibujo (un sombreador grande) se traduce para la tarjeta con ANGLE.
 // Si con el motor normal la tarjeta/controlador no puede (pantalla «Error de GPU»), la app prueba
@@ -383,7 +388,11 @@ require("./net.js").setup();
 ipcMain.handle("logs:open", () => shell.openPath(logDir()));
 process.on("uncaughtException", (e) => log("main", "uncaughtException: " + (e.stack || e.message)));
 process.on("unhandledRejection", (e) => log("main", "unhandledRejection: " + (e?.stack || e)));
-app.on("child-process-gone", (_e, d) => log("process", `${d.type} terminó: ${d.reason} (código ${d.exitCode})${d.name ? " · " + d.name : ""}`));
+app.on("child-process-gone", (_e, d) => {
+  log("process", `${d.type} terminó: ${d.reason} (código ${d.exitCode})${d.name ? " · " + d.name : ""}`);
+  // El proceso de la GPU se cayó: el editor sube su protección (sus ventanas pierden el contexto WebGL y se recuperan solas).
+  if (d.type === "GPU" && d.reason !== "clean-exit") log("gpu", "Proceso de la GPU caído: el editor baja la resolución de los shaders y se recupera");
+});
 
 /* ---------------- Rendimiento (datos reales del sistema) ---------------- */
 // CPU y RAM: métricas de Electron de cada proceso de LumaMap. GPU (uso 3D y VRAM):

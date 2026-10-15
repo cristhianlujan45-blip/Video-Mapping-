@@ -11,11 +11,15 @@ import { ShaderCache, spectrumFromLevels } from "./isf.js";
 import { getShader, onPluginsChange } from "./plugins.js";
 import { FFGLCache } from "./ffgl.js";
 import { DEFAULT_FX } from "./model.js";
+import { guardCap } from "./gpuguard.js";
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
 /** Alto máximo de los shaders de plugins: lo elegido en Calidad, o 4K en PC y 1080p en móvil. */
 export function shaderCap(project) {
   const r = project?.settings?.output?.shaderRes;
-  return [720, 1080, 1440, 2160].includes(+r) ? +r : (MOBILE ? 1080 : 2160);
+  const cap = [720, 1080, 1440, 2160].includes(+r) ? +r : (MOBILE ? 1080 : 2160);
+  // Protección de la tarjeta gráfica (gpuguard.js): tras una caída del controlador, menos resolución.
+  const g = guardCap();
+  return g ? Math.min(cap, g) : cap;
 }
 const NEUTRAL_FX = DEFAULT_FX();
 
