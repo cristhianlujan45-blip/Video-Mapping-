@@ -1343,6 +1343,49 @@ await test("3D para proyectar: lente por relación de proyección, ajuste fino, 
   await page.evaluate(async (keep) => { const a = window.__lumamap; (await import("./js/panels-3d.js")).closeWorkspace(a); a.edit(() => { a.S.project.stage3d.objects = []; a.S.project.stage3d.projectors = []; a.S.project.stage3d.faces = []; a.S.project.surfaces = a.S.project.surfaces.filter(s => keep.includes(s.id)); }); a.select(keep[0] || null); a.openTab(null); }, surfBefore);
 });
 
+await test("3D para proyectar: con el teclado (flechas mueven lo elegido o giran la vista, Re/Av Pág, Q/E, Esc) y en el teléfono una sola fila de botones", async () => {
+  const kctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const g = await kctx.newPage();
+  const errs = [];
+  g.on("pageerror", e => errs.push(e.message));
+  try {
+    await g.goto(base);
+    await g.waitForFunction(() => window.__lumamap?.S?.project, null, { timeout: 30000 });
+    await g.waitForTimeout(1500);
+    await g.evaluate(() => document.getElementById("modal")?._close?.(null));
+    await g.evaluate(() => window.__lumamap.openTab("3d"));
+    await g.waitForFunction(() => !!window.__lumamap.stage3d?.vp, null, { timeout: 30000 });
+    const id = await g.evaluate(() => { const st = window.__lumamap.stage3d; const o = st.addObject("cube"); st.view("front"); window.__lumamap.changed({ panel: true }); document.activeElement?.blur(); return o.id; });
+    const pos = () => g.evaluate((id) => window.__lumamap.S.project.stage3d.objects.find(o => o.id === id).pos, id);
+    const p0 = await pos();
+    await g.keyboard.press("ArrowRight");
+    let p = await pos();
+    assert.ok(Math.abs(p[0] - p0[0] - 0.05) < 1e-6 && p[2] === p0[2], "→ mueve 5 cm a la derecha (vista de frente): " + JSON.stringify([p0, p]));
+    await g.keyboard.press("Shift+ArrowUp");
+    p = await pos(); assert.ok(Math.abs(p[2] - p0[2] + 0.25) < 1e-6, "Mayús+↑: 25 cm hacia el fondo");
+    await g.keyboard.press("PageUp");
+    p = await pos(); assert.ok(Math.abs(p[1] - p0[1] - 0.05) < 1e-6, "Re Pág sube");
+    await g.keyboard.press("q");
+    assert.equal(await g.evaluate((id) => window.__lumamap.S.project.stage3d.objects.find(o => o.id === id).rot[1], id), 15);
+    // Esc suelta lo elegido; entonces las flechas giran la vista (el objeto no se mueve).
+    await g.keyboard.press("Escape");
+    const cam0 = await g.evaluate(() => window.__lumamap.stage3d.vp.cam.position.toArray());
+    const before = await pos();
+    await g.keyboard.press("ArrowLeft");
+    const cam1 = await g.evaluate(() => window.__lumamap.stage3d.vp.cam.position.toArray());
+    assert.deepEqual(await pos(), before, "sin nada elegido no se mueve el objeto");
+    assert.ok(Math.hypot(...cam1.map((v, i) => v - cam0[i])) > 0.1, "la vista gira");
+    // En el teléfono: una sola fila arriba (lo demás en «⋯») y sin la ayuda larga.
+    await g.setViewportSize({ width: 412, height: 860 });
+    await g.waitForTimeout(400);
+    const bar = await g.evaluate(() => { const b = document.querySelector("#ws3d .ws3d-bar"); const help = document.querySelector("#ws3d .ws3d-help"); const more = document.querySelector("#ws3d .ws3d-more"); return { h: b.getBoundingClientRect().height, help: getComputedStyle(help).display, more: getComputedStyle(more).display }; });
+    assert.ok(bar.h < 60, "una fila: " + bar.h);
+    assert.equal(bar.help, "none"); assert.equal(bar.more, "none");
+    await g.locator("#ws3d .ws3d-moreb").click();
+    assert.equal(await g.evaluate(() => getComputedStyle(document.querySelector("#ws3d .ws3d-more")).display), "contents", "«⋯» enseña el resto");
+    assert.deepEqual(errs, []);
+  } finally { await kctx.close(); }
+});
 await test("3D para proyectar: objeto real con la cámara (automático) — reconoce una caja, la pone en el 3D con sus medidas y el proyector donde está el real", async () => {
   const actx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
   const g = await actx.newPage();

@@ -45,6 +45,8 @@ export function key3dOf(e) {
 }
 
 const D2R = Math.PI / 180;
+// Teléfonos y tabletas: menos píxeles, sin antialias y el visor a 30 fps (la proyección no cambia).
+const MOBILE = typeof navigator !== "undefined" && (/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "") || (navigator.maxTouchPoints > 1 && Math.min(globalThis.screen?.width || 9999, globalThis.screen?.height || 9999) < 900));
 const UNITS = { m: ["m", 1], cm: ["cm", 100], mm: ["mm", 1000], ft: ["ft", 3.28084] };
 
 /* ======================================================================
@@ -245,6 +247,35 @@ export class Stage3D {
     d.objects = d.objects.filter(o => o.id !== gid);
   }
   select(type, id) { this.sel = id ? { type, id } : null; this.attachGizmo(); }
+  /** Lo elegido (objeto o proyector) en los datos, o null si no hay o está bloqueado. */
+  selItem() {
+    const s = this.sel; if (!s) return null;
+    const it = s.type === "projector" ? this.data.projectors.find(p => p.id === s.id) : this.data.objects.find(o => o.id === s.id);
+    return it && !it.locked ? it : null;
+  }
+  /**
+   * Flechas del teclado: mueve lo elegido por el suelo según hacia dónde mira la vista
+   * (dx = a la derecha, dz = hacia delante, dy = arriba), en metros. false si no hay nada elegido.
+   */
+  nudgeSel(dx, dy, dz) {
+    const it = this.selItem(); if (!it || !this.vp) return false;
+    const f = new THREE.Vector3(); this.vp.cam.getWorldDirection(f); f.y = 0;
+    if (f.lengthSq() < 1e-6) f.set(0, 0, -1);
+    f.normalize();
+    const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize();
+    // Al pasito más cercano en los ejes del mundo (así una caja no se tuerce al moverla de frente).
+    const v = r.multiplyScalar(dx).add(f.multiplyScalar(dz)), len = Math.hypot(dx, dz);
+    const mx = Math.abs(v.x) >= Math.abs(v.z) ? Math.sign(v.x) * len : 0, mz = Math.abs(v.x) >= Math.abs(v.z) ? 0 : Math.sign(v.z) * len;
+    const r4 = (x) => Math.round(x * 10000) / 10000;
+    it.pos = [r4(it.pos[0] + mx), r4(it.pos[1] + dy), r4(it.pos[2] + mz)];
+    return true;
+  }
+  /** Q / E: girar lo elegido alrededor del eje vertical (grados). */
+  rotateSel(deg) {
+    const it = this.selItem(); if (!it) return false;
+    it.rot = [it.rot[0], Math.round((it.rot[1] + deg) * 1000) / 1000, it.rot[2]];
+    return true;
+  }
 
   /* ---------------- Escena three.js a partir de los datos ---------------- */
   sync() {
@@ -380,13 +411,17 @@ export class Stage3D {
     const faces = [];
     for (const o of d.objects) if (!o.hidden) for (const fid of Object.values(o.faces)) { const f = d.faces.find(x => x.id === fid); if (f) faces.push(f); }
     if (!faces.length) return;
+    // En el teléfono: caras a 256 px y 15 veces por segundo (copiarlas de la tarjeta a la imagen de
+    // cada cara es lo que más cuesta; en el ordenador, a su resolución y en cada fotograma).
+    if (MOBILE && this.atlas && performance.now() - (this.atlasAt || 0) < 66) return;
+    this.atlasAt = performance.now();
     if (!this.atlas) {
       const canvas = new OffscreenCanvas(1024, 1024);
       const r = new Renderer(canvas);
       this.atlas = { canvas, r, comp: new Compositor(r, null, this.app.sharedComp()), tex: null, sig: "" };
     }
     const A = this.atlas, cols = Math.ceil(Math.sqrt(faces.length)), rows = Math.ceil(faces.length / cols);
-    const tile = Math.max(128, Math.min(d.faceRes || 512, Math.floor(4096 / Math.max(cols, rows))));
+    const tile = Math.max(128, Math.min(MOBILE ? Math.min(256, d.faceRes || 512) : d.faceRes || 512, Math.floor(4096 / Math.max(cols, rows))));
     const W = cols * tile, H = rows * tile;
     A.r.resize(W, H);
     const tiles = faces.map((face, i) => ({ face, x: (i % cols) * tile, y: Math.floor(i / cols) * tile, w: tile, h: tile }));
@@ -507,7 +542,11 @@ export class Stage3D {
     this.renderAtlas(frame);
     if (this.atlas && this.atlas.sig !== before) this.invalidateMaterials();
     this.renderProjectors();
-    if (this.vp) this.renderViewport();
+    if (this.vp) {
+      // En el móvil el visor va a 30 fps como mucho (lo que sale al proyector no se toca).
+      const now = performance.now();
+      if (!MOBILE || now - (this.vpAt || 0) > 32) { this.vpAt = now; this.renderViewport(); }
+    }
   }
 
   /* ======================================================================
@@ -518,9 +557,9 @@ export class Stage3D {
     const canvas = document.createElement("canvas");
     canvas.className = "ws3d-canvas";
     container.append(canvas);
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: !MOBILE, powerPreference: "high-performance" });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    renderer.setPixelRatio(MOBILE ? Math.min(1.25, devicePixelRatio || 1) : Math.min(2, devicePixelRatio || 1));
     const persp = new THREE.PerspectiveCamera(45, 1, 0.01, 500);
     persp.position.set(4, 3, 6);
     const ortho = new THREE.OrthographicCamera(-5, 5, 5, -5, -500, 500);

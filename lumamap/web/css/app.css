@@ -761,3 +761,23 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 /* Sección a la que se acaba de llevar al usuario */
 .sec.flash, details.flash{outline:2px solid var(--acc);outline-offset:3px;border-radius:10px;transition:outline-color .4s;}
 .autokind{margin:6px 0;font-size:13px;}
+/* 3D: en el ordenador todo a la vista; en el teléfono una fila (⋯ abre el resto) y navegación pequeña. */
+.ws3d-more{display:contents;}
+.ws3d-bar .ws3d-moreb{display:none;}
+.ws3d-nav .vsel{display:none;height:34px;border-radius:10px;background:rgba(12,14,20,.82);border:1px solid var(--line);color:var(--text);padding:0 6px;}
+@media (max-width:700px), (max-height:520px) and (orientation:landscape){
+  .ws3d-bar{flex-wrap:nowrap;overflow-x:auto;gap:4px;padding:4px 6px;scrollbar-width:none;}
+  .ws3d-bar::-webkit-scrollbar{display:none;}
+  .ws3d-bar > *{flex:none;}
+  .ws3d-bar select.text-in{max-width:120px;}
+  .ws3d-bar .ws3d-moreb{display:inline-flex;}
+  .ws3d-more{display:none;}
+  .ws3d-bar.open{flex-wrap:wrap;overflow:visible;}
+  .ws3d-bar.open .ws3d-more{display:contents;}
+  .ws3d-help{display:none;}
+  .ws3d-nav{left:6px;right:6px;bottom:6px;max-width:none;gap:4px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;}
+  .ws3d-nav::-webkit-scrollbar{display:none;}
+  .ws3d-nav button{min-width:34px;height:34px;padding:0 6px;font-size:13px;border-radius:10px;flex:none;}
+  .ws3d-nav .vbtns{display:none;}
+  .ws3d-nav .vsel{display:block;flex:none;}
+}

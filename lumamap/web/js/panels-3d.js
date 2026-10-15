@@ -70,24 +70,32 @@ function buildToolbar(app, st) {
   const split = selectEl([["none", "Sin dividir"], ["projector", "3D | Proyector"], ["mapping", "3D | Mapping 2D"]], st.vp?.split || "none", (v) => {
     st.vp.split = v; document.body.classList.toggle("split-mapping", v === "mapping");
   });
-  tb.append(addMenu,
+  // Lo de siempre a la vista; el resto en «⋯» (en el teléfono no cabe todo en una fila).
+  const more = h("div", { class: "ws3d-more" },
     tool("translate", "target", "Mover (G)"), tool("rotate", "rotate", "Rotar (R)"), tool("scale", "fit", "Escalar (S)"),
     btn({ label: "Snap", kind: `small ${st.data.snap.enabled ? "on" : ""}`, title: "Snap (Mayús+Tab)", onClick: (e) => { st.data.snap.enabled = !st.data.snap.enabled; st.applySnap(); e.currentTarget.classList.toggle("on", st.data.snap.enabled); app.renderPanel(); } }),
     modes, split,
-    btn({ label: "Persp / Orto", kind: "small", title: "Numpad 5", onClick: () => st.toggleOrtho() }),
+    btn({ label: "Persp / Orto", kind: "small", title: "Numpad 5", onClick: () => st.toggleOrtho() }));
+  tb.append(addMenu,
+    btn({ label: "⋯", kind: "small ws3d-moreb", title: "Más herramientas (mover, girar, escalar, snap, vista…)", onClick: () => tb.classList.toggle("open") }),
+    more,
     btn({ label: "Ver desde proyector", kind: "small", title: "Numpad 0", onClick: () => st.viewFromProjector(st.sel?.type === "projector" ? st.sel.id : null) }),
     h("span", { class: "grow" }),
     btn({ label: "Volver al 2D", ic: "close", kind: "small", onClick: () => { closeWorkspace(app); if (app.S.tab === "3d") app.openTab(null); } }),
-    h("small", { class: "ws3d-help" }, "Arrastrar: girar alrededor · Clic derecho: desplazar · Rueda o 2 dedos: acercar · Clic en una cara: su animación"));
+    h("small", { class: "ws3d-help" }, "Arrastrar: girar alrededor · Clic derecho: desplazar · Rueda o 2 dedos: acercar · Clic en una cara: su animación · Flechas: mover lo elegido (sin nada elegido: girar la vista) · Re Pág / Av Pág: subir y bajar · Q / E: girar · Mayús: más rápido · Esc: soltar"));
   // Botones de navegación en pantalla (para táctil y para quien no use atajos).
   const nav = document.querySelector("#ws3d .ws3d-nav") || h("div", { class: "ws3d-nav" });
   nav.innerHTML = "";
   const nb = (label, title, fn) => h("button", { title, onclick: fn }, label);
+  // En el teléfono: una sola fila pequeña (las vistas, en un desplegable) para no tapar el objeto.
+  const views = h("select", { class: "vsel", title: "Vista" }, h("option", { value: "" }, "Vista…"),
+    ...[["front", "Frente"], ["right", "Lado"], ["top", "Arriba"], ["3d", "3D"]].map(([v, l]) => h("option", { value: v }, l)));
+  views.addEventListener("change", () => { const v = views.value; views.value = ""; if (v === "3d") { st.view("front"); st.orbitBy(35, 22); } else if (v) st.view(v); });
   nav.append(nb("⟲", "Girar a la izquierda", () => st.orbitBy(-20, 0)), nb("⟳", "Girar a la derecha", () => st.orbitBy(20, 0)),
     nb("↑", "Mirar desde más arriba", () => st.orbitBy(0, 12)), nb("↓", "Mirar desde más abajo", () => st.orbitBy(0, -12)),
     nb("+", "Acercar", () => st.zoomBy(0.8)), nb("−", "Alejar", () => st.zoomBy(1.25)), nb("⌂", "Centrar el objeto", () => st.frameSelection()),
-    nb("Frente", "Vista de frente", () => st.view("front")), nb("Lado", "Vista de lado", () => st.view("right")), nb("Arriba", "Vista desde arriba", () => st.view("top")),
-    nb("3D", "Vista en perspectiva", () => { st.view("front"); st.orbitBy(35, 22); }));
+    h("span", { class: "vbtns" }, nb("Frente", "Vista de frente", () => st.view("front")), nb("Lado", "Vista de lado", () => st.view("right")), nb("Arriba", "Vista desde arriba", () => st.view("top")),
+      nb("3D", "Vista en perspectiva", () => { st.view("front"); st.orbitBy(35, 22); })), views);
   if (!nav.isConnected) document.querySelector("#ws3d .ws3d-view")?.append(nav);
   // Clic en una cara de un objeto → elegir su animación.
   st.onFacePick = (o, slot, faceId) => facePicker(app, o, slot, faceId);
@@ -125,6 +133,29 @@ export function handle3dKey(app, e) {
   const st = app.stage3d;
   if (!st?.vp || !document.getElementById("ws3d").classList.contains("show")) return false;
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return false;
+  if (document.querySelector("#modal.show")) return false;
+  // Flechas: mueven lo elegido por el suelo (según hacia dónde mira la vista); sin nada elegido,
+  // giran la vista. Re Pág / Av Pág: subir / bajar. Q / E: girar. + / −: acercar. Inicio: encuadrar.
+  // Mayús: pasos grandes; Alt: muy finos. Esc: soltar lo elegido.
+  // (Con el foco en el recuadro de calibración, las flechas mueven su cruz, no el objeto.)
+  if (!e.ctrlKey && !e.metaKey && !document.activeElement?.closest?.(".calibpad")) {
+    const step = e.shiftKey ? 0.25 : e.altKey ? 0.01 : 0.05, ang = e.shiftKey ? 45 : e.altKey ? 1 : 15;
+    const moved = () => { app.changed(); app.commitSoon(); };
+    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    let done = true;
+    if (arrows[e.key]) {
+      const [x, z] = arrows[e.key];
+      if (st.nudgeSel(x * step, 0, z * step)) moved(); else st.orbitBy(x * (e.shiftKey ? 45 : 15), z * (e.shiftKey ? 25 : 8));
+    } else if (e.key === "PageUp" || e.key === "PageDown") { if (st.nudgeSel(0, (e.key === "PageUp" ? 1 : -1) * step, 0)) moved(); }
+    else if ((key === "q" || key === "e") && !e.altKey) { if (st.rotateSel(key === "q" ? ang : -ang)) moved(); }
+    else if (e.key === "+" || e.key === "=") st.zoomBy(0.85);
+    else if (e.key === "-" || e.key === "_") st.zoomBy(1.18);
+    else if (e.key === "Home") st.frameSelection();
+    else if (e.key === "Escape" && st.sel) { st.select(null); app.renderPanel(); }
+    else done = false;
+    if (done) { e.preventDefault(); e.stopPropagation(); return true; }
+  }
   const k = Mod.key3dOf(e), map = Mod.keys3d();
   const action = Object.keys(map).find(a => map[a] === k);
   if (!action) return false;
