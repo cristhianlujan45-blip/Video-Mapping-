@@ -47,6 +47,7 @@ export function newsItems(app) {
       ["VJ automático", "Mezcla solo al ritmo de la música con «Mi set».", live("vj")],
     ]],
     ["🧊 3D y calibración", [
+      ["Objeto real con la cámara (automático)", "Pones una caja (o un cartel, la pared…): la cámara reconoce qué es, la crea en el 3D con sus medidas y coloca el proyector donde está el real.", () => goToSection(app, "3d", "Objeto real con la cámara")],
       ["Calibrar el proyector con la cámara", "El proyector muestra franjas, la cámara las ve y tocas cada esquina en la foto: la cruz va sola.", () => goToSection(app, "3d", "Alinear con el proyector real")],
     ]],
     ["🛡 Estabilidad", [

@@ -8,6 +8,7 @@ import { animThumb } from "./thumbs.js";
 import { icon } from "./icons.js";
 import * as M from "./model.js";
 import { alignSection } from "./panels-3dcalib.js";
+import { autoSection } from "./panels-3dauto.js";
 
 let Mod = null;   // módulo three3d.js (carga diferida)
 
@@ -183,6 +184,7 @@ const panel3d = {
 
     // ---- Fácil: objeto → animaciones en sus caras → proyectores ----
     const easy = h("div", { class: "p3d-easy" });
+    easy.append(autoSection(app, st));
     easy.append(section("1 · Objeto",
       h("div", { class: "chips" }, ...Mod.KINDS_3D.map(([k, l]) => h("button", { class: "chip", onclick: () => { st.addObject(k); st.frameSelection(); app.changed({ panel: true }); app.commit(); } }, "+ " + l)),
         h("button", { class: "chip", onclick: () => importModel(app, st) }, "Importar modelo…")),

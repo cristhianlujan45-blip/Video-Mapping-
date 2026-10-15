@@ -108,14 +108,17 @@ async function cameraGrabber(key) {
   const g = c.getContext("2d", { willReadFrequently: true });
   return async () => { g.drawImage(v, 0, 0, w, hh); return g.getImageData(0, 0, w, hh); };
 }
+/** Franjas en las salidas y fotos de la cámara elegida → { map (cámara → proyector), photo }. */
+export async function scanCamera(app, st, onStep = () => {}) {
+  const grab = st.camGrab || await cameraGrabber(st.camKey);
+  return scanGray({ showPattern: (p) => app.actions.showPattern(p), grabFrame: grab, settle: st.camSettle ?? 450, firstSettle: st.camSettle ?? 900, onStep });
+}
 /** Escanea: franjas en las salidas, fotos de la cámara y el mapa cámara → proyector. */
 async function runScan(app, st, status) {
   if (st.camBusy) return;
   st.camBusy = true;
   try {
-    const grab = st.camGrab || await cameraGrabber(st.camKey);
-    const r = await scanGray({ showPattern: (p) => app.actions.showPattern(p), grabFrame: grab, settle: st.camSettle ?? 450, firstSettle: st.camSettle ?? 900,
-      onStep: (i, n) => { if (status.isConnected) status.textContent = `Escaneando… ${i}/${n} (no muevas la cámara ni el objeto)`; } });
+    const r = await scanCamera(app, st, (i, n) => { if (status.isConnected) status.textContent = `Escaneando… ${i}/${n} (no muevas la cámara ni el objeto)`; });
     if (r.map.coverage < 0.01) {
       st.camScan = null;
       toast(r.map.contrast < 25 ? "La cámara no ve cambiar la proyección: apúntala al objeto y comprueba que el proyector sale por su pantalla." : "La cámara casi no distingue las franjas: menos luz en la sala o la cámara más cerca.", "err");
@@ -163,13 +166,18 @@ function camPhoto(app, st, cal) {
   });
   return cv;
 }
-function cameraBox(app, st, cal) {
-  const status = h("small", { class: "dim" }, st.camScan ? `Último escaneo: la cámara ve el ${Math.round(st.camScan.map.coverage * 100)} % de la imagen.` : "");
+/** Selector de la cámara que ve el objeto (se recuerda mientras está abierto el 3D). */
+export function cameraSelect(app, st) {
   const sel = h("select", { class: "text-in small", title: "Cámara que ve el objeto" }, h("option", { value: "default" }, "Cámara principal"));
   navigator.mediaDevices?.enumerateDevices?.().then((ds) => {
     for (const d of ds.filter(x => x.kind === "videoinput" && x.deviceId)) sel.append(h("option", { value: d.deviceId, selected: st.camKey === d.deviceId }, d.label || "Cámara"));
   }).catch(() => {});
   sel.addEventListener("change", () => { st.camKey = sel.value; st.camScan = null; app.renderPanel(); });
+  return sel;
+}
+function cameraBox(app, st, cal) {
+  const status = h("small", { class: "dim" }, st.camScan ? `Último escaneo: la cámara ve el ${Math.round(st.camScan.map.coverage * 100)} % de la imagen.` : "");
+  const sel = cameraSelect(app, st);
   return h("div", { class: "calibcambox" },
     h("b", {}, "📷 Con la cámara (más fácil y exacto)"),
     hint("Pon una cámara (o el móvil como cámara) que vea el objeto con la proyección encima y no la muevas. LumaMap proyecta unas franjas (unos 20 s) y luego, en vez de arrastrar cada cruz, tocas su esquina en la foto."),

@@ -1343,6 +1343,69 @@ await test("3D para proyectar: lente por relación de proyección, ajuste fino, 
   await page.evaluate(async (keep) => { const a = window.__lumamap; (await import("./js/panels-3d.js")).closeWorkspace(a); a.edit(() => { a.S.project.stage3d.objects = []; a.S.project.stage3d.projectors = []; a.S.project.stage3d.faces = []; a.S.project.surfaces = a.S.project.surfaces.filter(s => keep.includes(s.id)); }); a.select(keep[0] || null); a.openTab(null); }, surfBefore);
 });
 
+await test("3D para proyectar: objeto real con la cámara (automático) — reconoce una caja, la pone en el 3D con sus medidas y el proyector donde está el real", async () => {
+  const actx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+  const g = await actx.newPage();
+  const errs = [];
+  g.on("pageerror", e => errs.push(e.message));
+  try {
+    await g.goto(base);
+    await g.waitForFunction(() => window.__lumamap?.S?.project, null, { timeout: 30000 });
+    await g.waitForTimeout(1500);
+    await g.evaluate(() => document.getElementById("modal")?._close?.(null));
+    await g.evaluate(() => window.__lumamap.openTab("3d"));
+    await g.locator("#panelBody .sec", { hasText: "Objeto real con la cámara" }).waitFor({ timeout: 30000 });
+    // La escena de verdad: caja de 60 × 40 × 50 cm en el suelo, pared detrás, el proyector real y una cámara a su lado.
+    const truth = await g.evaluate(async () => {
+      const a = window.__lumamap, st = a.stage3d, C = await import("./js/calib3d.js"), G = await import("./js/graycode.js");
+      const p = st.addProjector(); a.changed({ panel: true });
+      const R2D = 180 / Math.PI, look = (pos, t) => { const d = t.map((v, i) => v - pos[i]); return [Math.atan2(d[1], Math.hypot(d[0], d[2])) * R2D, Math.atan2(-d[0], -d[2]) * R2D, 0]; };
+      const proj = { pos: [1.1, 1.5, 2.4], rot: look([1.1, 1.5, 2.4], [0, 0.2, 0]), fov: p.fov, res: p.res, shift: [0, 0] };
+      const cam = { pos: [0.7, 1.35, 2.3], rot: look([0.7, 1.35, 2.3], [0, 0.2, 0]), fov: 45, res: [320, 240] };
+      const box = { min: [-0.3, 0, -0.25], max: [0.3, 0.4, 0.25] };
+      const hitBox = (o, d) => { let t0 = -Infinity, t1 = Infinity; for (let i = 0; i < 3; i++) { if (Math.abs(d[i]) < 1e-12) { if (o[i] < box.min[i] || o[i] > box.max[i]) return Infinity; continue; } let x = (box.min[i] - o[i]) / d[i], y = (box.max[i] - o[i]) / d[i]; if (x > y) [x, y] = [y, x]; t0 = Math.max(t0, x); t1 = Math.min(t1, y); } return t1 >= t0 && t0 > 1e-6 ? t0 : Infinity; };
+      // Para cada píxel de la cámara: el punto del proyector que lo ilumina (o nada).
+      const W = 320, H = 240, uvAt = new Float32Array(W * H * 2).fill(NaN), Rc = C.eulerToMat(cam.rot), tc = Math.tan(cam.fov * Math.PI / 360);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const c = [((x + 0.5) / W - 0.5) * 2 * (W / H) * tc, -((y + 0.5) / H - 0.5) * 2 * tc, -1], d = [0, 1, 2].map(i => Rc[i][0] * c[0] + Rc[i][1] * c[1] + Rc[i][2] * c[2]), o = cam.pos;
+        let t = hitBox(o, d); if (d[1] < 0) t = Math.min(t, -o[1] / d[1]); if (d[2] < 0) t = Math.min(t, (-1.2 - o[2]) / d[2]);
+        if (!Number.isFinite(t)) continue;
+        const P = o.map((v, i) => v + d[i] * t), toP = P.map((v, i) => v - proj.pos[i]), dist = Math.hypot(...toP);
+        if (hitBox(proj.pos, toP.map(v => v / dist)) < dist - 1e-4) continue;
+        const uv = C.projectPoint(proj, P);
+        if (uv && uv[0] >= 0 && uv[0] < 1 && uv[1] >= 0 && uv[1] < 1) { uvAt[(y * W + x) * 2] = uv[0]; uvAt[(y * W + x) * 2 + 1] = uv[1]; }
+      }
+      st.camSettle = 5;
+      st.camGrab = async () => {
+        const pat = a.S.pattern, img = new ImageData(W, H);
+        for (let i = 0; i < W * H; i++) {
+          const u = uvAt[i * 2], v = uvAt[i * 2 + 1];
+          let on = 0;
+          if (!Number.isNaN(u)) { if (pat === "white") on = 1; else if (pat?.startsWith("gray:")) { const [, ax, k, b, inv] = pat.split(":"); on = G.grayBit(Math.floor((ax === "x" ? u : v) * (1 << +b)), +k, +b) ^ +inv; } }
+          const l = 30 + 190 * on; img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = l; img.data[i * 4 + 3] = 255;
+        }
+        return img;
+      };
+      return { pos: proj.pos };
+    });
+    await g.locator("#panelBody input[placeholder=ancho]").fill("60");
+    await g.locator("#panelBody input[placeholder=ancho]").dispatchEvent("change");
+    await g.locator("#panelBody").getByRole("button", { name: /Detectar el objeto y calibrar/ }).click();
+    await g.locator("#panelBody .autokind", { hasText: "Caja" }).waitFor({ timeout: 240000 });
+    assert.match(await g.locator("#panelBody .autokind").textContent(), /3 caras/);
+    assert.equal(await g.locator("#panelBody .sec", { hasText: "Objeto real con la cámara" }).locator("canvas.calibcam").count(), 1, "foto con las caras marcadas");
+    assert.equal(await g.evaluate(() => window.__lumamap.S.pattern), null, "sin franjas al terminar");
+    await g.locator("#panelBody").getByRole("button", { name: /Poner la caja en el 3D/ }).click();
+    const got = await g.evaluate(() => { const d = window.__lumamap.S.project.stage3d, o = d.objects.find(x => x.name === "Caja detectada"), p = d.projectors[0]; return { scale: o?.scale, pos: o?.pos, ppos: p.pos, wire: p.wire }; });
+    const dims = [...got.scale].sort((x, y) => x - y), real = [0.4, 0.5, 0.6];
+    dims.forEach((v, i) => assert.ok(Math.abs(v - real[i]) / real[i] < 0.2, "medidas " + JSON.stringify(got.scale)));
+    assert.ok(Math.abs(got.pos[1] - got.scale[1] / 2) < 1e-3, "apoyada en el suelo");
+    const dist = Math.hypot(...got.ppos), realDist = Math.hypot(...truth.pos);
+    assert.ok(Math.abs(dist - realDist) < 0.3, `proyector a ${dist.toFixed(2)} m (real ${realDist.toFixed(2)})`);
+    assert.equal(got.wire, true, "malla encendida para comprobarlo en el objeto real");
+    assert.deepEqual(errs, []);
+  } finally { await actx.close(); }
+});
 await test("comparador antes/después en Efectos: a un lado de la línea el original, al otro con el efecto (y no sale en la proyección)", async () => {
   await page.bringToFront();
   // Solo se ve esta superficie (otras pruebas dejan rojo en las demás, p. ej. la paleta del VJ).
@@ -1525,8 +1588,7 @@ await test("novedades: tras actualizar salen solas con la versión, y cada «Abr
     for (const t of ["Red de nodos", "Señales en vivo", "Mi panel", "Línea de tiempo del show", "Exportar el show a video", "Calibrar el proyector con la cámara"]) assert.ok(await dlg.locator(".newsitem", { hasText: t }).count(), t);
     // Señales: lleva a la pestaña Audio y a su sección, resaltada.
     await dlg.locator(".newsitem", { hasText: "Señales en vivo" }).getByRole("button", { name: "Abrir" }).click();
-    await g.waitForFunction(() => window.__lumamap.S.tab === "audio" && !!document.querySelector("#panelBody .sec.flash"), null, { timeout: 10000 });
-    assert.match(await g.locator("#panelBody .sec.flash h3").textContent(), /Señales en vivo/);
+    await g.waitForFunction(() => window.__lumamap.S.tab === "audio" && /Señales en vivo/.test(document.querySelector("#panelBody .sec.flash h3")?.textContent || ""), null, { timeout: 10000 });
     // Ya vistas: al recargar no salen otra vez; se abren desde ☰ o con el botón de arriba.
     await g.reload(); await g.waitForFunction(() => window.__lumamap?.S?.project, null, { timeout: 30000 });
     await g.waitForTimeout(3500);
