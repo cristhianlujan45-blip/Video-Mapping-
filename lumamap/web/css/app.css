@@ -712,6 +712,8 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 
 /* ---- Línea de tiempo del show (Escenas) ---- */
 .tlscroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); margin-top: 6px; }
+.exbar { height: 10px; border-radius: 6px; background: var(--bg2); border: 1px solid var(--line); overflow: hidden; margin: 8px 0; }
+.exbar i { display: block; height: 100%; width: 0; background: var(--acc); transition: width .2s; }
 .tlinner { position: relative; padding-bottom: 6px; min-width: 100%; }
 .tlruler { position: relative; height: 22px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .tlruler span { position: absolute; top: 3px; font-size: 10.5px; color: var(--dim); transform: translateX(-50%); white-space: nowrap; }

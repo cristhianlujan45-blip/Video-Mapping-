@@ -54,6 +54,8 @@ import { TimerEngine } from "./timers.js";
 import { buildProjectContext } from "./ai/context.js";
 import { Remote } from "./remote.js";
 import { startNetOut, netOutAvailable } from "./netout.js";
+import { planShow, frameAt, videoTimeAt, OfflineAnalyser, pickVideoCodec, pickAudioCodec, bitrateFor } from "./exportshow.js";
+import { Mp4Muxer, MemorySink } from "./mp4mux.js";
 import { recordLoss, readGuard, resetGuard, Watchdog, GUARD_CAPS } from "./gpuguard.js";
 import * as Updater from "./updater.js";
 
@@ -1945,6 +1947,160 @@ A.record = () => {
   toast(`Grabando ${o.canvas.width}×${o.canvas.height} a ${rec.fps} fps… vuelve a pulsar Grabar para terminar`);
 };
 
+
+/* ---- Exportar el show a video (exportshow.js + mp4mux.js) ----
+   No es una grabación de la pantalla: cada fotograma se dibuja en su instante exacto (escena,
+   transición, automatización, LFO, videos en su posición, sonido de la canción) y se codifica,
+   tarde lo que tarde. Así sale un 4K sin saltos aunque el equipo no pueda moverlo en directo. */
+A.exportInfo = () => {
+  const songDur = song?.el.duration || 0;
+  const plan = planShow(S.project, { songShow: S.songShow && song ? S.songShow : null, songDuration: songDur });
+  const cams = S.project.scenes.some(sc => Object.values(sc.looks).some(l => l.source?.type === "camera"));
+  return { plan, song: song ? { name: song.name, duration: songDur } : null, can: typeof VideoEncoder !== "undefined", maxH: /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 1080 : 2160, cams };
+};
+/** Archivo donde ir escribiendo (escritorio y navegador de PC): así un show largo en 4K no llena la memoria. */
+A.exportPickFile = async (name) => {
+  if (!window.showSaveFilePicker || window.LumaAndroid) return null;
+  const handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: "Video MP4", accept: { "video/mp4": [".mp4"] } }] });
+  return handle;
+};
+A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = true, file = null, onProgress = () => {}, signal = null } = {}) => {
+  if (S.exporting) throw new Error("Ya hay una exportación en marcha");
+  if (S.rec) A.record();
+  const P = S.project, info = A.exportInfo(), plan = info.plan;
+  if (!(plan.total > 0) || !plan.blocks.length) throw new Error("El show está vacío");
+  const N = Math.max(1, Math.round(plan.total * fps));
+  // Medios de todas las escenas, cargados antes de empezar.
+  await Promise.all([...M.usedMediaIds(P)].map(id => pool.ensure(id)));
+  const o = offscreenRenderer(true, Math.min(height, info.maxH));
+  const W = o.canvas.width, H = o.canvas.height;
+  const vc = await pickVideoCodec(W, H, fps, bitrateFor(W, H, fps, quality));
+  if (!vc) { o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); throw new Error(`Este equipo no puede codificar video a ${W}×${H}. Prueba con menos resolución.`); }
+  // La canción: decodificada entera (a 48 kHz) para el sonido del video y para que lo que reacciona al ritmo reaccione igual.
+  let pcm = null, ac = null;
+  if (song && withSong) {
+    try {
+      const buf = await (await fetch(song.url)).arrayBuffer();
+      const ab = await new OfflineAudioContext(2, 1, 48000).decodeAudioData(buf);
+      pcm = [ab.getChannelData(0), ab.numberOfChannels > 1 ? ab.getChannelData(1) : ab.getChannelData(0)];
+      ac = await pickAudioCodec(48000, 2);
+    } catch (e) { console.warn(e); pcm = null; }
+  }
+  // Dónde se guarda: en el archivo elegido (por partes) o en memoria (móvil).
+  let sink, writable = null, wq = Promise.resolve(), wErr = null;
+  if (file) {
+    writable = await file.createWritable();
+    sink = { bytes: 0, write(d) { this.bytes += d.length; wq = wq.then(() => writable.write(d)).catch((e) => { wErr = e; }); } };
+  } else sink = new MemorySink();
+  const mux = new Mp4Muxer({ video: { codec: vc.kind, codecString: vc.config.codec, width: W, height: H, fps }, audio: ac && pcm ? { codec: ac.kind, sampleRate: 48000, channels: 2 } : null, sink });
+  if (writable) wq = wq.then(() => writable.write(mux.head()));
+  let encErr = null;
+  const copy = (chunk) => { const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d); return d; };
+  // Estado del directo: se guarda y se devuelve al terminar.
+  const saved = { sceneId: P.sceneId, clock: S.clock, sceneStart: S.sceneStart, tr: S.tr, levels: S.levels, lumaAudio: globalThis.__lumaAudio, chase: show?.cfg?.chase, mods: S.mods };
+  const vids = new Map();
+  S.exporting = { n: N, i: 0 };
+  updateChrome();
+  try {
+    // 1) Sonido (rápido): toda la duración del show.
+    if (ac && pcm) {
+      const aenc = new AudioEncoder({ output: (chunk, meta) => { if (meta?.decoderConfig?.description) mux.setAudioDescription(meta.decoderConfig.description); mux.addAudio(copy(chunk), { duration: chunk.duration }); }, error: (e) => { encErr = e; } });
+      aenc.configure(ac.config);
+      const total = Math.min(pcm[0].length, Math.ceil(plan.total * 48000));
+      for (let s0 = 0; s0 < total && !encErr; s0 += 4800) {
+        const n = Math.min(4800, total - s0), data = new Float32Array(n * 2);
+        data.set(pcm[0].subarray(s0, s0 + n), 0); data.set(pcm[1].subarray(s0, s0 + n), n);
+        const ad = new AudioData({ format: "f32-planar", sampleRate: 48000, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(s0 * 1e6 / 48000), data });
+        aenc.encode(ad); ad.close();
+        while (aenc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 1));
+      }
+      await aenc.flush(); aenc.close();
+    }
+    // 2) Video, fotograma a fotograma.
+    const venc = new VideoEncoder({ output: (chunk, meta) => { if (meta?.decoderConfig?.description) mux.setVideoDescription(meta.decoderConfig.description); mux.addVideo(copy(chunk), { key: chunk.type === "key", timestamp: chunk.timestamp, duration: chunk.duration }); }, error: (e) => { encErr = e; } });
+    venc.configure(vc.config);
+    const ae = new AudioEngine(), bpm = P.settings.bpm || 120;
+    ae.setBpm(bpm, 10000);
+    if (pcm) { ae.analyser = new OfflineAnalyser(pcm, 48000); ae.ctx = { state: "running", sampleRate: 48000, resume: () => Promise.resolve() }; ae.bins = new Uint8Array(512); }
+    const fftB = new Uint8Array(256), waveB = new Uint8Array(256);
+    globalThis.__lumaAudio = () => ae.analyser ? { fft: spectrum256(ae.bins, fftB), wave: ae.wave(waveB) } : null;
+    if (show?.cfg) show.cfg.chase = false;
+    const lfo = createLfoClock();
+    for (const r of pool.videos()) { vids.set(r.id, !r.el.paused); r.el.pause(); }
+    const t0 = performance.now();
+    for (let i = 0; i < N; i++) {
+      if (signal?.aborted) throw new DOMException("Exportación cancelada", "AbortError");
+      if (encErr) throw encErr;
+      if (wErr) throw wErr;
+      const T = i / fps, f = frameAt(plan, P, T);
+      P.sceneId = f.sceneId; S.clock = T; S.sceneStart = f.sceneStart; S.tr = f.tr;
+      if (ae.analyser) ae.analyser.setTime(T);
+      S.levels = ae.update(10000 + T * 1000);
+      show?.tick();
+      lfo.tick(T, S.levels.bpm || bpm, P.settings.lfos, (l, w) => {
+        const d = describe(app, l.param);
+        if (d && d.kind !== "trigger") params.modulateExt("lfo:" + l.id, l.param, d.kind === "bool" ? (w >= 0.5 ? 1 : 0) : d.min + (d.max - d.min) * w, "lfo");
+      }, true, S.levels);
+      S.mods = params.modList();
+      const RP = applyModList(P, S.master, S.mods);
+      const layers = sceneLayers(RP.project, S.tr, T * 1000);
+      // Videos en su sitio: cada uno desde que empezó su escena (con su transporte).
+      const waits = [];
+      for (const ly of layers) {
+        const el0 = ly.scene.id === f.sceneId ? f.elapsed : Math.max(0, T - f.prevStart);
+        for (const l of Object.values(ly.scene.looks)) {
+          if (l.source?.type !== "media") continue;
+          const rt = pool.items.get(l.source.mediaId);
+          if (rt?.kind !== "video" || !(rt.el.duration > 0)) continue;
+          const want = videoTimeAt(l.play, rt.el.duration, el0, l.rate || 1, S.levels.bpm || bpm);
+          if (Math.abs(rt.el.currentTime - want) > 0.25 / fps) waits.push(new Promise((res) => {
+            const done = () => { clearTimeout(tm); res(); };
+            const tm = setTimeout(done, 4000);
+            rt.el.addEventListener("seeked", done, { once: true });
+            try { rt.el.currentTime = want; } catch { done(); }
+          }));
+        }
+      }
+      if (waits.length) await Promise.all(waits);
+      if (app.stage3d) { try { app.stage3d.tick({ project: RP.project, layers, time: T, levels: S.levels, master: RP.master }); } catch (e) { console.error("3D", e); } }
+      o.comp.frame(RP.project, { layers, time: T, levels: S.levels, view: o.view, master: RP.master, blackout: false, clear: [0, 0, 0, 1], live: null });
+      const vf = new VideoFrame(o.canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
+      venc.encode(vf, { keyFrame: i % (fps * 2) === 0 });
+      vf.close();
+      while (venc.encodeQueueSize > 2 && !encErr) await new Promise(r => setTimeout(r, 1));
+      S.exporting.i = i + 1;
+      const el = (performance.now() - t0) / 1000;
+      onProgress({ i: i + 1, n: N, t: T, total: plan.total, eta: el / (i + 1) * (N - i - 1), w: W, h: H, codec: vc.kind, audio: !!(ac && pcm) });
+      await new Promise(r => setTimeout(r, 0));   // que la interfaz respire (progreso, Cancelar)
+    }
+    await venc.flush(); venc.close();
+    if (encErr) throw encErr;
+    const { head, moov } = mux.finish();
+    const name = `${(P.name || "show").replace(/[^\w\- áéíóúñÁÉÍÓÚÑ]+/g, "").trim() || "show"}-${H}p.mp4`;
+    let size;
+    if (writable) {
+      wq = wq.then(() => writable.write(moov)).then(() => writable.write({ type: "write", position: 0, data: head }));
+      await wq; if (wErr) throw wErr;
+      await writable.close(); writable = null;
+      size = sink.bytes + head.length + moov.length;
+    } else {
+      const blob = sink.blob(head, moov); size = blob.size;
+      await saveBlob(name, blob);
+    }
+    return { width: W, height: H, fps, frames: N, seconds: plan.total, codec: vc.kind === "avc" ? "H.264" : "VP9", audio: ac && pcm ? (ac.kind === "aac" ? "AAC" : "Opus") : null, size, name: file?.name || name };
+  } finally {
+    if (writable) { try { await writable.abort?.(); } catch {} }
+    P.sceneId = saved.sceneId; S.clock = saved.clock; S.sceneStart = saved.sceneStart; S.tr = saved.tr; S.levels = saved.levels; S.mods = saved.mods;
+    globalThis.__lumaAudio = saved.lumaAudio;
+    if (show?.cfg && saved.chase !== undefined) show.cfg.chase = saved.chase;
+    for (const [id, was] of vids) { const r = pool.items.get(id); if (r && was && S.playing) r.el.play().catch(() => {}); }
+    o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    S.exporting = null;
+    updateChrome();
+    changed({ panel: true });
+  }
+};
+
 /* ======================================================================
    Modos y vista
    ====================================================================== */
@@ -2849,7 +3005,7 @@ function rafLoop(t) { requestAnimationFrame(rafLoop); runFrame(t); }
 const editorFpsCap = () => S.previewFps === -1 ? 0 : S.previewFps === 30 ? 30 : 60;
 let lastPreviewDraw = 0;
 function runFrame(now) {
-  if (inFrame || now - lastRun < 4 || window.__lumaPause) return;   // __lumaPause: pruebas (congelar para capturar)
+  if (inFrame || now - lastRun < 4 || window.__lumaPause || S.exporting) return;   // exportando: el render va fotograma a fotograma   // __lumaPause: pruebas (congelar para capturar)
   // Sin salidas abiertas, todo el editor va al límite; con salidas, la lógica sigue a su ritmo
   // (para que el proyector no dé saltos) y solo se limita el dibujo de la vista previa.
   const cap = editorFpsCap();

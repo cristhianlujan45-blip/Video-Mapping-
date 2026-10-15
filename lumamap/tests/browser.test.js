@@ -1401,6 +1401,80 @@ await test("si la tarjeta gráfica no puede con el dibujo: pantalla clara con el
     assert.ok(await g.locator("#gpuCopy").count() && await g.locator("#gpuRetry").count());
   } finally { await gctx.close(); }
 });
+await test("Escenas y show: exportar el show a video (MP4 fotograma a fotograma, con la canción): cada escena en su segundo", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const ectx = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
+  const g = await ectx.newPage();
+  const errs = [];
+  g.on("pageerror", e => errs.push(e.message));
+  try {
+    await g.goto(base);
+    await g.waitForFunction(() => window.__lumamap?.S?.project, null, { timeout: 30000 });
+    await g.waitForTimeout(1500);   // la bienvenida (perfil nuevo) prepara su proyecto
+    await g.evaluate(() => document.getElementById("modal")?._close?.(null));
+    await g.waitForTimeout(500);
+    await g.evaluate(async () => {
+      const a = window.__lumamap, A = a.actions, P = a.S.project;
+      window.showSaveFilePicker = undefined;            // sin acceso a archivos: se guarda al final (como en el móvil)
+      if (!P.surfaces.length) A.addQuad?.();
+      while (P.scenes.length < 2) A.addScene();
+      while (P.scenes.length > 2) P.scenes.pop();
+      const paint = (sc, color) => { for (const l of Object.values(sc.looks)) { l.source = { type: "color", color }; l.fx = { ...l.fx }; } };
+      a.edit(() => {
+        paint(P.scenes[0], "#ff0000"); paint(P.scenes[1], "#0000ff");
+        P.scenes[0].duration = 1; P.scenes[1].duration = 1; P.scenes[1].transition = "fade"; P.scenes[1].trMs = 300;
+        for (const s of P.surfaces) s.hidden = false;
+      });
+      A.goScene(P.scenes[1].id, { instant: true });
+      // Canción de 2 s (WAV hecho aquí): debe sonar en el video.
+      const sr = 48000, n = sr * 2, buf = new ArrayBuffer(44 + n * 4), dv = new DataView(buf);
+      const w = (o, s) => [...s].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+      w(0, "RIFF"); dv.setUint32(4, 36 + n * 4, true); w(8, "WAVEfmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true);
+      dv.setUint32(24, sr, true); dv.setUint32(28, sr * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); w(36, "data"); dv.setUint32(40, n * 4, true);
+      for (let i = 0; i < n; i++) { const v = Math.round(Math.sin(2 * Math.PI * 440 * i / sr) * 12000); dv.setInt16(44 + i * 4, v, true); dv.setInt16(46 + i * 4, v, true); }
+      A.loadSong(new File([buf], "prueba.wav", { type: "audio/wav" }));
+      await new Promise(r => setTimeout(r, 300));
+      a.openTab("scenes");
+    });
+    const tl = g.locator("#panelBody .sec", { hasText: "Línea de tiempo" });
+    await tl.locator("button", { hasText: "Exportar video" }).click();
+    const dlg = g.locator("#modal.show");
+    await dlg.locator("h2", { hasText: "Exportar el show a video" }).waitFor();
+    assert.match(await dlg.textContent(), /Show de 0:02/);
+    assert.match(await dlg.textContent(), /Con la canción «prueba»/);
+    await dlg.locator(".seg button", { hasText: "720p" }).click();
+    await dlg.locator(".seg button", { hasText: /^24$/ }).click();
+    const sceneBefore = await g.evaluate(() => window.__lumamap.S.project.sceneId);
+    const dl = g.waitForEvent("download", { timeout: 180000 });
+    dl.catch(() => {});
+    await dlg.locator("button", { hasText: "🎬 Exportar" }).click();
+    await dlg.locator("p", { hasText: /Video listo|No se pudo|cancelada/ }).waitFor({ timeout: 180000 });
+    const res = await dlg.locator("p").first().textContent();
+    assert.match(res, /Video listo/, "resultado: " + res);
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-exp-")), "show.mp4");
+    await (await dl).saveAs(file);
+    assert.match(await dlg.textContent(), /1280×720 a 24 fps/);
+    // Vuelve todo a como estaba (escena, ya no exporta).
+    assert.deepEqual(await g.evaluate(() => [window.__lumamap.S.project.sceneId, !!window.__lumamap.S.exporting]), [sceneBefore, false]);
+    const bytes = fs.readFileSync(file);
+    assert.equal(bytes.subarray(4, 8).toString(), "ftyp");
+    let ok = false; try { execFileSync("ffprobe", ["-version"], { stdio: "ignore" }); ok = true; } catch {}
+    if (ok) {
+      const p = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-print_format", "json", "-show_streams", "-show_format", "-count_frames", file]).toString());
+      const vs = p.streams.find(s => s.codec_type === "video"), as = p.streams.find(s => s.codec_type === "audio");
+      assert.equal(vs.width, 1280); assert.equal(vs.height, 720); assert.equal(+vs.nb_read_frames, 48, "2 s a 24 fps"); assert.equal(vs.r_frame_rate, "24/1");
+      assert.ok(as, "con sonido"); assert.equal(+as.sample_rate, 48000);
+      assert.ok(Math.abs(+p.format.duration - 2) < 0.15, "dura 2 s: " + p.format.duration);
+      assert.equal(execFileSync("ffmpeg", ["-v", "error", "-i", file, "-f", "null", "-"], { stdio: ["ignore", "pipe", "pipe"] }).toString().trim(), "", "se decodifica sin errores");
+      // Color medio del centro en un instante: rojo en la escena 1, azul en la 2.
+      const at = (t) => { const b = execFileSync("ffmpeg", ["-v", "error", "-ss", String(t), "-i", file, "-frames:v", "1", "-vf", "crop=iw/4:ih/4,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]); return [...b.subarray(0, 3)]; };
+      const [r1, , b1] = at(0.5), [r2, , b2] = at(1.7);
+      assert.ok(r1 > 150 && b1 < 80, `0,5 s rojo: ${at(0.5)}`);
+      assert.ok(b2 > 150 && r2 < 80, `1,7 s azul: ${at(1.7)}`);
+    } else console.log("    (sin ffmpeg: solo se comprueba que es un MP4)");
+    assert.deepEqual(errs, []);
+  } finally { await ectx.close(); }
+});
 await test("si Windows reinicia la tarjeta gráfica: protege (shaders a menos resolución), avisa y no recarga en bucle", async () => {
   const gctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const g = await gctx.newPage();

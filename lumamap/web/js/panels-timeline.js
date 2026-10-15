@@ -7,22 +7,13 @@
 // una copia aparte, así que la lista de escenas y la línea de tiempo siempre dicen lo mismo.
 import { h, section, row, btn, segmented, hint, toast } from "./ui.js";
 import { LIGHT_FX } from "./lightfx.js";
+import { layoutShow, MANUAL } from "./exportshow.js";
+import { openExport } from "./panels-export.js";
 
-const MANUAL = 8;          // lo que ocupa en el dibujo una escena «manual» (sin duración)
 const ui = { zoom: "fit" };
 const COLS = ["#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6", "#8b5cf6"];
-
-/** Inicio y largo de cada escena en la línea de tiempo (segundos). */
-export function layoutShow(scenes) {
-  let t = 0;
-  const out = scenes.map((sc) => {
-    const len = sc.duration > 0 ? sc.duration : MANUAL;
-    const b = { id: sc.id, start: t, len, manual: !(sc.duration > 0) };
-    t += len;
-    return b;
-  });
-  return { blocks: out, total: t };
-}
+// Inicio y largo de cada escena: lo mismo que usa «Exportar el show a video».
+export { layoutShow };
 export const fmtTime = (s) => { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
 export function timelineSection(app) {
@@ -114,12 +105,12 @@ export function timelineSection(app) {
   // Cabezal: por dónde va el show.
   const head = h("i", { class: "tlhead" });
   inner.append(head);
-  const tick = () => {
-    if (!head.isConnected) return;
+  const place = () => {
     const i = P.scenes.findIndex(s => s.id === P.sceneId), b = blocks[i];
-    if (b) head.style.left = x(b.start + Math.min(b.len, Math.max(0, S.clock - S.sceneStart))) + "px";
-    requestAnimationFrame(tick);
+    head.style.left = x(b ? b.start + Math.min(b.len, Math.max(0, S.clock - S.sceneStart)) : 0) + "px";
   };
+  place();   // ya en su sitio al dibujar el panel (no un fotograma después)
+  const tick = () => { if (!head.isConnected) return; place(); requestAnimationFrame(tick); };
   requestAnimationFrame(tick);
 
   const autoN = blocks.filter(b => !b.manual).length;
@@ -132,7 +123,8 @@ export function timelineSection(app) {
         S.sceneStart = S.clock;
         if (!S.playing) A.togglePlay();
         app.renderPanel();
-      } })),
+      } }),
+      btn({ label: "🎬 Exportar video", kind: "small", title: "Todo el show en un MP4 de hasta 4K, fotograma a fotograma", onClick: () => openExport(app) })),
     autoN < blocks.length ? hint(`${blocks.length - autoN} escena(s) manual(es): ocupan ${MANUAL} s en el dibujo; dales una duración arrastrando su borde.`) : null,
     h("div", { class: "tlscroll" }, inner));
 }
