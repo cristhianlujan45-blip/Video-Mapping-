@@ -53,8 +53,10 @@ setOnFail(async (name) => {
   if (process.env.SHOTS_DIR) { fs.mkdirSync(process.env.SHOTS_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.SHOTS_DIR, `${String(++shotN).padStart(2, "0")}-${name.replace(/[^\w]+/g, "_").slice(0, 60)}.png`) }); }
   // Que un diálogo que quedó abierto no haga fallar también a las pruebas siguientes.
   // (y lo que sigue en marcha solo: VJ, autopiloto de la mesa, LFO; el editor vuelve al frente)
-  await page.evaluate(() => { const a = window.__lumamap; a?.params?.cancelLearn?.(); for (let i = 0; i < 3; i++) document.getElementById("modal")?._close?.(null); a?.openTab?.(null);
-    if (a) { a.actions.vjStop?.(); const P = a.S.project.settings; P.deck.autopilot = 0; P.deck.quantize = "off"; P.deck.cells = {}; P.lfos = []; a.S.compare = null; } }).catch(() => {});
+  await page.evaluate(async () => { const a = window.__lumamap; a?.params?.cancelLearn?.(); for (let i = 0; i < 3; i++) document.getElementById("modal")?._close?.(null); a?.openTab?.(null);
+    if (a) { a.actions.vjStop?.(); const P = a.S.project.settings; P.deck.autopilot = 0; P.deck.quantize = "off"; P.deck.cells = {}; P.lfos = []; a.S.compare = null; a.actions.showPattern?.(null); }
+    // El espacio 3D abierto sigue dibujando (por software en la CI) y frena a todas las pruebas siguientes.
+    if (a?.stage3d) { try { (await import("./js/panels-3d.js")).closeWorkspace(a); } catch {} } }).catch(() => {});
   await page.bringToFront().catch(() => {});
 });
 await page.goto(base);
@@ -1314,7 +1316,7 @@ await test("3D para proyectar: lente por relación de proyección, ajuste fino, 
   });
   await page.locator("#panelBody").getByRole("button", { name: "Escanear con la cámara" }).click();
   const photo = page.locator("#panelBody .calibcam");
-  await photo.waitFor({ timeout: 30000 });
+  await photo.waitFor({ timeout: 120000 });   // 42 patrones; en la CI cada fotograma del 3D va por software
   assert.equal(await page.evaluate(() => window.__lumamap.S.pattern), null, "al terminar se quitan las franjas");
   await photo.scrollIntoViewIfNeeded();
   const pb = await photo.boundingBox();
@@ -1474,10 +1476,10 @@ await test("Escenas y show: exportar el show a video (MP4 fotograma a fotograma,
     await dlg.locator(".seg button", { hasText: "720p" }).click();
     await dlg.locator(".seg button", { hasText: /^24$/ }).click();
     const sceneBefore = await g.evaluate(() => window.__lumamap.S.project.sceneId);
-    const dl = g.waitForEvent("download", { timeout: 180000 });
+    const dl = g.waitForEvent("download", { timeout: 300000 });
     dl.catch(() => {});
     await dlg.locator("button", { hasText: "🎬 Exportar" }).click();
-    await dlg.locator("p", { hasText: /Video listo|No se pudo|cancelada/ }).waitFor({ timeout: 180000 });
+    await dlg.locator("p", { hasText: /Video listo|No se pudo|cancelada/ }).waitFor({ timeout: 300000 });
     const res = await dlg.locator("p").first().textContent();
     assert.match(res, /Video listo/, "resultado: " + res);
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-exp-")), "show.mp4");
