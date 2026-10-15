@@ -449,7 +449,7 @@ export const ACTIONS = {
     label: "Abrir un panel", params: { tab: TABS.join("|") },
     check: (app, p) => ({ tab: oneOf(p.tab, "tab", TABS) }),
     text: (app, p) => `Abrir el panel «${p.tab}»`,
-    run: (app, p) => { const pro = ["show", "tracking", "control", "perf"]; if (pro.includes(p.tab)) app.setPro(true); if (app.S.tab !== p.tab) app.openTab(p.tab); return "Panel abierto"; },
+    run: (app, p) => { const pro = ["tracking", "control", "perf"]; if (pro.includes(p.tab)) app.setPro(true); if (app.S.tab !== p.tab) app.openTab(p.tab); return "Panel abierto"; },
   },
   start_lesson: {
     label: "Lección de la academia", params: { level: "1-12 (11 = nodos y señales como TouchDesigner, 12 = efectos de cámara y filtros)" },

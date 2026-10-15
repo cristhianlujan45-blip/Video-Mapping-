@@ -142,6 +142,9 @@ let dropHandler = null, hoverHandler = null;
 export function setDropTarget(onDrop, onHover) { dropHandler = onDrop; hoverHandler = onHover; }
 export function draggable(el, getPayload) {
   el.classList.add("dragsrc");
+  // Sin esto, con el ratón, una miniatura ya cargada empieza el arrastre de imagen del navegador
+  // (y este cancela el nuestro: lo soltado no llegaba a la superficie).
+  el.addEventListener("dragstart", (e) => e.preventDefault());
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !dropHandler) return;
     const sx = e.clientX, sy = e.clientY, touch = e.pointerType !== "mouse";

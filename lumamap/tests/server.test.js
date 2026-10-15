@@ -194,6 +194,60 @@ await test("móvil por cable USB: sus imágenes JPEG llegan al motor con su nomb
   assert.equal(fake, false); assert.equal(leaked, false);
   display.sock.end(); ctl.sock.end(); cam.sock.end();
 });
+await test("salida por red: el motor manda la proyección en JPEG y sale por /stream.mjpg y /frame.jpg (para OBS, vMix, TouchDesigner)", async () => {
+  const http = await import("node:http");
+  // Sin nada enviado todavía: lo dice claro.
+  const r0 = await fetch(base + "/frame.jpg");
+  assert.equal(r0.status, 503); assert.match(await r0.text(), /Salida por red/);
+  const display = wsClient(port, "display");
+  await nextMsg(display, "__open");
+  const jpeg = (n) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(n), Buffer.from([0xff, 0xd9])]);
+  const f1 = jpeg(20000);
+  display.sock.write(encodeFrame(f1, { mask: true, opcode: 0x2 }));
+  await new Promise(r => setTimeout(r, 150));
+  const r1 = await fetch(base + "/frame.jpg");
+  assert.equal(r1.headers.get("content-type"), "image/jpeg");
+  assert.deepEqual(Buffer.from(await r1.arrayBuffer()), f1);
+  // El video: partes JPEG una detrás de otra; llega la actual y la siguiente.
+  const parts = [];
+  const req = http.get(base + "/stream.mjpg");
+  const done = new Promise((resolve, reject) => {
+    req.on("response", (res) => {
+      assert.match(res.headers["content-type"], /multipart\/x-mixed-replace; boundary=lumaframe/);
+      let buf = Buffer.alloc(0);
+      res.on("data", (d) => {
+        buf = Buffer.concat([buf, d]);
+        for (;;) {
+          const h = buf.indexOf("\r\n\r\n"); if (h < 0) break;
+          const len = +/Content-Length: (\d+)/.exec(buf.subarray(0, h).toString())[1];
+          if (buf.length < h + 4 + len) break;
+          parts.push(buf.subarray(h + 4, h + 4 + len)); buf = buf.subarray(h + 4 + len + 2);
+          if (parts.length === 2) { req.destroy(); resolve(); return; }
+        }
+      });
+    }).on("error", (e) => { if (parts.length < 2) reject(e); });
+  });
+  await new Promise(r => setTimeout(r, 100));
+  const f2 = jpeg(5000);
+  display.sock.write(encodeFrame(f2, { mask: true, opcode: 0x2 }));
+  await done;
+  assert.deepEqual(parts[0], f1); assert.deepEqual(parts[1], f2);
+  // Lo que no es JPEG no entra; y una cámara no puede ponerse como salida.
+  display.sock.write(encodeFrame(Buffer.from("no soy una imagen"), { mask: true, opcode: 0x2 }));
+  const cam = wsClient(port, "camera", { camId: "c9" });
+  await nextMsg(cam, "auth");
+  cam.sock.write(encodeFrame(jpeg(100), { mask: true, opcode: 0x2 }));
+  await new Promise(r => setTimeout(r, 150));
+  assert.deepEqual(Buffer.from(await (await fetch(base + "/frame.jpg")).arrayBuffer()), f2);
+  display.sock.end(); cam.sock.end();
+  // Con código, la dirección necesita ?pin=.
+  const s3 = createServer({ port: 0, osc: false, pin: "7777" });
+  await new Promise(r => s3.listen(0, "127.0.0.1", r));
+  const b3 = `http://127.0.0.1:${s3.address().port}`;
+  assert.equal((await fetch(b3 + "/frame.jpg")).status, 401);
+  assert.notEqual((await fetch(b3 + "/frame.jpg?pin=7777")).status, 401);
+  s3.closeAllConnections?.(); s3.close();
+});
 await test("con código (PIN): una cámara sin el código no entra y el motor no la ve", async () => {
   const s2 = createServer({ port: 0, osc: false, pin: "4321" });
   await new Promise(r => s2.listen(0, "127.0.0.1", r));

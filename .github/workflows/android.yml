@@ -39,15 +39,10 @@ jobs:
       - name: Unit tests (core + app)
         run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
 
-      - name: Build APKs
-        run: ./gradlew --no-daemon :app:assembleDebug :lumamap:assembleRelease
-
-      - name: Upload LUJAN MAPPING debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: lujan-mapping-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+      # Una sola app de Android: LumaMap. LUJAN MAPPING (la primera app nativa, en app/) ya no se
+      # publica aparte: LumaMap hace todo lo que hacía y más. Su código y sus pruebas se mantienen.
+      - name: Build APK
+        run: ./gradlew --no-daemon :lumamap:assembleRelease
 
       - name: Upload LumaMap APK
         uses: actions/upload-artifact@v4
@@ -245,7 +240,8 @@ jobs:
           mkdir release
           cp out/lumamap-windows-installer/*.exe release/LumaMap-Setup.exe
           cp out/lumamap-android/lumamap-release.apk release/LumaMap-Android.apk
-          cp out/lujan-mapping-debug-apk/*.apk release/LujanMapping-Android.apk
+          # El enlace antiguo de LUJAN MAPPING entrega la misma app (LumaMap): una sola app, ningún enlace roto.
+          cp out/lumamap-android/lumamap-release.apk release/LujanMapping-Android.apk
           BASE="https://github.com/${{ github.repository }}/releases/download/lumamap-latest"
           if [ -f out/lumamap-mac/LumaMap-Mac-arm64.dmg ] && [ -f out/lumamap-mac/LumaMap-Mac-x64.dmg ]; then
             cp out/lumamap-mac/LumaMap-Mac-arm64.dmg release/LumaMap-Mac-AppleSilicon.dmg
@@ -299,7 +295,7 @@ jobs:
             Versión **2.3.${{ github.run_number }}**. La app avisa sola de las versiones nuevas (Menú → Buscar actualizaciones).
 
             - **Windows:** descarga `LumaMap-Setup.exe`, ábrelo e instala (si aparece «Windows protegió su PC»: *Más información → Ejecutar de todas formas*).
-            - **Android (2 apps):** `LumaMap-Android.apk` (la app completa) y `LujanMapping-Android.apk` (LUJAN MAPPING). Descárgalas e instálalas (permite «instalar apps desconocidas»).
+            - **Android:** `LumaMap-Android.apk`. Descárgala e instálala (permite «instalar apps desconocidas»). `LujanMapping-Android.apk` es el mismo archivo (para los enlaces antiguos): ahora hay una sola app.
             - **Mac:** `LumaMap-Mac-AppleSilicon.dmg` (M1, M2, M3, M4) o `LumaMap-Mac-Intel.dmg`. Ábrelo y arrastra LumaMap a Aplicaciones. La primera vez: clic derecho sobre LumaMap → *Abrir* → *Abrir* (no está firmada con un certificado de Apple). Los plugins FFGL (.dll) son solo de Windows.
           files: release/*
           fail_on_unmatched_files: true

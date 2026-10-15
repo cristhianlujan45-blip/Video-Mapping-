@@ -30,7 +30,9 @@ import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./source
 import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
 import { PRO_PANELS, PRO_TABS } from "./panels-pro.js";
 import { DMX_PANELS, DMX_TABS } from "./panels-dmx.js";
-import { SHOW_PANELS, SHOW_TABS } from "./panels-show.js";
+import { SHOW_PANELS, SHOW_TABS, showTransport, showTimecode, showAutomation, showPerformance } from "./panels-show.js";
+import { timelineSection } from "./panels-timeline.js";
+import { FEATURED_TAB, featuredAnims, featuredFx } from "./featured.js";
 import { PANELS_3D, TABS_3D } from "./panels-3d.js";
 import { TRACKING_PANELS, TRACKING_TABS } from "./panels-tracking.js";
 import { ASSISTANT_PANELS, ASSISTANT_TABS } from "./panels-assistant.js";
@@ -38,7 +40,7 @@ import { INTERACTIVE_PANELS, INTERACTIVE_TABS } from "./panels-interactive.js";
 import { FX_RANGE } from "./params.js";
 import { TRANSITIONS } from "./compose.js";
 
-const animUI = { cat: "Todas", q: "" };
+const animUI = { cat: FEATURED_TAB, q: "" };
 
 /** Celda de la biblioteca (con «convirtiendo… %» si está en la cola). */
 export function mediaCell(m, { on = false, onClick } = {}) {
@@ -208,15 +210,17 @@ function animCatalog(app, onPick, { drag = false } = {}) {
   const cur = app.lookSel()?.source;
   const renderGrid = () => {
     const q = norm(animUI.q.trim());
-    const list = ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || a.cat === animUI.cat) && (!q || norm(a.name + " " + a.cat).includes(q)));
+    // Destacadas por defecto; al escribir, se busca en todo.
+    const list = q ? ANIM_LIBRARY.filter(a => (animUI.cat === "Todas" || animUI.cat === FEATURED_TAB || a.cat === animUI.cat) && norm(a.name + " " + a.cat).includes(q))
+      : animUI.cat === FEATURED_TAB ? featuredAnims(ANIM_LIBRARY) : ANIM_LIBRARY.filter(a => animUI.cat === "Todas" || a.cat === animUI.cat);
     grid.innerHTML = "";
     const on = cur?.type === "gen" ? list.find(a => a.gen === cur.gen && a.color === cur.color && a.color2 === cur.color2)?.id
       : cur?.type === "shader" ? list.find(a => a.shader === cur.shaderId)?.id : null;
     grid.append(list.length ? tiles(list.map(a => ({ id: a.id, label: a.name, img: () => animThumb(a) })), { value: on, cols: 4, onPick: (id) => onPick(ANIM_LIBRARY.find(x => x.id === id)),
       drag: drag ? (it) => { const a = ANIM_LIBRARY.find(x => x.id === it.id); return { label: a.name, apply: (app) => applyAnim(app, a) }; } : null }) : hint("Ninguna animación con ese nombre."));
   };
-  for (const c of ["Todas", ...ANIM_CATEGORIES]) {
-    const n = c === "Todas" ? ANIM_LIBRARY.length : ANIM_LIBRARY.filter(a => a.cat === c).length;
+  for (const c of [FEATURED_TAB, "Todas", ...ANIM_CATEGORIES]) {
+    const n = c === "Todas" ? ANIM_LIBRARY.length : c === FEATURED_TAB ? featuredAnims(ANIM_LIBRARY).length : ANIM_LIBRARY.filter(a => a.cat === c).length;
     const b = h("button", { class: `chip ${animUI.cat === c ? "on" : ""}`, onclick: () => {
       animUI.cat = c; cats.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); renderGrid();
     } }, `${c} · ${n}`);
@@ -323,9 +327,14 @@ const live = {
     const A = app.actions, S = app.S, P = S.project;
     const wrap = h("div", {});
     if (!P.surfaces.length) return needSelection(app, "Añade superficies (una por pantalla o zona) y aquí podrás poner una animación distinta en cada una y mezclarlas en vivo.");
+    // Tres formas de tocar en directo, cada una en su pestaña (antes competían en la misma lista):
+    // mezcla A/B por superficie, la mesa de clips (como Resolume) y el VJ automático; y lo demás aparte.
+    const sub = LIVE_SUBS.some(x => x[0] === S.liveSub) ? S.liveSub : "mix";
+    wrap.append(h("div", { class: "livesubs" }, segmented({ options: LIVE_SUBS, value: sub, onChange: (v) => { S.liveSub = v; app.renderPanel(); } })));
+    if (sub === "clips") { wrap.append(hint("Lanza clips como en Resolume: cada fila es una superficie, cada columna una escena de clips."), deckSection(app)); return wrap; }
+    if (sub === "vj") { wrap.append(hint("El VJ automático mezcla solo al ritmo de la música con «Mi set»."), vjSection(app)); return wrap; }
+    if (sub === "more") { liveMore(app, wrap); return wrap; }
     wrap.append(myPanelSection(app));
-    wrap.append(deckSection(app));
-    wrap.append(vjSection(app));
     wrap.append(section("Todas las pantallas",
       hint("Cada superficie tiene AHORA (lo que se ve) y SIGUIENTE (lo que preparas). Pulsa GO para fundir, o mueve el fader a mano."),
       h("div", { class: "lbl" }, "Duración del fundido"),
@@ -336,7 +345,15 @@ const live = {
       segmented({ options: [[0, "No"], [4, "4"], [8, "8"], [16, "16"], [32, "32"]], value: S.autoMix || 0, small: true, onChange: (v) => A.setAutoMix(v) }),
       P.surfaces.some(x => x.screen) ? h("div", {}, h("div", { class: "lbl" }, "Ver en el editor"),
         segmented({ options: SCREEN_OPTS, value: S.viewScreen || 0, small: true, onChange: (v) => A.setViewScreen(v) })) : null));
+    liveCards(app, wrap);
+    return wrap;
+  },
+};
+const LIVE_SUBS = [["mix", "🎚 Mezcla A/B"], ["clips", "🎛 Mesa de clips"], ["vj", "🤖 VJ automático"], ["more", "⚙ Pantallas y más"]];
 
+/** «Pantallas y más»: encender/apagar salidas, tiempos, mandos y sensores. */
+function liveMore(app, wrap) {
+    const A = app.actions, S = app.S, P = S.project;
     // Pantallas de salida: encender / apagar, brillo, estrobo y efecto de cada una.
     const scr = h("div", { class: "screens" });
     for (const n of [1, 2, 3, 4]) {
@@ -394,7 +411,11 @@ const live = {
       hint("Usa cualquier cámara como sensor: cuando alguien pasa o se mueve en la zona elegida, cambia la animación, hace un golpe de luz, cambia de escena o enciende/apaga. Puedes poner varias cámaras, cada una con su función."),
       sensBox,
       btn({ label: "Añadir sensor", ic: "plus", kind: "block", onClick: A.addSensor })));
+}
 
+/** Tarjetas AHORA / SIGUIENTE de cada superficie con su fader A ⟷ B. */
+function liveCards(app, wrap) {
+    const A = app.actions, S = app.S, P = S.project;
     for (const s of P.surfaces) {
       const look = app.S.project.scenes.find(x => x.id === P.sceneId).looks[s.id];
       if (!look) continue;
@@ -425,9 +446,7 @@ const live = {
         segmented({ options: SCREEN_OPTS, value: s.screen || 0, small: true, onChange: (v) => A.setScreen(s.id, v) }));
       wrap.append(card);
     }
-    return wrap;
-  },
-};
+}
 
 /* ---------------------------------------------------------------- Contenido */
 const SOURCE_TYPES = [
@@ -603,7 +622,7 @@ function transportControls(app, look, mediaId) {
 }
 
 /* ---------------------------------------------------------------- Efectos */
-const fxUI = { cat: "Todas", q: "", combine: false };
+const fxUI = { cat: FEATURED_TAB, q: "", combine: false };
 const fold = (title, open, ...children) => {
   const d = h("details", { class: "fold" }, h("summary", {}, title), ...children);
   if (open) d.open = true;
@@ -629,8 +648,9 @@ const fx = {
     const renderGrid = () => {
       const q = fxUI.q.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       grid.innerHTML = "";
-      const list = FX_LIBRARY.filter(e => (fxUI.cat === "Todas" || e.cat === fxUI.cat) &&
-        (!q || (e.name + " " + e.cat).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(q)));
+      const match = (e) => (e.name + " " + e.cat).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(q);
+      const list = q ? FX_LIBRARY.filter(e => (fxUI.cat === "Todas" || fxUI.cat === FEATURED_TAB || e.cat === fxUI.cat) && match(e))
+        : fxUI.cat === FEATURED_TAB ? featuredFx(FX_LIBRARY) : FX_LIBRARY.filter(e => fxUI.cat === "Todas" || e.cat === fxUI.cat);
       for (const e of list) {
         const chip = h("button", { class: "chip", title: e.cat, onclick: () => {
           app.edit(() => { look.fx = fxUI.combine ? { ...look.fx, ...e.fx } : { ...DEFAULT_FX(), ...e.fx }; });
@@ -642,7 +662,7 @@ const fx = {
       }
       if (!list.length) grid.append(hint("Ningún efecto con ese nombre."));
     };
-    for (const c of ["Todas", ...FX_CATEGORIES]) {
+    for (const c of [FEATURED_TAB, "Todas", ...FX_CATEGORIES]) {
       const b = h("button", { class: `chip ${fxUI.cat === c ? "on" : ""}`, onclick: () => {
         fxUI.cat = c; cats.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); renderGrid();
       } }, c);
@@ -815,9 +835,31 @@ const layers = {
   },
 };
 
+/** «📡 Salida por red»: la proyección en MJPEG para OBS, vMix, TouchDesigner o un navegador. */
+function netOutSection(app) {
+  const S = app.S, A = app.actions, cfg = A.netOutCfg(), on = !!S.netOut;
+  const urls = h("div", { class: "netouturls" });
+  if (on) A.netOutUrls().then(list => urls.replaceChildren(...list.map(u => h("code", { class: "copy", title: "Toca para copiar", onclick: () => { navigator.clipboard?.writeText(u); toast("Dirección copiada"); } }, u))));
+  const stat = h("small", { class: "netoutstat" });
+  if (on) { const t = setInterval(() => { if (!stat.isConnected || !S.netOut) return clearInterval(t); const st = S.netOut, secs = (performance.now() - st.t0) / 1000; stat.textContent = `${st.sent} fotogramas enviados · ${(st.bytes / 1048576 / Math.max(1, secs) * 8).toFixed(1)} Mbit/s`; }, 500); }
+  const restart = (patch) => { if (S.netOut) A.netOut(true, patch); else { try { localStorage.setItem("lumamap:netout", JSON.stringify({ ...cfg, ...patch })); } catch {} } app.renderPanel(); };
+  const d = fold("📡 Salida por red (OBS, vMix, TouchDesigner)", on || netOutOpen,
+    hint("Manda lo que sale por el proyector a otros programas o equipos de la red, como video MJPEG. Funciona en la app de Windows/Mac y en el navegador abierto desde LumaMap."),
+    toggle({ label: on ? "Enviando por la red" : "Enviar la proyección por la red", value: on, onChange: (v) => { A.netOut(v); app.renderPanel(); } }),
+    h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Tamaño")),
+    segmented({ options: [[540, "540p"], [720, "720p"], [1080, "1080p"]], value: cfg.height, small: true, onChange: (v) => restart({ height: +v }) }),
+    h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Fotogramas por segundo")),
+    segmented({ options: [[10, "10"], [15, "15"], [25, "25"], [30, "30"]], value: cfg.fps, small: true, onChange: (v) => restart({ fps: +v }) }),
+    on ? h("div", {}, h("div", { class: "lbl" }, "Dirección (en este equipo o en otro de la misma red):"), urls, stat) : null,
+    hint("OBS: Fuente → «Fuente multimedia» → quita «Archivo local» → pega la dirección. vMix: Añadir entrada → Stream. TouchDesigner: «Web Render TOP» con la dirección. Un navegador también la abre. NDI, Spout y Syphon: EN DESARROLLO."));
+  d.addEventListener("toggle", () => { netOutOpen = d.open; });   // sigue abierta al cambiar el tamaño o los fps
+  return d;
+}
+let netOutOpen = false;
+
 /* ---------------------------------------------------------------- Escenas */
 const scenes = {
-  title: () => "Escenas",
+  title: () => "Escenas y show",
   render(app) {
     const S = app.S, A = app.actions, P = S.project;
     const list = h("div", { class: "list" });
@@ -832,11 +874,11 @@ const scenes = {
     });
     const cur = app.scene();
     return h("div", {},
-      hint(S.pro ? "Las escenas usan el mismo mapeo con distinto contenido. En la pestaña Show son tus cues (las mismas), con timecode y automatización." : "Las escenas usan el mismo mapeo con distinto contenido. Tócalas en directo para cambiar."),
-      row(btn({ label: "Anterior", ic: "left", kind: "wide", onClick: () => A.stepScene(-1) }), btn({ label: "Siguiente", ic: "right", kind: "wide primary", onClick: () => A.stepScene(1) })),
-      h("div", { style: { height: "10px" } }),
+      hint("Cada escena usa el mismo mapeo con distinto contenido: son las cues de tu show. Tócalas en directo, o deja que pasen solas con la línea de tiempo."),
+      showTransport(app),
       list,
       btn({ label: "Nueva escena (copia de la actual)", ic: "plus", kind: "block", onClick: A.addScene }),
+      timelineSection(app),
       section(`Escena actual · ${cur.name}`,
         slider({ label: "Duración en reproducción automática", min: 0, max: 120, step: 1, value: cur.duration, def: 0, fmt: (v) => v ? v + " s" : "manual", onInput: (v) => app.edit(() => { cur.duration = v; }) }),
         h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Transición al entrar en esta escena")),
@@ -846,6 +888,9 @@ const scenes = {
         toggle({ label: "Avanzar escenas automáticamente", hint: "Usa la duración de cada escena", value: P.settings.autoAdvance, onChange: (v) => app.edit(() => { P.settings.autoAdvance = v; S.sceneStart = S.clock; }) }),
         toggle({ label: "Volver a la primera al terminar", value: P.settings.loopScenes, onChange: (v) => app.edit(() => { P.settings.loopScenes = v; }) }),
         slider({ label: "Duración de transición por defecto", min: 0, max: 4000, step: 50, value: P.settings.transitionMs, def: 800, fmt: (v) => (v / 1000).toFixed(2) + " s", onInput: (v) => app.edit(() => { P.settings.transitionMs = v; }) })),
+      fold("⏱ Timecode (interno, MTC, LTC, OSC)", P.settings.show.tcSource !== "internal", showTimecode(app)),
+      fold("● Automatización grabada", false, showAutomation(app)),
+      fold("🎭 Actuación y emergencia", false, showPerformance(app)),
     );
   },
 };
@@ -1034,6 +1079,7 @@ const output = {
       h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Calidad")),
       segmented({ options: RECORD_QUALITIES.map(q => [q.mbps, q.label]), value: R.mbps, cols: 2, small: true, onChange: (v) => app.edit(() => { R.mbps = v; }) }),
       btn({ label: S.rec ? "Detener grabación" : "Grabar video de la salida", ic: "camera", kind: `block ${S.rec ? "danger" : "primary"}`, onClick: () => { A.record(); setTimeout(() => app.renderPanel(), 300); } })));
+    wrap.append(netOutSection(app));
     return wrap;
   },
 };
@@ -1047,7 +1093,10 @@ const menu = {
       h("div", { class: "badge", html: icon(ic) }), h("div", { class: "name" }, label, sub ? h("small", {}, sub) : null));
     return h("div", {},
       section("Modo",
-        toggle({ label: "Modo profesional", hint: "Añade las pestañas Show (cues, timecode, automatización), Tracking (cuerpo, manos, zonas y reglas), Control (MIDI, macros, monitor) y Rendimiento, y la vista completa de Luces (DMX, Art-Net, sACN, pixel mapping). El uso de siempre no cambia.", value: S.pro, onChange: (v) => app.setPro(v) })),
+        toggle({ label: S.pro ? "Modo profesional (activado)" : "Modo profesional", hint: "Todo lo de siempre (Escenas y show, 3D, Luces, Interactivo, Asistente…) está en los dos modos. El profesional solo añade lo técnico:", value: S.pro, onChange: (v) => app.setPro(v) }),
+        h("div", { class: "promodes" },
+          ...[["tracking", "Tracking", "cuerpo, manos, zonas y reglas"], ["knob", "Control", "MIDI, OSC, macros y monitor"], ["gauge", "Rendimiento", "FPS, GPU y fotogramas perdidos"], ["light", "Luces completas", "DMX, Art-Net, sACN y pixel map a mano"]]
+            .map(([ic, t, d]) => h("div", { class: `promode ${S.pro ? "on" : ""}` }, h("span", { html: icon(ic) }), h("b", {}, t), h("small", {}, d), h("i", {}, "PRO"))))),
       section("Proyecto", h("div", { class: "list" },
         item("plus", "Nuevo", A.newProject, "Desde una plantilla"),
         item("folder", "Abrir", A.open, "Proyectos guardados en este dispositivo"),

@@ -708,3 +708,37 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .calibgrid { display: grid; grid-template-columns: auto repeat(4, 1fr); gap: 4px; align-items: center; margin-top: 6px; }
 .calibgrid > span { font-size: 12px; color: var(--dim); padding-right: 6px; }
 .calibpts .item small { color: var(--dim); }
+
+/* ---- Línea de tiempo del show (Escenas) ---- */
+.tlscroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); margin-top: 6px; }
+.tlinner { position: relative; padding-bottom: 6px; min-width: 100%; }
+.tlruler { position: relative; height: 22px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.tlruler span { position: absolute; top: 3px; font-size: 10.5px; color: var(--dim); transform: translateX(-50%); white-space: nowrap; }
+.tltrack { position: relative; height: 34px; border-bottom: 1px dashed color-mix(in srgb, var(--line) 70%, transparent); }
+.tlname { position: sticky; left: 0; z-index: 2; display: inline-flex; align-items: center; height: 100%; width: 80px; padding-left: 8px; font-size: 11px; color: var(--dim); background: var(--bg2); }
+.tlblock { position: absolute; top: 3px; height: 28px; border-radius: 6px; background: color-mix(in srgb, var(--c) 45%, var(--bg3)); border: 1px solid var(--c); overflow: hidden; cursor: pointer; display: flex; align-items: center; gap: 6px; padding-left: 4px; font-size: 11.5px; white-space: nowrap; box-sizing: border-box; }
+.tlblock.on { outline: 2px solid #fff; }
+.tlblock.manual { border-style: dashed; background: color-mix(in srgb, var(--c) 18%, var(--bg3)); }
+.tlblock small { color: var(--dim); }
+.tlbn { position: relative; z-index: 1; overflow: hidden; text-overflow: ellipsis; }
+.tltr { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #0008, transparent); pointer-events: none; }
+.tlgrip { position: absolute; right: 0; top: 0; bottom: 0; width: 10px; cursor: ew-resize; background: linear-gradient(90deg, transparent, #fff6); touch-action: none; }
+.tlsel { position: absolute; top: 5px; height: 24px; font-size: 11px; background: var(--bg3); color: var(--tx); border: 1px solid var(--line); border-radius: 5px; }
+.tlauto { position: absolute; top: 4px; }
+.tlsong { position: absolute; top: 5px; height: 24px; border-radius: 5px; background: color-mix(in srgb, #22c55e 30%, var(--bg3)); border: 1px solid #22c55e; font-size: 11px; padding-left: 6px; line-height: 24px; overflow: hidden; white-space: nowrap; }
+.tlhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff2d55; pointer-events: none; z-index: 3; box-shadow: 0 0 6px #ff2d55; }
+.livesubs{position:sticky;top:0;z-index:2;background:var(--bg2);padding:4px 0 8px;margin-bottom:4px;}
+
+/* ---- Modo profesional: qué añade, a la vista ---- */
+.promodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-top: 6px; }
+.promode { position: relative; display: grid; grid-template-columns: 22px 1fr; column-gap: 6px; align-items: center; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 8px; opacity: .65; }
+.promode.on { border-style: solid; border-color: color-mix(in srgb, var(--acc) 60%, transparent); opacity: 1; }
+.promode span svg { width: 18px; height: 18px; }
+.promode small { grid-column: 2; color: var(--dim); font-size: 11px; }
+.promode i, #dock button.pro::after, .moretab.pro::after { font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: .05em; color: #00131a; background: var(--acc); border-radius: 4px; padding: 0 4px; }
+.promode i { position: absolute; top: 4px; right: 6px; }
+#dock button.pro, .moretab.pro { position: relative; }
+#dock button.pro::after, .moretab.pro::after { content: "PRO"; position: absolute; top: 2px; right: 2px; }
+.netouturls { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.netouturls code { font-size: 12px; padding: 4px 6px; background: var(--bg3); border-radius: 6px; cursor: copy; word-break: break-all; }
+.netoutstat { color: var(--dim); }

@@ -273,7 +273,7 @@ La última versión se publica sola en la página **Releases** del repositorio
 - **Android:** `LumaMap-Android.apk`. Todas las versiones se firman con la misma
   clave, así que cada APK nuevo se instala **encima** del anterior sin perder tus
   proyectos (solo hay que desinstalar una vez las versiones 2.0 y 2.1).
-- **Android, segunda app:** `LujanMapping-Android.apk` (LUJAN MAPPING), aparte de LumaMap.
+- **Android: una sola app (LumaMap).** `LujanMapping-Android.apk` sigue funcionando como enlace pero ya entrega la misma app: LUJAN MAPPING (la primera app nativa, en `app/`) ya no se publica aparte porque LumaMap hace todo lo que hacía y más. Su código y sus pruebas se conservan.
 - **Mac:** `LumaMap-Mac-AppleSilicon.dmg` (Mac con M1, M2, M3 o M4) o
   `LumaMap-Mac-Intel.dmg`. Abre el .dmg y arrastra LumaMap a *Aplicaciones*. La primera vez:
   clic derecho sobre LumaMap → *Abrir* → *Abrir* (no lleva certificado de Apple). Todo funciona

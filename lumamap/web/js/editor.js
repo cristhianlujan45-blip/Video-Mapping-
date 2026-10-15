@@ -53,6 +53,7 @@ import { analyzeProject } from "./ai/analyzer.js";
 import { TimerEngine } from "./timers.js";
 import { buildProjectContext } from "./ai/context.js";
 import { Remote } from "./remote.js";
+import { startNetOut, netOutAvailable } from "./netout.js";
 import * as Updater from "./updater.js";
 
 const $ = (s) => document.querySelector(s);
@@ -1868,6 +1869,31 @@ A.snapshot = () => {
   o.canvas.toBlob((b) => { saveBlob(`lumamap-${stamp()}.png`, b); toast("Imagen guardada"); o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); }, "image/png");
 };
 
+/** Salida por red (MJPEG): la proyección para OBS, vMix, TouchDesigner o un navegador de la red. */
+const NETOUT_KEY = "lumamap:netout";
+A.netOutCfg = () => { try { return { height: 720, fps: 25, ...JSON.parse(localStorage.getItem(NETOUT_KEY) || "{}") }; } catch { return { height: 720, fps: 25 }; } };
+A.netOut = (on, opts = {}) => {
+  if (S.netOut) { S.netOut.stop(); S.netOut = null; }
+  if (on) {
+    if (!netOutAvailable(app)) { toast(native ? "En Android no hay servidor local: la salida por red es de la app de Windows/Mac (o el navegador abierto desde LumaMap)." : "La salida por red necesita la app de escritorio o abrir LumaMap desde su servidor.", "err"); return false; }
+    const cfg = { ...A.netOutCfg(), ...opts };
+    try { localStorage.setItem(NETOUT_KEY, JSON.stringify({ height: cfg.height, fps: cfg.fps })); } catch {}
+    S.netOut = startNetOut(app, (hgt) => {
+      const o = offscreenRenderer(false, hgt);
+      return { canvas: o.canvas, render: (now) => renderOff(o, now), dispose: () => { o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); } };
+    }, cfg);
+  }
+  return !!S.netOut;
+};
+/** Direcciones para ver la salida por red desde otro programa o equipo. */
+A.netOutUrls = async () => {
+  let port = location.port || "80", ips = [], pin = "";
+  if (window.LumaDesktop?.remoteInfo) { const i = await window.LumaDesktop.remoteInfo(); port = String(i.port || port); ips = (i.urls || []).map(u => u.ip); pin = i.pin || ""; }
+  else { try { const r = await (await fetch("api/ping", { cache: "no-store" })).json(); ips = r.ips || []; } catch {} }
+  const q = pin ? `?pin=${encodeURIComponent(pin)}` : "";
+  return [...new Set(["127.0.0.1", ...ips])].map(ip => `http://${ip}:${port}/stream.mjpg${q}`);
+};
+
 A.record = () => {
   if (S.rec) {
     S.rec.mr.stop();
@@ -2527,7 +2553,7 @@ function setPro(on) {
   if (S.tab === "menu") renderPanel();
 }
 app.setPro = setPro;
-A.togglePro = () => { setPro(!S.pro); toast(S.pro ? "Modo profesional: Show, Tracking, Control, Rendimiento y Luces completas" : "Modo simple"); };
+A.togglePro = () => { setPro(!S.pro); toast(S.pro ? "Modo profesional: + Tracking, Control, Rendimiento y Luces completas (pestañas marcadas PRO)" : "Modo simple: lo de siempre, sin lo técnico"); };
 /** Calidad de la vista previa del editor (la salida conserva su calidad). */
 A.setPreview = ({ scale, fps } = {}) => {
   if (scale) S.previewScale = scale;
@@ -2626,6 +2652,7 @@ function updateModebar() {
 app.updateModebar = updateModebar;
 
 function openTab(id) {
+  if (id === "show") id = "scenes";   // Show y Escenas son una sola pestaña (las escenas son las cues)
   if (id && S.tab === id) id = null; // tocar la pestaña activa la cierra
   const prev = S.tab;
   S.tab = id;
@@ -2896,6 +2923,7 @@ function tick(now) {
   dmx.tick(now, { project: RP.project, layers, time: S.clock, levels: S.levels, master: RP.master });
   if (!document.hidden && !S.previewSkip) { drawOverlay(v, view); drawCompare(ovCtx(), v, DPR()); drawLoupe(v, view); }
   params.tickFeedback(now);
+  if (S.netOut) S.netOut.tick(now);   // salida por red: un fotograma cuando toca
   const rb = $("#recBadge");
   if (S.rec) {
     renderOff(S.rec.o, now);

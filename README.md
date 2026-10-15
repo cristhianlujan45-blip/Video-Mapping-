@@ -1,5 +1,9 @@
 # Luma map
 
+> **Una sola app:** la app que se publica es **LumaMap** (`lumamap/`). LUJAN MAPPING, la
+> primera app nativa de este repositorio (`app/`, descrita abajo), ya no se publica aparte:
+> LumaMap hace todo lo que hacía y mucho más. Su código y sus pruebas se mantienen.
+
 > **Nuevo: [LumaMap 2](lumamap/README.md)** — app de video mapping táctil para
 > Android y tablet: dibujo con neón sobre la pared, 16 animaciones en GPU, malla
 > de deformación, máscaras, efectos, audio reactivo, escenas y salida HDMI/USB-C

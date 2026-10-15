@@ -110,6 +110,15 @@ await test("efectos de cámara: solo en «Efectos de cámara» (no en animacione
   const p = validatePlugin({ "lumamap-plugin": 1, id: "f", shaders: [{ name: "x", use: "rara", isf: `/*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ] }*/ void main(){ gl_FragColor = IMG_NORM_PIXEL(inputImage, isf_FragNormCoord); }` }] });
   assert.equal(p.shaders[0].use, "both");
 });
+await test("⭐ Destacadas: todas las elegidas existen (animaciones de base y de plugins, y efectos)", async () => {
+  loadPlugins();
+  const F = await import("../web/js/featured.js");
+  assert.equal(F.featuredAnims(ANIM_LIBRARY).length, F.FEATURED_COUNTS.anims);
+  assert.equal(F.featuredFx(FX_LIBRARY).length, F.FEATURED_COUNTS.fx);
+  assert.ok(F.FEATURED_COUNTS.anims >= 30 && F.FEATURED_COUNTS.anims <= 40 && F.FEATURED_COUNTS.fx >= 30 && F.FEATURED_COUNTS.fx <= 40);
+  // Sin repetidos y sin efectos de cámara (esos tienen su sitio).
+  assert.equal(new Set(F.featuredAnims(ANIM_LIBRARY).map(a => a.id)).size, F.FEATURED_COUNTS.anims);
+});
 await test("un .json que no es plugin o un texto cualquiera se rechaza con un mensaje claro", () => {
   assert.throws(() => pluginFromFile("hola", "x.json"), /ni un shader ISF/);
   assert.throws(() => pluginFromFile('{"a":1}', "x.json"), /No es un plugin/);

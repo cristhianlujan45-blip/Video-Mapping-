@@ -4,7 +4,7 @@
 import { createServer, startHttps } from "../server/index.js";
 import { test, report, setOnFail, setParts } from "./harness.js";
 // Tanda 2 (PART=2): móviles, plugins, VJ y lo de Resolume; la tanda 1 (PART=1) es el resto.
-setParts(/^(3D para proyectar|móvil como cámara|móvil por cable|plugins:|VJ automático|como Resolume|plugins en 4K|comparador|móvil: nada amontonado|como TouchDesigner)/);
+setParts(/^(Salida por red|Escenas y show|3D para proyectar|móvil como cámara|móvil por cable|plugins:|VJ automático|como Resolume|plugins en 4K|comparador|móvil: nada amontonado|como TouchDesigner)/);
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
@@ -197,6 +197,9 @@ await test("biblioteca de efectos: aplicar «Contorno neón» y combinar «Espej
   await page.evaluate(() => window.__lumamap.openTab("fx"));
   await page.locator(".fxlib .chip", { hasText: "Contorno neón" }).first().click();
   await page.evaluate(() => { [...document.querySelectorAll("#panelBody .toggle")].find(t => /Combinar con el efecto actual/.test(t.textContent)).querySelector("input").click(); });   // Combinar
+  // Se abre en «⭐ Destacadas»; «Espejo selfie» está en «Todas» (y en su categoría).
+  assert.equal(await page.locator(".fxlib .chip", { hasText: "Espejo selfie" }).count(), 0, "las destacadas primero");
+  await page.locator("#panelBody .sec", { hasText: "Biblioteca de efectos" }).locator(".chip", { hasText: /^Todas$/ }).click();
   await page.locator(".fxlib .chip", { hasText: "Espejo selfie" }).first().click();
   const fx = await page.evaluate(() => window.__lumamap.lookSel().fx);
   assert.equal(fx.edges, 1); assert.equal(fx.flipX, true);
@@ -242,7 +245,7 @@ await test("resolución personalizada y ajustes del proyector", async () => {
 });
 await test("mezcla en vivo: preparar lo siguiente, fader y GO por pantalla", async () => {
   await page.keyboard.press("Escape");
-  await page.evaluate(() => { const a = window.__lumamap; a.select(a.S.project.surfaces[0].id); a.actions.setSource({ type: "gen", gen: "plasma" }); a.openTab("live"); });
+  await page.evaluate(() => { const a = window.__lumamap; a.select(a.S.project.surfaces[0].id); a.actions.setSource({ type: "gen", gen: "plasma" }); a.S.liveSub = "mix"; a.openTab("live"); });
   const id = await page.evaluate(() => window.__lumamap.S.project.surfaces[0].id);
   await page.locator(".livecard .slot.b").first().click();
   await page.locator("#modal .tile", { hasText: "Hiperespacio" }).first().click();
@@ -338,7 +341,7 @@ await test("modo profesional: pestañas nuevas y modo simple intacto", async () 
   const simpleTabs = await page.locator("#dock button").count();
   await page.evaluate(() => window.__lumamap.setPro(true));
   const proTabs = await page.locator("#dock button").count();
-  assert.equal(proTabs, simpleTabs + 4, "Show, Tracking, Control y Rendimiento (Interactivo, Luces, 3D y Asistente están en el modo simple)");
+  assert.equal(proTabs, simpleTabs + 3, "Tracking, Control y Rendimiento (Show está dentro de Escenas; Interactivo, Luces, 3D y Asistente están en el modo simple)");
   await page.locator('#dock [data-tab="control"]').click();
   await page.getByText("Controladores MIDI").waitFor();
   await page.locator('#dock [data-tab="perf"]').click();
@@ -635,7 +638,7 @@ await test("mandos: un mando de Xbox simulado aparece, se asigna su botón A al 
     window.__pads = [mk(0, "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e)"), mk(1, "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c)")];
     Object.defineProperty(navigator, "getGamepads", { value: () => window.__pads, configurable: true });
     const a = window.__lumamap; a.S.project.settings.control.mappings = []; if (a.S.blackout) a.actions.blackout();
-    a.openTab("live"); dispatchEvent(new Event("gamepadconnected"));
+    a.S.liveSub = "more"; a.openTab("live"); dispatchEvent(new Event("gamepadconnected"));
   });
   const press = (p, b, on) => page.evaluate(([p, b, on]) => { window.__pads[p].buttons[b] = { pressed: on, value: on ? 1 : 0 }; }, [p, b, on]);
   const box = page.locator("#panelBody .ctlsimple");
@@ -961,7 +964,7 @@ void main(){ float v = 0.5 + 0.5 * sin(isf_FragNormCoord.x * freq + TIME); gl_Fr
   fs.rmSync(fsFile, { force: true });
 });
 await test("VJ automático: set desde una frase, mezcla sola al tempo (clips y efectos) sin llenar el deshacer, y al parar todo vuelve", async () => {
-  const before = await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(240); a.openTab(null); a.openTab("live");
+  const before = await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(240); a.openTab(null); a.S.liveSub = "vj"; a.openTab("live");
     return { undo: a.history.undoStack.length, fx: JSON.stringify(a.S.project.scenes.find(s => s.id === a.S.project.sceneId).looks[a.S.project.surfaces[0].id].fx) }; });
   await page.locator("#panelBody").getByRole("button", { name: /Mi set/ }).click();
   await page.locator(".vjset input[type=text]").fill("techno rojo y blanco con láseres y espacio");
@@ -996,7 +999,7 @@ await test("VJ automático: set desde una frase, mezcla sola al tempo (clips y e
 });
 await test("como Resolume: mesa de clips (lanzar casilla y columna, al golpe y autopiloto) y «Animar al ritmo» en cualquier deslizador", async () => {
   await page.bringToFront();
-  await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(240); a.S.liveFade = 0; if (!a.S.playing) a.actions.togglePlay(); a.openTab(null); a.openTab("live"); });
+  await page.evaluate(() => { const a = window.__lumamap; a.actions.setBpm(240); a.S.liveFade = 0; if (!a.S.playing) a.actions.togglePlay(); a.openTab(null); a.S.liveSub = "clips"; a.openTab("live"); });
   await page.locator("#panelBody").getByRole("button", { name: /Abrir la mesa/ }).click();
   const deck = page.locator(".deck");
   await deck.locator(".dcell").first().waitFor();
@@ -1141,7 +1144,7 @@ await test("como TouchDesigner: señales que siguen los graves (con monitor en v
   assert.equal(await page.evaluate(async () => { const { tipCard, resetTips, setTutorial } = await import("./js/tutorial.js"); resetTips(); const off = tipCard(window.__lumamap, "nodes"); setTutorial(true); const on = tipCard(window.__lumamap, "nodes"); return [off, !!on].join(); }), ",true");
   await page.evaluate(() => window.__lumamap.openTab(null));
   // 3 · Mi panel: un deslizador y un botón elegidos por el usuario, que de verdad mueven el show.
-  await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.S.project.settings.panel = [{ param: "global/master", label: "" }, { param: "global/blackout", label: "Negro total" }]; }); if (a.S.blackout) a.actions.blackout(); a.openTab("live"); });
+  await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.S.project.settings.panel = [{ param: "global/master", label: "" }, { param: "global/blackout", label: "Negro total" }]; }); if (a.S.blackout) a.actions.blackout(); a.S.liveSub = "mix"; a.openTab("live"); });
   const mp = page.locator("#panelBody .mpgrid");
   await mp.waitFor();
   await mp.locator("input[type=range]").first().evaluate((r) => { r.value = "0.3"; r.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -1154,6 +1157,80 @@ await test("como TouchDesigner: señales que siguen los graves (con monitor en v
   const st = await page.evaluate(async () => { const { panelState } = await import("./js/mypanel.js"); const { describe } = await import("./js/params.js"); const a = window.__lumamap; return panelState(a.S.project.settings.panel, (id) => describe(a, id)); });
   assert.deepEqual(st.map(x => [x.id, x.name, x.kind]), [["global/master", "Brillo general", "float"], ["global/blackout", "Negro total", "bool"]]);
   await page.evaluate(() => { const a = window.__lumamap; a.S.master = 1; a.edit(() => { a.S.project.settings.panel = []; }); a.openTab(null); });
+});
+
+await test("Salida por red: desde Proyectar se manda la proyección y se ve en /frame.jpg y /stream.mjpg (como en OBS)", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); a.openTab("output"); });
+  const fold = page.locator("#panelBody details", { hasText: "Salida por red" });
+  await fold.locator("summary").click();
+  await fold.locator(".seg button", { hasText: "540p" }).click();
+  await fold.locator(".seg button", { hasText: /^10$/ }).click();
+  await fold.locator(".toggle", { hasText: "Enviar la proyección por la red" }).click();
+  await page.waitForFunction(() => (window.__lumamap.S.netOut?.sent || 0) >= 3, null, { timeout: 20000 });
+  const urls = await page.evaluate(() => window.__lumamap.actions.netOutUrls());
+  assert.ok(urls.some(u => /^http:\/\/127\.0\.0\.1:\d+\/stream\.mjpg$/.test(u)), urls.join(" "));
+  await page.locator("#panelBody .netouturls code").first().waitFor();
+  // La imagen que recibe otro programa: JPEG de 960×540 con la proyección (no negra).
+  const img = await page.evaluate(async () => {
+    const b = await (await fetch("/frame.jpg", { cache: "no-store" })).blob();
+    const bmp = await createImageBitmap(b), c = Object.assign(document.createElement("canvas"), { width: 96, height: 54 }), g = c.getContext("2d");
+    g.drawImage(bmp, 0, 0, 96, 54); const d = g.getImageData(0, 0, 96, 54).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2];
+    return { type: b.type, w: bmp.width, h: bmp.height, light: s / (96 * 54 * 3) };
+  });
+  assert.equal(img.type, "image/jpeg"); assert.deepEqual([img.w, img.h], [960, 540]); assert.ok(img.light > 3, "con imagen " + img.light);
+  // El video por la red también responde.
+  const mj = await page.evaluate(async () => { const ctl = new AbortController(); const r = await fetch("/stream.mjpg", { signal: ctl.signal }); const rd = r.body.getReader(); const { value } = await rd.read(); ctl.abort(); return { ct: r.headers.get("content-type"), first: new TextDecoder().decode(value.slice(0, 40)) }; });
+  assert.match(mj.ct, /multipart\/x-mixed-replace/); assert.match(mj.first, /--lumaframe/);
+  await fold.locator(".toggle", { hasText: "Enviando por la red" }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.netOut), null);
+  await page.evaluate(() => window.__lumamap.openTab(null));
+});
+
+await test("Escenas y show: una sola pestaña (Show abre Escenas) con línea de tiempo: arrastrar la duración, luces por escena, saltar y reproducir desde el principio", async () => {
+  const ids = await page.evaluate(() => { const a = window.__lumamap, P = a.S.project; a.openTab(null);
+    const before = P.scenes.map(s => s.id);
+    while (P.scenes.length < 3) a.actions.addScene();
+    a.edit(() => { P.scenes[0].duration = 4; P.scenes[1].duration = 0; P.scenes[2].duration = 6; });
+    a.actions.goScene(P.scenes[0].id, { instant: true });
+    a.openTab("show");
+    return { before, all: P.scenes.map(s => s.id), tab: a.S.tab }; });
+  assert.equal(ids.tab, "scenes", "«show» abre la pestaña Escenas");
+  assert.equal(await page.locator("#dock [data-tab=show]").count(), 0, "ya no hay pestaña Show aparte");
+  const tl = page.locator("#panelBody .sec", { hasText: "Línea de tiempo" });
+  await tl.waitFor();
+  for (const t of ["Timecode", "Automatización grabada", "Actuación y emergencia"]) assert.equal(await page.locator("#panelBody summary", { hasText: t }).count(), 1, t);
+  const blocks = tl.locator(".tlblock");
+  assert.equal(await blocks.count(), ids.all.length);
+  assert.equal(await tl.locator(".tlblock.manual").count(), 1, "la escena sin duración es «manual»");
+  // Arrastrar el borde de la primera escena: 4 s → 6 s.
+  await tl.locator(".tlscroll").scrollIntoViewIfNeeded();
+  const b0 = await blocks.first().boundingBox(), pxs = b0.width / 4;
+  const g = await blocks.first().locator(".tlgrip").boundingBox();
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2 + pxs * 2, g.y + g.height / 2, { steps: 5 }); await page.mouse.up();
+  await page.waitForFunction(() => Math.abs(window.__lumamap.S.project.scenes[0].duration - 6) <= 0.5, null, { timeout: 5000 }).catch(async (e) => { console.log("DIAG-TL", JSON.stringify({ b0, g, pxs, d: await page.evaluate(() => window.__lumamap.S.project.scenes.map(s => s.duration)), at: await page.evaluate(([x, y]) => { const el = document.elementFromPoint(x, y); return el?.className + " " + el?.tagName; }, [g.x + g.width / 2, g.y + g.height / 2]) })); throw e; });
+  // Luces de la segunda escena desde su pista.
+  const sel = page.locator("#panelBody .sec", { hasText: "Línea de tiempo" }).locator(".tlsel").nth(1);
+  const opt = await sel.locator("option").nth(3).getAttribute("value");
+  await sel.selectOption(opt);
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.scenes[1].lights), opt);
+  // Tocar la regla en mitad de la tercera escena salta a ella.
+  await page.locator("#panelBody .tlscroll").scrollIntoViewIfNeeded();
+  const b2 = await page.locator("#panelBody .tlblock").nth(2).boundingBox(), r = await page.locator("#panelBody .tlruler").boundingBox();
+  await page.mouse.click(b2.x + b2.width / 2, r.y + r.height / 2);
+  const got = await page.evaluate(() => window.__lumamap.S.project.sceneId);
+  if (got !== ids.all[2]) console.log("DIAG-RULER", JSON.stringify({ at: await page.evaluate(([x, y]) => { const el = document.elementFromPoint(x, y); return (el?.className || "") + " " + el?.tagName + " " + (el?.parentElement?.className || ""); }, [b2.x + b2.width / 2, r.y + r.height / 2]), b2, r, idx: ids.all.indexOf(got), n: ids.all.length, durs: await page.evaluate(() => window.__lumamap.S.project.scenes.map(s => s.duration)), blocks: await page.locator("#panelBody .tlblock").evaluateAll(els => els.map(e => [e.style.left, e.style.width])) }));
+  assert.equal(got, ids.all[2]);
+  // «Desde el principio»: primera escena, avance automático y Play; el cabezal avanza.
+  await page.locator("#panelBody").getByRole("button", { name: "▶ Desde el principio" }).click();
+  const st = await page.evaluate(() => { const a = window.__lumamap; return { id: a.S.project.sceneId, auto: a.S.project.settings.autoAdvance, playing: a.S.playing }; });
+  assert.deepEqual(st, { id: ids.all[0], auto: true, playing: true });
+  const x1 = await page.locator("#panelBody .tlhead").evaluate(e => parseFloat(e.style.left));
+  await page.waitForTimeout(700);
+  const x2 = await page.locator("#panelBody .tlhead").evaluate(e => parseFloat(e.style.left));
+  assert.ok(x2 > x1, `el cabezal avanza (${x1} → ${x2})`);
+  await page.evaluate((before) => { const a = window.__lumamap, P = a.S.project; a.edit(() => { P.scenes = P.scenes.filter(s => before.includes(s.id)); P.settings.autoAdvance = false; for (const s of P.scenes) { s.duration = 0; delete s.lights; } });
+    a.actions.goScene(P.scenes[0].id, { instant: true }); a.openTab(null); }, ids.before);
 });
 
 await test("3D para proyectar: lente por relación de proyección, ajuste fino, y calibrar el proyector con el real por puntos (clic en una esquina, arrastrar la cruz, calcular)", async () => {

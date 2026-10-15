@@ -72,9 +72,9 @@ export function buildCommands(app) {
   add("Ver", "zoomOut", "Alejar vista", () => A.zoom(0.8), { keys: "-", ic: "fit" });
   add("Ver", "preview", "Vista previa sin guías", () => app.setMode(S.mode === "preview" ? "edit" : "preview"), { keys: "V", ic: "eye" });
   // Un comando por pestaña, con el mismo nombre que la pestaña.
-  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["anim", "Panel Animaciones", "wand"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas", "scenes"], ["live", "Panel En vivo", "live"], ["audio", "Panel Audio", "audio"], ["interactive", "Panel Interactivo", "body"], ["lights", "Panel Luces", "light"], ["3d", "Panel 3D", "cube"], ["assistant", "Panel Asistente", "ai"]])
+  for (const [id, label, ic] of [["add", "Panel Añadir", "plus"], ["anim", "Panel Animaciones", "wand"], ["content", "Panel Contenido", "content"], ["fx", "Panel Efectos", "fx"], ["shape", "Panel Forma", "shape"], ["layers", "Panel Capas", "layers"], ["scenes", "Panel Escenas y show (línea de tiempo, timecode)", "scenes"], ["live", "Panel En vivo", "live"], ["audio", "Panel Audio", "audio"], ["interactive", "Panel Interactivo", "body"], ["lights", "Panel Luces", "light"], ["3d", "Panel 3D", "cube"], ["assistant", "Panel Asistente", "ai"]])
     add("Ver", "tab-" + id, label, () => app.openTab(id), { ic });
-  for (const [id, label, ic] of [["show", "Panel Show (cues y timecode)", "timeline"], ["tracking", "Panel Tracking", "tracking"]])
+  for (const [id, label, ic] of [["tracking", "Panel Tracking", "tracking"]])
     add("Ver", "tab-" + id, label, () => { app.setPro(true); app.openTab(id); }, { ic });
 
   add("Proyección", "output", "Proyectar (panel)", () => app.openTab("output"), { keys: "F", ic: "project" });
