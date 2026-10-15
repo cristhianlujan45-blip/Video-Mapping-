@@ -3468,10 +3468,13 @@ async function welcome() {
     { id: "cube", label: "Cubo 3D", ic: "cube" }, { id: "facade", label: "Fachada", ic: "building" },
     { id: "stage", label: "Escenario", ic: "stage" }, { id: "holo", label: "Holograma", ic: "body" }, { id: "blank", label: "Vacío", ic: "plus" },
   ];
-  content.append(tiles(items, { onPick: (id) => closeDialog(id), cols: 3 }));
+  content.append(tiles(items, { onPick: (id) => closeDialog(id), cols: 3 }),
+    h("div", { class: "welcome-learn" }, btn({ label: "🎓 Aprender con Luma (tutorial interactivo)", kind: "primary block", onClick: () => closeDialog("learn") }),
+      h("small", { class: "hint" }, "Una guía con IA te enseña cada herramienta con actividades cortas. Puedes ocultarla, saltar o repetir cuando quieras.")));
   const pick = (await dialog({ title: "Bienvenido", content, buttons: [] })) || "screen";
-  setProject(M.TEMPLATES[pick === "holo" ? "blank" : pick].build());
-  if (pick === "holo") setTimeout(() => A.hologramWizard(), 50);
+  setProject(M.TEMPLATES[pick === "holo" || pick === "learn" ? "blank" : pick].build());
+  if (pick === "learn") setTimeout(() => app.startTutorial({ restart: true }), 50);
+  else if (pick === "holo") setTimeout(() => A.hologramWizard(), 50);
   else if (pick === "draw") openTab("draw");
   else openTab("add");
 }
@@ -3608,6 +3611,8 @@ async function init() {
   });
   startDeviceNotices(app);
   app.openNews = () => openNews(app);
+  // 🎓 Tutorial interactivo con Luma (todo el curso o «Continuar» donde se quedó).
+  app.startTutorial = (opts) => { aiOf(app); app.academy.startCourse(opts); };
   maybeShowNews(app);   // lo nuevo, una vez después de actualizar
   // Arrastrar y soltar desde los paneles: la superficie bajo el dedo/ratón recibe lo soltado;
   // en un hueco vacío se crea una superficie nueva ahí mismo.

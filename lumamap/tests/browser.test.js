@@ -513,6 +513,60 @@ await test("academia: «PASO 1/5» espera la acción del usuario y avanza solo",
   await page.locator("#academyCard").getByRole("button", { name: "Salir" }).click();
   assert.equal(await page.locator("#academyCard").count(), 0);
 });
+await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/volver, atrás/repetir, capítulos y preguntas sin IA", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); localStorage.removeItem("lumamap:academyCur"); });
+  // Desde el menú ☰ (como lo haría el usuario).
+  await page.locator('#top [data-act="menu"]').click();
+  await page.locator("#panelBody .item", { hasText: "Tutorial interactivo con Luma" }).click();
+  const card = page.locator("#academyCard");
+  await card.locator(".coachtext", { hasText: "Soy Luma" }).waitFor();
+  assert.match(await card.textContent(), /capítulo 1\/18: Conoce LumaMap/);
+  await card.getByRole("button", { name: "Siguiente ▶" }).click();
+  await card.locator(".coachtext", { hasText: "☰ es el menú" }).waitFor();
+  // Resalta el botón que hay que tocar; hacerlo de verdad pasa solo al siguiente paso.
+  await page.waitForFunction(() => document.querySelector('#top [data-act="menu"]').classList.contains("coach-hl"));
+  await page.evaluate(() => window.__lumamap.openTab(null));
+  await page.waitForTimeout(700);
+  assert.match(await card.textContent(), /PASO 2\//, "no avanza sin la acción");
+  await page.locator('#top [data-act="menu"]').click();
+  await card.locator(".coachok").waitFor();
+  await card.locator(".coachtext", { hasText: "Abre «Añadir»" }).waitFor();
+  // Ocultar: queda una burbuja; tocarla vuelve al mismo paso.
+  await card.getByTitle("Ocultar (queda una burbuja para volver)").click();
+  await page.locator("#academyCard .coachbubble").waitFor();
+  assert.equal(await card.locator(".coachtext").count(), 0);
+  await page.locator("#academyCard .coachbubble").click();
+  await card.locator(".coachtext", { hasText: "Abre «Añadir»" }).waitFor();
+  // ◀ vuelve al paso anterior y ⟲ lo repite: hay que volver a hacerlo (aunque el menú siga abierto).
+  await card.getByRole("button", { name: "◀" }).click();
+  await card.locator(".coachtext", { hasText: "☰ es el menú" }).waitFor();
+  await card.getByRole("button", { name: "⟲ Repetir" }).click();
+  await page.waitForTimeout(800);
+  assert.match(await card.textContent(), /PASO 2\//);
+  // «Hazlo por mí» lo hace (y Luma lo da por bueno).
+  await card.getByRole("button", { name: "Hazlo por mí" }).click();
+  await card.locator(".coachtext", { hasText: "Abre «Añadir»" }).waitFor();
+  // Pregúntale a Luma: sin IA responde la guía, y lo dice.
+  await card.getByRole("button", { name: "💬 Pregúntale" }).click();
+  await card.getByRole("textbox", { name: "Pregúntale a Luma" }).fill("¿cómo hago una máscara?");
+  await card.getByRole("button", { name: "Preguntar" }).click();
+  await card.locator(".coachans", { hasText: "Respondió:" }).waitFor({ timeout: 20000 });
+  assert.match(await card.locator(".coachans").textContent(), /m[aá]scara/i);
+  // Capítulos: cualquiera, cuando quieras.
+  await card.getByRole("button", { name: "📚 Capítulos" }).click();
+  await page.locator("#modal .coachlist .lesson").first().waitFor();
+  assert.equal(await page.locator("#modal .coachlist .lesson").count(), 18);
+  await page.locator("#modal .coachlist .lesson", { hasText: "3D: mapping sobre objetos" }).click();
+  await card.locator(".coachtext", { hasText: "pestaña «3D»" }).waitFor();
+  // Salir y «Continuar» vuelve al mismo sitio.
+  await card.getByRole("button", { name: "Salir" }).click();
+  await card.waitFor({ state: "detached" });
+  await page.evaluate(() => window.__lumamap.startTutorial());
+  await card.locator(".coachtext", { hasText: "pestaña «3D»" }).waitFor();
+  await card.getByTitle(/Salir del tutorial/).click();
+  await card.waitFor({ state: "detached" });
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); });
+});
 await test("Show Director y diagnóstico: plan de 6 secciones aplicado como escenas; salud del proyecto con puntuación", async () => {
   await page.evaluate(() => window.__lumamap.openTab("assistant"));
   await page.locator(".aiquick button", { hasText: "Detectar Problemas" }).click();
@@ -1381,7 +1435,9 @@ await test("3D para proyectar: con el teclado (flechas mueven lo elegido o giran
     const bar = await g.evaluate(() => { const b = document.querySelector("#ws3d .ws3d-bar"); const help = document.querySelector("#ws3d .ws3d-help"); const more = document.querySelector("#ws3d .ws3d-more"); return { h: b.getBoundingClientRect().height, help: getComputedStyle(help).display, more: getComputedStyle(more).display }; });
     assert.ok(bar.h < 60, "una fila: " + bar.h);
     assert.equal(bar.help, "none"); assert.equal(bar.more, "none");
-    await g.locator("#ws3d .ws3d-moreb").click();
+    // (con el 3D dibujando por software la máquina va lenta: se toca sin esperar a que «quede quieto»)
+    await g.locator("#ws3d .ws3d-moreb").waitFor({ state: "visible" });
+    await g.locator("#ws3d .ws3d-moreb").dispatchEvent("click");
     assert.equal(await g.evaluate(() => getComputedStyle(document.querySelector("#ws3d .ws3d-more")).display), "contents", "«⋯» enseña el resto");
     assert.deepEqual(errs, []);
   } finally { await kctx.close(); }

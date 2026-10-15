@@ -107,6 +107,32 @@ jobs:
           path: ${{ runner.temp }}/shots
           if-no-files-found: ignore
 
+  # La IA local de verdad: instala Ollama (el oficial), lo arranca y comprueba con el código de la
+  # app que se detecta, que «Descargar la IA» baja el modelo y que Luma y el asistente responden.
+  # Informativa: si los servidores de Ollama fallan no frena la publicación de la app.
+  ollama:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Instalar y arrancar Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          (ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &)
+          for i in $(seq 1 30); do curl -fsS http://localhost:11434/api/version && break; sleep 2; done
+      - name: IA local real (detectar, descargar, Luma responde, asistente)
+        working-directory: lumamap
+        env:
+          REQUIRE_OLLAMA: "1"
+          OLLAMA_MODEL: qwen3:0.6b
+        run: node tests/ollama-real.test.js
+      - name: Registro de Ollama
+        if: always()
+        run: tail -n 60 "$RUNNER_TEMP/ollama.log" || true
+
   windows:
     runs-on: windows-latest
     timeout-minutes: 30

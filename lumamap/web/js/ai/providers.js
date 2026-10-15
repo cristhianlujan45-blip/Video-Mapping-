@@ -144,7 +144,7 @@ export class AIProvider {
     try {
       const out = await this.ask({ system: SYSTEM, user: `Explica de forma breve y práctica, paso a paso si hace falta, esta duda: «${topic}». Usa solo esta guía:\n${arts.map(a => a.title + ": " + a.text).join("\n")}\nResponde JSON {"reply": "..."}`, schema: { type: "object", properties: { reply: { type: "string" } }, required: ["reply"] } });
       return { text: out.reply, articles: arts };
-    } catch { return { text: arts[0].text, articles: arts }; }
+    } catch { return { text: arts[0].text, articles: arts, fallback: true }; }
   }
   async diagnoseProblem(ctx, question = "") {
     const an = analyzeProject(ctx);

@@ -1135,6 +1135,7 @@ const menu = {
         item("midi", "Conectar controlador MIDI", () => { A.midi(); if (S.pro) app.openTab("control"); }, S.pro ? "Asigna cualquier control con clic derecho → Aprender" : "Activa el Modo profesional para asignar knobs y faders"),
         item("live", "Control desde el móvil y OSC", () => A.remoteInfo(), "Maneja el show desde el navegador del teléfono o desde una mesa OSC"))),
       section("Ayuda y sistema", h("div", { class: "list" },
+        item("ai", "🎓 Tutorial interactivo con Luma", () => app.startTutorial?.(), "Una guía con IA te enseña toda la herramienta con actividades · ocultar, saltar o repetir cuando quieras"),
         item("info", "✨ Novedades de esta versión", () => app.openNews?.(), "Lo nuevo (nodos y señales como TouchDesigner, exportar a 4K, calibrar con la cámara…) con un botón para ir a cada cosa"),
         item("help", "Ayuda y atajos", () => A.help()),
         item("wand", "Todos los comandos", A.palette, "Busca cualquier acción escribiendo · Ctrl+K"),

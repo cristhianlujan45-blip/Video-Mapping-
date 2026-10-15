@@ -105,7 +105,7 @@ export function parseCommand(app, text) {
       actions: [A("hologram_setup", { type: /pir[aá]mide/.test(t) ? "piramide" : /\b(tul|tela|gasa)\b/.test(t) ? "tul" : "escenario", n: pn ? num(pn[1]) : 1 })] };
   }
   if (/(c[oó]mo|ens[eé][ñn]ame|mu[eé]strame|aprender|tutorial|expl[ií]ca)/.test(t)) {
-    const lesson = /nodo|touch ?designer|se[ñn]al|\blfo\b|mi panel/.test(t) ? 11 : /(efecto|filtro)s? (de|para) (la )?c[aá]mara|filtro/.test(t) ? 12 : /m[aá]scara/.test(t) ? 2 : /malla|warp|curv/.test(t) ? 3 : /varias superficies/.test(t) ? 4 : /proyectores|blending|bordes/.test(t) ? 5 : /vj|en vivo/.test(t) ? 6 : /audio|m[uú]sica/.test(t) ? 7 : /luz|luces|dmx/.test(t) ? 8 : /interactiv|tracking|c[aá]mara/.test(t) ? 9 : /show|escena|cue/.test(t) ? 10 : /calibr|esquina|mapping|empez/.test(t) ? 1 : 0;
+    const lesson = /nodo|touch ?designer|se[ñn]al|\blfo\b|mi panel/.test(t) ? 11 : /(efecto|filtro)s? (de|para) (la )?c[aá]mara|filtro/.test(t) ? 12 : /\b3d\b|cubo|objeto/.test(t) ? 17 : /export|l[ií]nea de tiempo/.test(t) ? 15 : /mesa de clips|resolume/.test(t) ? 16 : /m[aá]scara/.test(t) ? 2 : /malla|warp|curv/.test(t) ? 3 : /varias superficies/.test(t) ? 4 : /proyectores|blending|bordes/.test(t) ? 5 : /vj|en vivo/.test(t) ? 6 : /audio|m[uú]sica/.test(t) ? 7 : /luz|luces|dmx/.test(t) ? 8 : /interactiv|tracking|c[aá]mara/.test(t) ? 9 : /show|escena|cue/.test(t) ? 10 : /calibr|esquina|mapping|empez/.test(t) ? 1 : /tutorial|toda la herramienta|a usar|todo\b/.test(t) && !/desactiv|apaga|quita/.test(t) ? 13 : 0;
     return { intent: "explain", reply: lesson ? "Te lo enseño paso a paso." : "", actions: lesson ? [A("start_lesson", { level: lesson })] : [] };
   }
 

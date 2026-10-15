@@ -10,6 +10,7 @@ import { AIEngine, MSG } from "./ai/providers.js";
 import { validateAction, applyAction } from "./ai/actions.js";
 import { AREAS, analyzeProject } from "./ai/analyzer.js";
 import { Academy, LEVELS } from "./ai/academy.js";
+import { coachChanged, coachTick, openChapters } from "./coach.js";
 import { tutorialOn, setTutorial } from "./tutorial.js";
 import { planChanges, applyPlan, planFromSong } from "./ai/showplan.js";
 import { analyzeFile } from "./ai/songanalysis.js";
@@ -26,6 +27,8 @@ export function aiOf(app) {
     app.ai = new AIEngine(app);
     app.academy = new Academy(app);
     app.academy.onChange = () => { paintAcademy(app); if (app.S.tab === "assistant") app.renderPanel(); };
+    // El resaltado del tutorial sigue al botón aunque el panel se redibuje.
+    setInterval(() => { try { coachTick(app); } catch {} }, 700);
     if (app.ai.settings.saveConversations) { try { ui.log = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch {} }
   }
   return app.ai;
@@ -221,27 +224,15 @@ function autoMapCard(app, res) {
 /* ---------------- Academia ---------------- */
 function academyList(app) {
   const A = app.academy;
-  return h("div", { class: "aicard" }, h("b", {}, "🎓 Academia de video mapping"), hint("Lecciones paso a paso: el asistente te dice una cosa y espera a que la hagas. La 11 enseña los nodos y las señales (como TouchDesigner) y la 12 los efectos de cámara y filtros."),
+  return h("div", { class: "aicard" }, h("b", {}, "🎓 Academia de video mapping"),
+    h("div", { class: "row" }, btn({ label: A.saved() ? "▶ Continuar el tutorial con Luma" : "▶ Tutorial con Luma (todo, paso a paso)", kind: "primary", onClick: () => { ui.card = null; A.startCourse(); app.renderPanel(); } }),
+      btn({ label: "📚 Capítulos", kind: "small", onClick: () => openChapters(app) })), hint("Lecciones paso a paso: el asistente te dice una cosa y espera a que la hagas. La 11 enseña los nodos y las señales (como TouchDesigner) y la 12 los efectos de cámara y filtros."),
     toggle({ label: "Tutorial guiado", hint: "Consejos la primera vez que abres algo nuevo (nodos, señales, Mi panel, efectos de cámara). Apagado: no sale nada.", value: tutorialOn(), onChange: (v) => { setTutorial(v, app); app.renderPanel(); } }),
     h("div", { class: "lessons" }, ...LEVELS.map(L => h("button", { class: `lesson ${A.done.has(L.level) ? "done" : ""}`, onclick: () => { A.start(L.level); ui.card = null; app.renderPanel(); } },
       h("b", {}, `${A.done.has(L.level) ? "✓" : L.level}`), h("span", {}, L.title), h("small", {}, `${L.steps.length} pasos`)))));
 }
-/** Tarjeta flotante del paso actual (encima del escenario, pequeña). */
-function paintAcademy(app) {
-  let el = document.getElementById("academyCard");
-  const A = app.academy, L = A?.level, st = A?.step;
-  if (!st) {
-    el?.remove();
-    if (A?.finished) { toast(`🎓 ¡Lección ${A.finished} completada!`); A.finished = 0; }
-    return;
-  }
-  if (!el) { el = h("div", { id: "academyCard", class: "academy" }); document.getElementById("stage")?.append(el); }
-  el.replaceChildren(
-    h("small", {}, `Academia · Nivel ${L.level}: ${L.title}`),
-    h("b", {}, `PASO ${A.cur.i + 1}/${L.steps.length}`),
-    h("p", {}, st.text),
-    h("div", { class: "row" }, btn({ label: "Saltar paso", kind: "small", onClick: () => A.next() }), btn({ label: "Salir", kind: "small", onClick: () => A.stop() })));
-}
+/** Tarjeta del tutorial (Luma, coach.js). */
+function paintAcademy(app) { coachChanged(app); }
 
 /* ---------------- IA local: instalar y descargar con un toque ---------------- */
 const pull = { model: "", phase: "", done: 0, total: 0, error: "", retries: 0, speed: 0, samples: [] };

@@ -781,3 +781,35 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
   .ws3d-nav .vbtns{display:none;}
   .ws3d-nav .vsel{display:block;flex:none;}
 }
+/* 🎓 Tutorial con Luma (coach.js): tarjeta, burbuja al ocultarlo y resaltado de lo que hay que tocar */
+.academy.coach{max-width:360px;width:calc(100% - 24px);z-index:30;gap:6px;max-height:calc(100% - 24px);overflow:auto;}
+.coachhead{display:flex;align-items:center;gap:8px;}
+.coachhead > div{display:flex;flex-direction:column;min-width:0;}
+.coachhead small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.coachav{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:20px;background:linear-gradient(135deg,var(--acc),#7a5cff);box-shadow:0 0 12px #7a5cff66;}
+.coachx{flex:none;width:30px;height:30px;border-radius:9px;background:var(--bg3);border:1px solid var(--line);color:var(--text);font-size:14px;display:grid;place-items:center;}
+.coachdots{display:flex;gap:4px;}
+.coachdots i{flex:1;height:4px;border-radius:2px;background:var(--bg4);}
+.coachdots i.ok{background:var(--ok);} .coachdots i.on{background:var(--acc);}
+.academy .coachtext{font-size:15px;line-height:1.4;}
+.academy .coachok{color:var(--ok);font-weight:600;}
+.coachbtns{flex-wrap:wrap;gap:4px;}
+.coachask{gap:4px;flex-wrap:nowrap;} .coachask .text-in{flex:1;min-width:0;}
+.coachans{background:var(--bg3);border-radius:10px;padding:7px 9px;font-size:13px;max-height:160px;overflow:auto;}
+.coachans p{font-size:13px !important;}
+.academy.coach.mini{padding:0;border:none;background:none;box-shadow:none;max-width:none;width:auto;backdrop-filter:none;}
+.coachbubble{border-radius:20px;padding:8px 14px;background:linear-gradient(135deg,var(--acc),#7a5cff);color:#fff;font-weight:600;border:none;box-shadow:0 4px 16px #0008;}
+.coachbubble small{color:#fff !important;opacity:.85;}
+.coach-hl{outline:3px solid #ffd23f !important;outline-offset:2px;border-radius:8px;animation:coachpulse 1.2s ease-in-out infinite;}
+@keyframes coachpulse{0%,100%{outline-color:#ffd23f;box-shadow:0 0 0 0 #ffd23f66;}50%{outline-color:#ff9f1a;box-shadow:0 0 0 6px #ffd23f00;}}
+.coachlist{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));}
+.lesson.on{border-color:var(--acc);}
+@media (max-width:700px), (max-height:520px) and (orientation:landscape){
+  .academy.coach{left:6px;right:6px;bottom:6px;width:auto;max-width:none;padding:8px 10px;max-height:55%;}
+  .academy .coachtext{font-size:14px;}
+  .coachbtns .btn{padding:4px 8px;}
+}
+@media (prefers-reduced-motion:reduce){ .coach-hl{animation:none;} }
+.welcome-learn{margin-top:12px;display:flex;flex-direction:column;gap:4px;text-align:center;}
+@media (max-width:700px), (max-height:520px) and (orientation:landscape){ .academy.coach .coachwait{display:none;} .academy.coach .coachhead small{font-size:11px;} }
+@media (max-width:700px), (max-height:520px) and (orientation:landscape){ .academy.coach.mini{right:auto;max-height:none;padding:0;} }

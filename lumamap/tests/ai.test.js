@@ -120,9 +120,13 @@ await test("la IA enseña los nodos (como TouchDesigner) y los efectos de cámar
   assert.equal(lesson("enséñame los efectos de cámara"), 12);
   assert.equal(lesson("enséñame las máscaras"), 2);
   assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 12 } }).ok, true);
-  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 13 } }).ok, false);
+  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 17 } }).ok, true);
+  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 19 } }).ok, false);
+  assert.equal(lesson("enséñame a usar toda la herramienta"), 13);
+  assert.equal(lesson("cómo proyecto sobre un cubo en 3d"), 17);
+  assert.equal(lesson("cómo exporto el show"), 15);
   const { LEVELS } = await import("../web/js/ai/academy.js");
-  assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
   const { searchKnowledge } = await import("../web/js/ai/knowledge.js");
   assert.equal(searchKnowledge("cómo uso la red de nodos")[0].id, "nodos");
   assert.equal(searchKnowledge("desactivar el tutorial")[0].id, "tutorial");
@@ -382,6 +386,48 @@ await test("IA arreglada: entiende las frases de todos los días (y las aplica)"
   assert.deepEqual([look().source.type, look().source.text], ["text", "HOLA"]);
   await applyAction(app, validateAction(app, { action: "reset_fx", parameters: { surface: "all" } }));
   assert.equal(look().fx.style, M.DEFAULT_FX().style);
+});
+
+await test("tutorial con Luma: actividades que se comprueban, atrás/repetir/saltar/ocultar, capítulos y «Continuar» donde lo dejaste", async () => {
+  const { Academy, COURSE, LEVELS } = await import("../web/js/ai/academy.js");
+  // Todos los capítulos del curso existen, sin repetir, y cada paso o se comprueba o es explicativo.
+  assert.equal(new Set(COURSE).size, COURSE.length);
+  assert.deepEqual([...COURSE].sort((a, b) => a - b), LEVELS.map(l => l.level));
+  for (const L of LEVELS) for (const st of L.steps) assert.ok(st.info || typeof st.check === "function", `${L.title}: «${st.text}»`);
+  mem.clear();
+  const app = makeApp(); app.openTab = (t) => { app.S.tab = t; }; app.S.tab = null;
+  const A = new Academy(app); let changes = 0; A.onChange = () => changes++;
+  A.startCourse();
+  assert.equal(A.cur.level, COURSE[0]); assert.equal(A.cur.i, 0);
+  assert.ok(A.step.info, "el primer paso es la presentación de Luma");
+  A.next();                                      // «Siguiente» en un paso explicativo
+  assert.equal(A.cur.i, 1);
+  A.check(); assert.equal(A.doneFlash, false, "no avanza sin hacerlo");
+  app.openTab("menu"); A.check();                // la actividad: abrir ☰
+  assert.equal(A.doneFlash, true);
+  await new Promise(r => setTimeout(r, 1000));
+  assert.equal(A.cur.i, 2, "pasa sola al siguiente");
+  A.prev(); assert.equal(A.cur.i, 1);            // ◀
+  A.repeat(); assert.equal(A.cur.i, 1);          // ⟲
+  A.hide(true); assert.equal(A.hidden, true); A.hide(false); assert.equal(A.hidden, false);
+  A.next(); A.next();                            // saltar dos pasos
+  assert.equal(A.cur.i, 3);
+  A.doIt();                                      // «Hazlo por mí»: crea el rectángulo
+  assert.equal(app.S.project.surfaces.length, 1);
+  // «Salir» y volver: sigue donde lo dejó.
+  A.stop(); assert.equal(A.cur, null);
+  const B = new Academy(app); B.startCourse();
+  assert.deepEqual([B.cur.level, B.cur.i], [COURSE[0], 3]);
+  // Terminar el capítulo: queda hecho, se ofrece el siguiente y «Continuar» empieza por él.
+  while (B.cur) B.next();
+  assert.ok(B.done.has(COURSE[0])); assert.equal(B.finished, COURSE[0]); assert.equal(B.nextLevel(B.finished), COURSE[1]);
+  const C = new Academy(app); C.startCourse(); assert.equal(C.cur.level, COURSE[1]); C.stop();
+  // Cualquier capítulo cuando quieras; «Empezar de cero» borra el progreso.
+  C.start(17); assert.equal(C.level.title, "3D: mapping sobre objetos"); C.stop();
+  C.resetProgress(); assert.equal(C.done.size, 0); assert.equal(C.saved(), null);
+  C.startCourse({ restart: true }); assert.equal(C.cur.level, COURSE[0]); C.stop();
+  B.stop(); A.stop();
+  assert.ok(changes > 5);
 });
 
 report();

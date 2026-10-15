@@ -12,6 +12,10 @@ const sig = (s) => s ? JSON.stringify(s.points) : "";
 const nodesOpen = () => typeof document !== "undefined" && !!document.querySelector(".nodes .nodenet");
 // Efecto de cámara / filtro puesto: qué imagen le entra ("camera" o "media"), o "".
 const camFx = (app) => { const src = look(app)?.source; if (src?.type !== "shader") return ""; const i = getShader(src.shaderId)?.isf.inputs.find(x => x.type === "image"); return i ? ((src.shaderParams || {})[i.name]?.kind === "media" ? "media" : "camera") : ""; };
+// Botón de una pestaña en la barra de abajo (o «Más» si en el teléfono no cabe).
+const dock = (id) => [`#dock [data-tab="${id}"]`, "#dock .more"];
+// «Hazlo por mí» de «abre la pestaña…»: abrirla (sin cerrarla si ya lo estaba).
+const openT = (t) => (app) => { if (app.S.tab !== t) app.openTab(t); };
 const outputsOpen = (app) => { try { return (app.perf?.().outputs || []).length > 0 || !!app.S.projecting || !!app.S.output; } catch { return false; } };
 
 export const LEVELS = [
@@ -93,35 +97,116 @@ export const LEVELS = [
   ] },
 ];
 
-const KEY = "lumamap:academy";
+
+// ---- Capítulos del tutorial interactivo con Luma (el curso completo, en orden) ----
+const objs3d = (app) => app.S.project.stage3d?.objects || [];
+const sig3d = (app) => JSON.stringify(objs3d(app).map(o => [o.pos, o.rot, o.scale]));
+const faceLooks = (app) => { const sc = currentScene(app.S.project); return JSON.stringify((app.S.project.stage3d?.faces || []).map(f => sc.looks[f.id]?.source || null)); };
+const modalTitle = () => (typeof document !== "undefined" && document.querySelector("#modal.show h2")?.textContent) || "";
+LEVELS.push(
+  { level: 13, title: "Conoce LumaMap", steps: [
+    { text: "¡Hola! Soy Luma 🤖, tu guía. Te enseño LumaMap con actividades cortas: tú lo haces y yo compruebo que salió. Puedes ocultarme (🙈), volver atrás, repetir o saltar un paso cuando quieras. Pulsa «Siguiente».", info: true },
+    { text: "Arriba a la izquierda, ☰ es el menú: proyectos, guardar, ayuda y ajustes. Ábrelo.", target: '#top [data-act="menu"]', check: (app) => app.S.tab === "menu", doIt: openT("menu") },
+    { text: "Abajo están las pestañas. Abre «Añadir».", target: dock("add"), check: (app) => app.S.tab === "add", doIt: openT("add") },
+    { text: "Toca «Rectángulo»: crea una superficie, la «tela» donde se proyecta.", target: { sel: "#panelBody button, #panelBody .tile", text: "Rectángulo" }, start: (app) => ({ n: app.S.project.surfaces.length }), check: (app, b) => app.S.project.surfaces.length > b.n, doIt: (app) => app.actions.addShape("rect") },
+    { text: "Las bolitas de las esquinas se arrastran hasta las esquinas de tu pared u objeto real. Mueve una.", target: "#stage", start: (app) => ({ s: sig(sel(app)) }), check: (app, b) => !!sel(app) && sig(sel(app)) !== b.s },
+    { text: "«Proyectar» (arriba a la derecha) manda la imagen al proyector. Ábrelo.", target: "#btnProject", check: (app) => app.S.tab === "output", doIt: openT("output") },
+    { text: "Dos salvavidas: ↶ deshace cualquier cosa (Ctrl+Z) y ✨ «¿Qué hago ahora?» te dice el siguiente paso. ¡Listo para el primer mapping!", target: "#btnNext", info: true },
+  ] },
+  { level: 14, title: "Contenido y efectos", steps: [
+    { text: "Toca una superficie en el escenario para elegirla (o crea una: Añadir → Rectángulo).", check: (app) => !!sel(app), doIt: (app) => app.actions.addShape("rect") },
+    { text: "Abre la pestaña «Contenido»: qué se ve dentro (animación, video, foto, cámara, texto…).", target: dock("content"), check: (app) => app.S.tab === "content", doIt: openT("content") },
+    { text: "Elige «Texto» y escribe tu nombre.", target: { sel: "#panelBody button, #panelBody .tile", text: "Texto" }, check: (app) => look(app)?.source.type === "text", doIt: (app) => app.actions.setSource({ type: "text" }) },
+    { text: "Abre «Efectos».", target: dock("fx"), check: (app) => app.S.tab === "fx", doIt: openT("fx") },
+    { text: "En «Color», mueve «Brillo» o «Contraste»: los efectos se ajustan en directo.", start: (app) => ({ f: JSON.stringify(look(app)?.fx || {}) }), check: (app, b) => !!look(app) && JSON.stringify(look(app).fx) !== b.f },
+    { text: "Toca un efecto de la biblioteca (por ejemplo «Contorno neón»). «Quitar todos los efectos» (al final) lo deja como estaba.", start: (app) => ({ f: JSON.stringify(look(app)?.fx || {}) }), check: (app, b) => !!look(app) && JSON.stringify(look(app).fx) !== b.f },
+  ] },
+  { level: 15, title: "Línea de tiempo y video", steps: [
+    { text: "Abre «Escenas»: cada escena es un momento del show.", target: dock("scenes"), check: (app) => app.S.tab === "scenes", doIt: openT("scenes") },
+    { text: "Crea otra escena con «Nueva escena (copia de la actual)».", check: (app) => app.S.project.scenes.length >= 2, doIt: (app) => app.actions.addScene() },
+    { text: "En la línea de tiempo, arrastra el borde derecho de una escena para darle duración.", target: "#panelBody .tlgrip", check: (app) => app.S.project.scenes.some(s => s.duration > 0) },
+    { text: "Pulsa «▶ Desde el principio»: el show avanza solo, escena tras escena.", target: { sel: "#panelBody button", text: "Desde el principio" }, check: (app) => !!app.S.playing && !!app.S.project.settings.autoAdvance },
+    { text: "Abre «🎬 Exportar video»: así sacas el show en MP4 hasta 4K (puedes cerrarlo sin exportar).", target: { sel: "#panelBody button", text: "Exportar video" }, check: () => /Exportar el show/.test(modalTitle()) },
+  ] },
+  { level: 16, title: "En vivo: mesa de clips y VJ", steps: [
+    { text: "Abre «En vivo».", target: dock("live"), check: (app) => app.S.tab === "live", doIt: openT("live") },
+    { text: "Toca «Mesa de clips»: como en Resolume, cada fila es una superficie y cada columna un momento.", target: { sel: "#panelBody .livesubs button", text: "Mesa" }, check: (app) => app.S.tab === "live" && app.S.liveSub === "clips" },
+    { text: "Toca «VJ automático»: mezcla solo, al ritmo de la música, con «Mi set».", target: { sel: "#panelBody .livesubs button", text: "VJ" }, check: (app) => app.S.tab === "live" && app.S.liveSub === "vj" },
+    { text: "Cuando tengas música, pulsa «Empezar» en el VJ automático y mira cómo cambia solo. Por ahora, «Siguiente».", info: true },
+  ] },
+  { level: 17, title: "3D: mapping sobre objetos", steps: [
+    { text: "Abre la pestaña «3D» (si no la ves abajo, está en «Más»).", target: dock("3d"), check: (app) => app.S.tab === "3d", doIt: openT("3d") },
+    { text: "Añade un cubo: «1 · Objeto» → «+ Cubo».", target: { sel: "#panelBody .chip", text: "+ Cubo" }, check: (app) => objs3d(app).some(o => o.kind === "cube"), doIt: (app) => { app.stage3d?.addObject("cube"); app.changed({ panel: true }); } },
+    { text: "Toca el cubo y muévelo: con las flechas del teclado (Re Pág / Av Pág para subir) o arrastrando las flechas de colores.", start: (app) => ({ s: sig3d(app) }), check: (app, b) => sig3d(app) !== b.s },
+    { text: "Toca una cara del cubo y ponle una animación.", start: (app) => ({ s: faceLooks(app) }), check: (app, b) => faceLooks(app) !== b.s },
+    { text: "Pon un proyector: «3 · Proyectores» → «1 proyector».", target: { sel: "#panelBody .chip", text: "1 proyector" }, check: (app) => (app.S.project.stage3d?.projectors || []).length > 0 },
+    { text: "Toca «Ver desde proyector»: así se verá sobre el objeto real.", target: { sel: "#ws3d button", text: "Ver desde proyector" }, check: (app) => !!app.stage3d?.vp?.viewFrom },
+    { text: "Con una caja de verdad, «📷 Objeto real con la cámara» la reconoce y calibra sola. ¡Ya sabes lo básico del 3D!", info: true },
+  ] },
+  { level: 18, title: "Tu ayudante con IA", steps: [
+    { text: "Abre «Asistente» (si no lo ves abajo, está en «Más»): propone qué hacer, revisa tu proyecto y prepara shows.", target: dock("assistant"), check: (app) => app.S.tab === "assistant", doIt: openT("assistant") },
+    { text: "Pregúntame algo aquí abajo y pulsa «Preguntar». Por ejemplo: «¿cómo hago una máscara?».", ask: true, check: (app) => (app.academy?.asked || 0) > 0 },
+    { text: "La IA es opcional. Con Ollama (gratis, en tu equipo) respondo mejor: Asistente → «Descargar la IA». Sin ella respondo con la guía.", info: true },
+  ] },
+);
+/** El curso completo, en el orden recomendado (cada número es un capítulo de LEVELS). */
+export const COURSE = [13, 1, 14, 2, 3, 4, 15, 10, 16, 6, 7, 11, 12, 9, 8, 17, 5, 18];
+
+const KEY = "lumamap:academy", CUR = "lumamap:academyCur";
 export class Academy {
   constructor(app) {
     this.app = app; this.cur = null; this.timer = 0; this.onChange = () => {};
+    this.hidden = false; this.asked = 0; this.doneFlash = false;
     try { this.done = new Set(JSON.parse(localStorage.getItem(KEY) || "[]")); } catch { this.done = new Set(); }
   }
   get level() { return this.cur ? LEVELS.find(l => l.level === this.cur.level) : null; }
   get step() { return this.level?.steps[this.cur.i] || null; }
-  start(level) {
+  /** Dónde se quedó (para «Continuar»), o null. */
+  saved() { try { const c = JSON.parse(localStorage.getItem(CUR) || "null"); return c && LEVELS.some(l => l.level === c.level) ? c : null; } catch { return null; } }
+  save() { try { localStorage.setItem(CUR, JSON.stringify(this.cur ? { level: this.cur.level, i: this.cur.i } : null)); } catch {} }
+  start(level, i = 0) {
     const L = LEVELS.find(l => l.level === level);
     if (!L) return;
-    this.cur = { level, i: 0, base: null };
+    this.cur = { level, i: Math.max(0, Math.min(L.steps.length - 1, i)), base: null };
+    this.finished = 0; this.hidden = false; this.doneFlash = false;
     this.enter();
     clearInterval(this.timer);
     // Comprobación ligera dos veces por segundo (solo mientras hay una lección abierta).
     this.timer = setInterval(() => this.check(), 500);
     this.onChange();
   }
-  enter() {
+  /** Empieza el curso (o lo continúa donde se quedó). */
+  startCourse({ restart = false } = {}) {
+    const c = !restart && this.saved();
+    if (c) return this.start(c.level, c.i);
+    this.start(COURSE.find(n => !this.done.has(n)) ?? COURSE[0]);
+  }
+  /** El capítulo que va después de este en el curso (o null al final). */
+  nextLevel(level = this.cur?.level ?? this.finished) {
+    const k = COURSE.indexOf(level);
+    return k >= 0 && k + 1 < COURSE.length ? COURSE[k + 1] : null;
+  }
+  /** back: se volvió a este paso (◀ / ⟲): no se da por hecho solo porque ya estaba así; hay que hacerlo otra vez. */
+  enter(back = false) {
     const st = this.step;
+    this.doneFlash = false;
+    this.cur.armed = !back;
     this.cur.base = st?.start ? st.start(this.app) : null;
     if (st?.tab && this.app.S.tab !== st.tab) this.app.openTab(st.tab);
+    this.save();
   }
   check() {
     const st = this.step;
     if (!st) return this.stop();
+    if (st.info || !st.check || this.doneFlash) return;
     let ok = false;
     try { ok = !!st.check(this.app, this.cur.base); } catch {}
-    if (ok) this.next();
+    if (!ok) this.cur.armed = true;
+    else if (this.cur.armed) {
+      // «¡Bien!» un momento y al siguiente paso.
+      this.doneFlash = true; this.onChange();
+      setTimeout(() => { if (this.doneFlash) this.next(); }, 900);
+    }
   }
   next() {
     if (!this.cur) return;
@@ -129,11 +214,20 @@ export class Academy {
     if (this.cur.i >= this.level.steps.length) {
       this.done.add(this.cur.level);
       try { localStorage.setItem(KEY, JSON.stringify([...this.done])); } catch {}
-      const lv = this.cur.level;
+      const lv = this.cur.level, nx = this.nextLevel(lv);
       this.stop();
       this.finished = lv;
+      // Para «Continuar» la próxima vez: el capítulo siguiente del curso.
+      try { localStorage.setItem(CUR, JSON.stringify(nx ? { level: nx, i: 0 } : null)); } catch {}
     } else this.enter();
     this.onChange();
   }
-  stop() { clearInterval(this.timer); this.timer = 0; this.cur = null; this.onChange(); }
+  prev() { if (!this.cur || this.cur.i === 0) return; this.cur.i--; this.enter(true); this.onChange(); }
+  /** Repetir el paso actual desde cero (vuelve a mirar el estado de partida). */
+  repeat() { if (!this.cur) return; this.enter(true); this.onChange(); }
+  /** Hacer el paso por el usuario (si el paso lo permite). */
+  doIt() { const st = this.step; if (!st?.doIt) return; this.cur.armed = true; try { st.doIt(this.app); } catch (e) { console.warn(e); } if (st.info) this.next(); }
+  hide(on = true) { this.hidden = on; this.onChange(); }
+  resetProgress() { this.done = new Set(); try { localStorage.removeItem(KEY); localStorage.removeItem(CUR); } catch {} this.onChange(); }
+  stop() { clearInterval(this.timer); this.timer = 0; this.cur = null; this.doneFlash = false; this.onChange(); }
 }

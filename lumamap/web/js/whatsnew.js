@@ -7,7 +7,7 @@ import { h, btn, dialog, closeDialog, hint, toast } from "./ui.js";
 import { openExport } from "./panels-export.js";
 
 /** Cambia cuando hay novedades nuevas que enseñar. */
-export const NEWS_REV = "2026-10-15";
+export const NEWS_REV = "2026-10-15b";
 const SEEN_KEY = "lumamap:newsSeen";
 const store = () => { try { return globalThis.localStorage || null; } catch { return null; } };
 // ¿Ya se había usado LumaMap en este equipo? Se mira al cargar, antes de que la app guarde nada.
@@ -32,6 +32,9 @@ export function goToSection(app, tab, text) {
 export function newsItems(app) {
   const live = (sub) => () => { app.S.liveSub = sub; app.openTab("live"); app.renderPanel(); };
   return [
+    ["🎓 Aprender", [
+      ["Tutorial interactivo con Luma", "Una guía con IA te enseña toda la herramienta con actividades: tú lo haces y Luma lo comprueba. Ocultar, saltar, repetir o elegir capítulo cuando quieras; puedes preguntarle lo que sea.", () => app.startTutorial?.()],
+    ]],
     ["🔗 Como TouchDesigner", [
       ["Red de nodos", "La cadena de cada superficie: fuente → señales → efectos → forma → mezcla → salida. Toca un nodo para abrirlo.", () => app.openNodes()],
       ["Señales en vivo", "Seguir sonido, golpe, ruido, azar y suavizado, con monitor en directo; muévelas a cualquier parámetro.", () => goToSection(app, "audio", "Señales en vivo")],

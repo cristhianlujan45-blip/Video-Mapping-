@@ -452,8 +452,8 @@ export const ACTIONS = {
     run: (app, p) => { const pro = ["tracking", "control", "perf"]; if (pro.includes(p.tab)) app.setPro(true); if (app.S.tab !== p.tab) app.openTab(p.tab); return "Panel abierto"; },
   },
   start_lesson: {
-    label: "Lección de la academia", params: { level: "1-12 (11 = nodos y señales como TouchDesigner, 12 = efectos de cámara y filtros)" },
-    check: (app, p) => ({ level: Math.round(num(p.level, "level", 1, 12)) }),
+    label: "Lección de la academia", params: { level: "1-18 (11 = nodos y señales como TouchDesigner, 12 = efectos de cámara y filtros, 13 = conoce LumaMap, 14 = contenido y efectos, 15 = línea de tiempo y exportar video, 16 = mesa de clips y VJ, 17 = 3D sobre objetos, 18 = la IA)" },
+    check: (app, p) => ({ level: Math.round(num(p.level, "level", 1, 18)) }),
     text: (app, p) => `Empezar la lección ${p.level} de la Academia`,
     run: (app, p) => { app.academy?.start(p.level); return "Lección en marcha"; },
   },
