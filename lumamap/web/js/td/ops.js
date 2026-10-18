@@ -108,6 +108,9 @@ top("feedback", "Feedback (memoria)", "La imagen del fotograma anterior de otro 
   [opRef("target", "TOP que recuerda", "TOP"), pulse("reset", "Borrar memoria")], null, { special: "feedback" });
 top("select", "Seleccionar", "Usa la imagen de otro TOP de la red sin cables (Select TOP).", [0, 0], [opRef("top", "TOP", "TOP")], null, { special: "select" });
 top("in", "Entrada de la subred", "Dentro de una subred (Base COMP): la imagen que le llega a la subred por esa entrada (In TOP).", [0, 0], [i("index", "Entrada n.º", 1, 1, 4)], null, { special: "in" });
+top("movieout", "Grabar video", "Graba lo que le entra en un video (.mp4 o .webm) a la resolución que elijas; al parar se guarda en la biblioteca y se descarga (Movie File Out TOP).", [1, 1],
+  [t("record", "● Grabando", 0), i("w", "Ancho", 1920, 64, 3840), i("h", "Alto", 1080, 64, 2160), m("fps", "Fotogramas por segundo", [[30, "30"], [60, "60"], [25, "25"], [24, "24"]], 30),
+    m("quality", "Calidad", [[0, "Normal (8 Mb/s)"], [1, "Alta (16 Mb/s)"], [2, "Máxima (40 Mb/s)"]], 1), s("name", "Nombre del archivo", "grabacion")], PASS, { special: "movieout" });
 top("resolution", "Resolución", "Cambia la resolución de la imagen (Resolution TOP).", [1, 1], [i("w", "Ancho", 1280, 16, 4096), i("h", "Alto", 720, 16, 4096)], PASS, { special: "resolution" });
 // Filtros
 top("level", "Nivel", "Brillo, contraste, gamma, opacidad y negativo (Level TOP).", [1, 1],
@@ -288,6 +291,25 @@ chop("animation", "Animación (fotogramas clave)", "Curvas con fotogramas clave 
 chop("audio", "Audio (niveles)", "El sonido que entra (micrófono o la canción): graves, medios, agudos, volumen y golpe (Audio Analysis CHOP).", [0, 0],
   [f("gain", "Ganancia", 1, 0, 5)],
   ({ p, env }) => { const L = env.levels || {}; const g = p.gain; return many([["bass", (L.bass || 0) * g], ["mid", (L.mid || 0) * g], ["high", (L.high || 0) * g], ["level", (L.level || 0) * g], ["beat", L.beat || 0], ["bpm", L.bpm || env.bpm || 120]]); });
+chop("audiofile", "Audio de un archivo", "Una canción o sonido de tu PC (.mp3, .wav, .ogg…): suena y da graves, medios, agudos, volumen, golpe y su posición (Audio File In CHOP). Va sincronizado en el editor y en las salidas.", [0, 0],
+  [{ k: "audio", label: "Archivo de audio", type: "audiofile", def: "" }, t("play", "Sonando", 1), t("sound", "Se oye (por los altavoces)", 1), f("volume", "Volumen", 0.8, 0, 1),
+    m("sync", "Tiempo", [[0, "Libre, en bucle (igual en todas las ventanas)"], [1, "Sigue la línea de tiempo de la red"]]), f("gain", "Ganancia del análisis", 1, 0, 5), i("bands", "Bandas de espectro (0 = no)", 0, 0, 256)],
+  ({ p, env, node }) => {
+    const A = env.audioFile?.(node, p, env.local) || null;
+    const g = p.gain, ch = [["bass", (A?.bass || 0) * g], ["mid", (A?.mid || 0) * g], ["high", (A?.high || 0) * g], ["level", (A?.level || 0) * g], ["beat", A?.beat || 0], ["position", A?.pos || 0], ["length", A?.dur || 0]];
+    if (p.bands > 0) {
+      const n = Math.max(2, p.bands | 0), out = new Array(n).fill(0), F = A?.fft;
+      if (F) { const L = F.length; for (let k = 0; k < n; k++) { const a = Math.floor(Math.pow(k / n, 1.6) * L), b = Math.max(a + 1, Math.floor(Math.pow((k + 1) / n, 1.6) * L)); let mx = 0; for (let j = a; j < b && j < L; j++) mx = Math.max(mx, F[j]); out[k] = Math.min(1, mx / 255 * g); } }
+      ch.push(["spectrum", out]);
+    }
+    return many(ch);
+  });
+chop("midiin", "MIDI In (todos)", "Todos los controles MIDI que se mueven, cada uno como un canal (cc7, note60…; de 0 a 1) (MIDI In CHOP).", [0, 0],
+  [s("only", "Solo estos (p. ej. cc1 cc7; vacío = todos)", "")],
+  ({ p, env }) => inputsChop(env.inputsAll?.("midi") || [], p.only));
+chop("oscin", "OSC In (todos)", "Todos los mensajes OSC que llegan, cada dirección como un canal (/fader/1 → fader_1) (OSC In CHOP).", [0, 0],
+  [s("only", "Solo estos (p. ej. fader_1; vacío = todos)", "")],
+  ({ p, env }) => inputsChop(env.inputsAll?.("osc") || [], p.only));
 chop("spectrum", "Espectro", "Las frecuencias del sonido en N bandas (Audio Spectrum CHOP): para barras o instancias.", [0, 0],
   [i("bins", "Bandas", 32, 2, 256), f("gain", "Ganancia", 1, 0, 5)],
   ({ p, env }) => {
@@ -483,6 +505,8 @@ comp("base", "Subred (Base COMP)", "Una caja con su propia red dentro, para orde
 comp("replicator", "Replicador", "Hace N copias de un nodo (el maestro), como el Replicator COMP: cada copia se llama prefijo1, prefijo2… y en sus expresiones me.digits es su número.", [0, 0],
   [opRef("master", "Maestro (el nodo que se copia)", "*"), i("count", "Copias", 4, 0, 200), s("prefix", "Nombre de las copias", "item"), t("follow", "Copiar los cambios del maestro", 1),
     t("wire", "Conectarlas como el maestro", 1), pulse("recreate", "Volver a crear")], { replicator: true });
+comp("window", "Ventana a un proyector", "Saca una imagen de la red directamente por una salida (pantalla 1 a 4) a pantalla completa, sin colocar superficies (Window COMP). Pulsa «Abrir» y lleva la ventana al proyector.", [0, 0],
+  [opRef("top", "Imagen (TOP)", "TOP"), i("screen", "Salida n.º", 2, 1, 4), pulse("open", "▶ Abrir la ventana")], { window: true });
 const PANEL = { page: "Panel" };
 comp("slider", "Deslizador (panel)", "Un deslizador para tu panel de control: muévelo en el nodo, en «Panel de control» o con MIDI. Canal: value (Slider COMP).", [0, 0],
   [f("value", "Posición (0…1)", 0.5, 0, 1), f("min", "Mínimo", 0, -100, 100), f("max", "Máximo", 1, -100, 100), s("label", "Texto", "", PANEL), c("color", "Color", "#00e5ff", PANEL)], { panel: true });
@@ -525,6 +549,19 @@ mat("wire", "Líneas (neón)", "Solo las aristas, de un color brillante (Wirefra
 add({ type: "text", fam: "DAT", label: "Texto (DAT)", desc: "Un texto para el Text TOP (Text DAT).", inputs: [0, 0], params: [{ k: "text", label: "Texto", type: "txt", def: "Hola" }] });
 add({ type: "table", fam: "DAT", label: "Tabla", desc: "Una tabla de números (filas y columnas separadas por comas) para usar con tab('tabla1', fila, columna) (Table DAT).", inputs: [0, 0],
   params: [{ k: "text", label: "Filas (una por línea, columnas con comas)", type: "txt", def: "0, 0.5, 1\n1, 0.2, 0.8" }] });
+
+/** Canales a partir de entradas de fuera [clave, valor]: «cc:7» → cc7, «/fader/1» → fader_1. */
+function inputsChop(list, only) {
+  const want = String(only || "").split(/[\s,]+/).filter(Boolean);
+  const pairs = [];
+  for (const [key, v] of list) {
+    const nm = String(key).replace(/^\/+/, "").replace(/[^A-Za-z0-9_]+/g, k => k === ":" ? "" : "_").replace(/^(\d)/, "c$1") || "chan";
+    if (want.length && !want.includes(nm)) continue;
+    if (!pairs.some(x => x[0] === nm)) pairs.push([nm, +v || 0]);
+  }
+  pairs.sort((a, b) => a[0].localeCompare(b[0], "es", { numeric: true }));
+  return pairs.length ? many(pairs) : chopOut([], {}, 1);
+}
 
 /* ---------------- Consultas ---------------- */
 export const OPS = Object.fromEntries(ops.map(o => [o.fam + ":" + o.type, o]));

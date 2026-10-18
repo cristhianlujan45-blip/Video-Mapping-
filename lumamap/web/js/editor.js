@@ -1058,6 +1058,8 @@ async function importMediaFiles(files) {
   return added;
 }
 setupQueue(app, { finish: (id, file) => importOne(file, id) });
+/** Importa un archivo a la biblioteca (lo usan, por ejemplo, las grabaciones del editor de redes). */
+app.importFile = (file) => importOne(file);
 app.openMediaLibrary = (o) => openMediaLibrary(app, o);
 
 /** Importa y coloca: sobre la superficie seleccionada o en una nueva con la proporción del archivo. */

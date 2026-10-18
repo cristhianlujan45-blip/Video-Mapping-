@@ -889,6 +889,59 @@ await test("redes de nodos: subredes (Ctrl+G, entrar, subir), replicador y panel
   await pv.getByRole("button", { name: "Cerrar el panel de control" }).click();
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
+await test("redes de nodos: MIDI In y OSC In (todos los controles), audio de un archivo, grabar video a la biblioteca y ventana a un proyector", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js"), Store = await import("./js/store.js");
+    let n, mi, oi, af, nz, mo, win;
+    // Un audio de 2 s con golpes graves (WAV hecho aquí).
+    const sr = 22050, len = sr * 2, buf = new ArrayBuffer(44 + len * 2), dv = new DataView(buf);
+    const w4 = (o, t) => { for (let k = 0; k < 4; k++) dv.setUint8(o + k, t.charCodeAt(k)); };
+    w4(0, "RIFF"); dv.setUint32(4, 36 + len * 2, true); w4(8, "WAVE"); w4(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w4(36, "data"); dv.setUint32(40, len * 2, true);
+    for (let k = 0; k < len; k++) { const t = k / sr, env = Math.exp(-((t % 0.5) * 10)); dv.setInt16(44 + k * 2, Math.sin(2 * Math.PI * 70 * t) * env * 30000, true); }
+    await Store.putMedia({ id: "mediaTestAudio", name: "golpes.wav", kind: "audio", blob: new Blob([buf], { type: "audio/wav" }), size: buf.byteLength });
+    a.edit(() => {
+      a.S.project.media.push({ id: "mediaTestAudio", name: "golpes.wav", kind: "audio", size: buf.byteLength });
+      n = G.newNetwork("IO"); a.S.project.networks.push(n);
+      mi = G.addNode(n, "CHOP", "midiin"); oi = G.addNode(n, "CHOP", "oscin");
+      af = G.addNode(n, "CHOP", "audiofile", { p: { audio: "mediaTestAudio", sound: 0 } });
+      nz = G.addNode(n, "TOP", "noise"); mo = G.addNode(n, "TOP", "movieout", { p: { w: 320, h: 180, name: "prueba" } }); G.connect(n, nz.id, mo.id, 0);
+      win = G.addNode(n, "COMP", "window", { p: { top: nz.name, screen: 2 } });
+    });
+    m.closeNetworkEditor(); await a.openNetwork({ netId: n.id });
+    // MIDI y OSC que llegan a LumaMap.
+    a.params.input({ src: "midi", device: "Prueba", key: "cc:7", v: 0.5, on: true });
+    a.params.input({ src: "osc", device: "OSC", key: "/fader/1", v: 0.25, on: true });
+    await new Promise(r => setTimeout(r, 300));
+    const ck = a.td.cookers.get(n.id);
+    const midi = ck.chop(mi).data, osc = ck.chop(oi).data;
+    // Grabar 1,5 s y parar: va a la biblioteca.
+    const before = a.S.project.media.filter(x => x.kind === "video").length;
+    a.edit(() => { mo.p.record = 1; });
+    await new Promise(r => setTimeout(r, 1500));
+    const recOn = !!a.td.recInfo(mo.id);
+    a.edit(() => { mo.p.record = 0; });
+    for (let k = 0; k < 50 && a.S.project.media.filter(x => x.kind === "video").length === before; k++) await new Promise(r => setTimeout(r, 200));
+    const vids = a.S.project.media.filter(x => x.kind === "video");
+    // Audio: suena (en silencio en la prueba) y se analiza.
+    let A = null;
+    for (let k = 0; k < 40; k++) { A = ck.chop(af)?.data; if (A?.length?.[0] > 0 && A.position[0] > 0.1) break; await new Promise(r => setTimeout(r, 100)); }
+    // Ventana a un proyector: una superficie a pantalla completa por la salida 2 con la red.
+    m._edForTests.openWindowComp(n, win);
+    const surf = a.S.project.surfaces.find(x => x.winOf === win.id);
+    const look = surf && a.S.project.scenes[0].looks[surf.id];
+    return { midi: midi.cc7?.[0], osc: osc.fader_1?.[0], recOn, newVideo: vids.length - before, lastName: vids.at(-1)?.name, audioLen: A?.length?.[0] || 0, audioPos: A?.position?.[0] || 0, err: a.td.info(n, af).error, surf: surf ? { screen: surf.screen, type: look?.source.type, netNode: look?.source.netNode === nz.id } : null };
+  });
+  assert.equal(r.midi, 0.5); assert.equal(r.osc, 0.25);
+  assert.ok(r.recOn, "estaba grabando");
+  assert.equal(r.newVideo, 1, "la grabación está en la biblioteca");
+  assert.match(r.lastName, /^prueba-.*\.(mp4|webm)$/);
+  assert.equal(r.err, "");
+  assert.ok(Math.abs(r.audioLen - 2) < 0.05, "el audio dura 2 s: " + r.audioLen);
+  assert.deepEqual(r.surf, { screen: 2, type: "net", netNode: true });
+  for (const p of ctx.pages()) if (p !== page) await p.close();
+  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
+});
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const g = await pctx.newPage();

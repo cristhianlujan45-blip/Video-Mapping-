@@ -111,6 +111,7 @@ export class NetEngine {
     this.topMs = new Map();
     this.history = new Map();     // CHOP → últimos valores (para los visores)
     this.models = new Map();      // archivo de modelo 3D → { geo, ver, err }
+    this.recs = new Map();        // Grabar video: nodo → { rec, canvas, t0, chunks… }
     this.installTaps();
   }
 
@@ -192,6 +193,8 @@ export class NetEngine {
       fft: () => globalThis.__lumaAudio?.()?.fft || (levels ? spectrumFromLevels(levels, this._fft ||= new Uint8Array(256)) : null),
       pointer: this.pointer, keys: this.keys,
       input: (src, key) => this.inputs.get(src + "|" + key) ?? 0,
+      inputsAll: (src) => { const out = []; for (const [k, v] of this.inputs) if (k.startsWith(src + "|")) out.push([k.slice(src.length + 1), v]); return out; },
+      audioFile: (node, p, local) => this.audioFile(node, p, local),
       tracking: (cam) => this.trackingSignals(cam),
       motion: (cam, sens) => this.motion(cam, sens),
     };
@@ -231,6 +234,12 @@ export class NetEngine {
     this.ensureFrame(time, levels);
     const out = [];
     for (const net of this.project?.networks || []) {
+      // Lo que tiene que funcionar aunque nadie use su salida: grabar video y que suene el audio.
+      for (const n of net.nodes) {
+        if (n.bypass) continue;
+        if (n.fam === "TOP" && n.type === "movieout" && (n.p.record || this.recs.has(n.id))) this.top(net, n);
+        else if (n.fam === "CHOP" && n.type === "audiofile") this.cooker(net).chop(n);
+      }
       if (!net.nodes.some(n => n.type === "export" && n.fam === "CHOP")) continue;
       for (const e of this.cooker(net).exports()) out.push(e);
     }
@@ -319,6 +328,7 @@ export class NetEngine {
       case "resolution": w = Math.max(16, Math.min(MAX_SIDE, p.w | 0)); h = Math.max(16, Math.min(MAX_SIDE, p.h | 0)); break;
       case "select": { const n = nodeByName(net, p.top); return n && n !== node ? this.top(net, n) : null; }
       case "in": return this.top(net, subIn(net, node));
+      case "movieout": if (first) this.record(net, node, p, first); return first || null;
       case "feedback": {
         const target = nodeByName(net, p.target);
         let f = this.fb.get(node.id);
@@ -704,6 +714,103 @@ export class NetEngine {
     return { tex: out.texture, w, h };
   }
 
+  /* ---------------- Audio de un archivo ---------------- */
+  /**
+   * Reproduce y analiza un audio de la biblioteca (Audio File In CHOP). Solo suena en la ventana
+   * del editor; en las salidas se analiza en silencio. Todas van a la misma posición (reloj de la
+   * pared o línea de tiempo de la red), corrigiendo si se separan.
+   */
+  audioFile(node, p, local = 0) {
+    const key = node.id + ":af";
+    let a = this.extra.get(key);
+    if (!a || a.media !== p.audio) {
+      if (a?.el) { a.el.pause(); a.el.removeAttribute("src"); try { a.src?.disconnect(); } catch {} if (a.url) URL.revokeObjectURL(a.url); }
+      a = { media: p.audio, el: null, ready: false, bins: null, beatT: -1, avg: 0, f: -1, out: null };
+      this.extra.set(key, a);
+      if (p.audio) this.loadAudio(a).catch(e => { a.err = String(e?.message || e); });
+    }
+    if (a.err) throw new Error("No se pudo leer el audio: " + a.err);
+    if (!a.ready) return null;
+    if (a.f === this.frameNo) return a.out;
+    a.f = this.frameNo;
+    const el = a.el, ctx = this.actx;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    a.gain.gain.value = this.opts.app && p.sound ? Math.max(0, Math.min(1, p.volume)) : 0;
+    if (p.play) { if (el.paused) el.play().catch(() => {}); } else if (!el.paused) el.pause();
+    const dur = el.duration || 0;
+    if (dur > 0 && p.play) {
+      const target = (p.sync | 0) === 1 ? Math.min(dur - 0.01, local || 0) : (Date.now() / 1000) % dur;
+      if (Math.abs(el.currentTime - target) > 0.3) { try { el.currentTime = target; } catch {} }
+    }
+    const an = a.an, b = a.bins ||= new Uint8Array(an.frequencyBinCount);
+    an.getByteFrequencyData(b);
+    const band = (lo, hi) => { const n = b.length, sr = ctx.sampleRate / 2; let s0 = 0, c = 0; for (let k = Math.floor(lo / sr * n); k < Math.min(n, Math.ceil(hi / sr * n)); k++) { s0 += b[k]; c++; } return c ? s0 / c / 255 : 0; };
+    const bass = band(20, 200), mid = band(200, 2000), high = band(2000, 12000), level = (bass + mid + high) / 3;
+    // Golpe: los graves suben de golpe por encima de su media.
+    a.avg = a.avg * 0.92 + bass * 0.08;
+    const t = this.time;
+    if (bass > a.avg * 1.35 && bass > 0.25 && t - a.beatT > 0.18) a.beatT = t;
+    const beat = t - a.beatT < 0.1 ? 1 : 0;
+    a.out = { bass, mid, high, level, beat, pos: el.currentTime || 0, dur, fft: b };
+    return a.out;
+  }
+  async loadAudio(a) {
+    const Store = await import("../store.js");
+    const rec = await Store.getMedia(a.media);
+    if (!rec?.blob) throw new Error("falta el archivo en la biblioteca");
+    const el = new Audio();
+    a.url = URL.createObjectURL(rec.blob);
+    el.src = a.url; el.loop = true; el.preload = "auto"; el.crossOrigin = "anonymous";
+    const ctx = this.actx ||= new (globalThis.AudioContext || globalThis.webkitAudioContext)();
+    a.src = ctx.createMediaElementSource(el);
+    a.an = ctx.createAnalyser(); a.an.fftSize = 1024; a.an.smoothingTimeConstant = 0.6;
+    a.gain = ctx.createGain(); a.gain.gain.value = 0;
+    a.src.connect(a.an); a.an.connect(a.gain); a.gain.connect(ctx.destination);
+    a.el = el; a.ready = true;
+  }
+
+  /* ---------------- Grabar video (Movie File Out TOP) ---------------- */
+  record(net, node, p, img) {
+    let R = this.recs.get(node.id);
+    const want = !!p.record && !!this.opts.app && typeof MediaRecorder !== "undefined";
+    if (!want) { if (R && R.state === "rec") this.stopRecord(node, R); return; }
+    if (!R || R.state !== "rec") {
+      const c = document.createElement("canvas");
+      c.width = Math.max(64, Math.min(3840, p.w | 0)) & ~1; c.height = Math.max(64, Math.min(2160, p.h | 0)) & ~1;
+      const fps = +p.fps || 30, bps = [8e6, 16e6, 40e6][p.quality | 0] || 16e6;
+      // WebM (VP9/VP8) primero: lo graba cualquier Chromium/Electron (el MP4 depende de que haya códec H.264).
+      const types = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4;codecs=avc1.640028", "video/mp4"];
+      const mime = types.find(t => MediaRecorder.isTypeSupported?.(t)) || "";
+      // Cada fotograma se entrega a mano (requestFrame): así no se pierde ninguno aunque el equipo vaya lento.
+      const stream = c.captureStream(0);
+      const rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: bps });
+      R = { state: "rec", canvas: c, g: c.getContext("2d"), rec, chunks: [], t0: performance.now(), mime: rec.mimeType || mime || "video/webm", name: String(p.name || "grabacion"), track: stream.getVideoTracks()[0], fps, last: 0 };
+      rec.ondataavailable = (e) => { if (e.data?.size) R.chunks.push(e.data); };
+      rec.start(1000);
+      this.recs.set(node.id, R);
+    }
+    const w = R.canvas.width, h = R.canvas.height;
+    this.ensureCanvas(w, h);
+    this.pass(this.mat("blit", BLIT), null, { s0: img.tex, srcSize: [img.w, img.h], fit: 1, flipX: 0 }, [0, 0, w, h]);
+    R.g.drawImage(this.canvas, 0, this.canvas.height - h, w, h, 0, 0, w, h);
+    const now = performance.now();
+    if (now - R.last >= 1000 / R.fps - 2) { R.last = now; R.track?.requestFrame?.(); }
+  }
+  stopRecord(node, R) {
+    R.state = "stopping";
+    R.rec.onstop = () => {
+      const blob = new Blob(R.chunks, { type: R.mime.split(";")[0] });
+      const ext = /mp4/.test(R.mime) ? "mp4" : "webm";
+      const name = `${R.name.replace(/[^\w-]+/g, "_") || "grabacion"}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${ext}`;
+      this.recs.delete(node.id);
+      this.lastRecording = { blob, name, secs: (performance.now() - R.t0) / 1000 };
+      this.opts.onRecorded?.(this.lastRecording);
+    };
+    try { R.rec.stop(); } catch { this.recs.delete(node.id); }
+  }
+  /** Estado de la grabación de un nodo: null o { secs }. */
+  recInfo(id) { const R = this.recs.get(id); return R ? { secs: (performance.now() - R.t0) / 1000, state: R.state } : null; }
+
   /** Simula las partículas de un nodo una vez por fotograma. */
   particleSim(net, node, pp) {
     const key = node.id + ":ps";
@@ -848,6 +955,7 @@ export class NetEngine {
       const id = k.replace(/^(sop|mat):/, "").split(":")[0];
       if (live.has(id)) continue;
       x.tex?.dispose?.(); x.geo?.dispose?.(); x.mat?.dispose?.(); x.rt?.dispose?.();
+      if (x.el) { x.el.pause(); try { x.src?.disconnect(); } catch {} if (x.url) URL.revokeObjectURL(x.url); }
       this.extra.delete(k);
     }
     for (const [id, f] of this.fb) if (!live.has(id)) { f.prev?.dispose(); this.fb.delete(id); }

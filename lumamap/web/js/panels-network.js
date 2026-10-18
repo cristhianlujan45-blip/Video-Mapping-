@@ -22,7 +22,7 @@ import { catalog, describe } from "./params.js";
 import { listCameras, cameraName } from "./sources.js";
 import { listShaders } from "./plugins.js";
 import { openNodes } from "./panels-nodes.js";
-import { uid } from "./model.js";
+import { uid, createQuad, rectCorners, addSurface } from "./model.js";
 
 const NW = 160, VIEW_H = 90, IN_Y0 = 36, IN_DY = 20, GRID = 10;
 const FAM_SHORT = { TOP: "TOP", CHOP: "CHOP", SOP: "SOP", COMP: "COMP", MAT: "MAT", DAT: "DAT" };
@@ -45,6 +45,7 @@ export const networkEditorOpen = () => ed.open;
 export async function openNetworkEditor(a, { netId = null, nodeId = null } = {}) {
   app = a;
   await app.ensureTd?.();
+  if (app.td) app.td.opts.onRecorded = (r) => saveRecording(r);
   closeDialog();
   if (!nets().length) app.edit(() => { const n = newNetwork("Red 1"); nets().push(n); });
   ed.netId = (netId && nets().some(n => n.id === netId)) ? netId : (nets().some(n => n.id === ed.netId) ? ed.netId : nets()[0].id);
@@ -266,6 +267,7 @@ function summary(n) {
     case "SOP": return n.type === "file" ? (app.S.project.media.find(m => m.id === p.model)?.name || "Sin archivo: elige uno") : def.label + (p.radius !== undefined ? ` · r ${val("radius")}` : "");
     case "COMP": if (n.type === "particles") return `${val("rate")}/s · vida ${val("life")} s`;
       if (n.type === "base") { const k = descendants(curNet(), n.id).length; return h("span", {}, `📦 ${k} nodo${k === 1 ? "" : "s"} dentro`, h("br"), h("small", {}, "doble clic: entrar")); }
+      if (n.type === "window") return `${p.top || "—"} → salida ${val("screen")}`;
       if (n.type === "replicator") { const k = curNet().nodes.filter(x => x.repOf === n.id).length; return `${k} copia${k === 1 ? "" : "s"} de ${p.master || "?"}`; }
       return n.type === "geo" ? (p.instancing ? `Instancias de ${p.instanceop || "?"}` : `Material: ${p.material || "—"}`) : n.type === "camera" ? `Fov ${val("fov")}°` : "Luz " + ["puntual", "sol", "foco", "ambiente"][p.kind | 0];
     case "MAT": { const sw = h("i", { class: "tdswatch" }); sw.style.background = p.color || "#888"; return h("span", {}, sw, " ", p.map ? "Textura: " + p.map : def.label); }
@@ -818,6 +820,8 @@ function nodePanel(net, n) {
     n.fam === "TOP" ? btn({ label: "▶ Usar en superficie", kind: "small", onClick: () => useOnSurface(n.id) }) : null,
     n.type === "animation" ? btn({ label: "◆ Curvas", kind: "small primary", onClick: () => openAnim(n.id) }) : null,
     n.type === "base" ? btn({ label: "📦 Entrar (I)", kind: "small primary", onClick: () => enterBase(n.id) }) : null,
+    n.type === "window" ? btn({ label: "▶ Abrir la ventana", kind: "small primary", onClick: () => openWindowComp(net, n) }) : null,
+    n.type === "movieout" ? btn({ label: n.p.record ? "■ Parar y guardar" : "● Grabar", kind: `small ${n.p.record ? "danger" : "primary"}`, onClick: () => { app.edit(() => { n.p.record = n.p.record ? 0 : 1; }); renderParams(); refreshNode(n); } }) : null,
     ["TOP", "CHOP"].includes(n.fam) ? btn({ label: "⧉ Visor", kind: "small", title: "Visor flotante (V)", onClick: () => openViewer(n.id) }) : null,
     btn({ label: "Borrar", kind: "small danger", onClick: () => { ed.sel = new Set([n.id]); deleteSel(); } }));
   box.append(head, h("p", { class: "tdppdesc" }, h("b", {}, def.label), " — ", def.desc), acts);
@@ -915,6 +919,13 @@ function paramRow(net, n, q) {
         btn({ label: "◆ Editar las curvas", kind: "small primary", onClick: () => openAnim(n.id) }));
       break;
     }
+    case "audiofile": {
+      const list = app.S.project.media.filter(m => m.kind === "audio");
+      const s = h("select", { class: "sel small", "aria-label": q.label }, h("option", { value: "" }, list.length ? "— elige un audio —" : "— aún no hay audios —"), ...list.map(m => h("option", { value: m.id, selected: m.id === v }, m.name)));
+      s.onchange = () => set(s.value);
+      ctl = h("div", {}, s, btn({ label: "Importar audio (.mp3 .wav .ogg .m4a .flac)…", kind: "small", onClick: () => importAudio((id) => { set(id); renderParams(); }) }));
+      break;
+    }
     case "model": {
       const models = app.S.project.media.filter(m => m.kind === "model");
       const s = h("select", { class: "sel small", "aria-label": q.label }, h("option", { value: "" }, models.length ? "— elige un modelo —" : "— aún no hay modelos 3D —"), ...models.map(m => h("option", { value: m.id, selected: m.id === v }, m.name)));
@@ -934,7 +945,7 @@ function paramRow(net, n, q) {
       s.onchange = () => set(s.value);
       ctl = s; break;
     }
-    case "pulse": ctl = btn({ label: q.label, kind: "small", onClick: () => set((+v || 0) + 1) }); break;
+    case "pulse": ctl = btn({ label: q.label, kind: "small", onClick: () => { set((+v || 0) + 1); if (n.type === "window" && q.k === "open") openWindowComp(net, n); } }); break;
     case "learn": ctl = btn({ label: "🎚 Aprender: mueve el control…", kind: "small", onClick: () => {
       toast("Mueve ahora un control MIDI, OSC, del mando o una tecla asignada…");
       app.td?.learn((ev) => { app.edit(() => { n.p.src = ev.src; n.p.key = ev.key; }); toast(`Aprendido: ${ev.src} · ${ev.key}`); renderParams(); });
@@ -1309,6 +1320,60 @@ function drawViewers(net, eng, time, lv) {
     } catch (e) { console.warn("visor flotante", e); }
   }
 }
+const fmtSecs = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+/** Importa un audio a la biblioteca de la red (para el «Audio de un archivo» CHOP). */
+function importAudio(done) {
+  const inp = h("input", { type: "file", accept: "audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac" });
+  inp.onchange = async () => {
+    const f = inp.files?.[0];
+    if (!f) return;
+    try {
+      const Store = await import("./store.js");
+      const id = uid("media");
+      await Store.putMedia({ id, name: f.name, kind: "audio", mime: f.type || "audio/mpeg", blob: f, size: f.size });
+      app.edit(() => app.S.project.media.push({ id, name: f.name, kind: "audio", size: f.size }));
+      toast(`Audio «${f.name}» listo`);
+      done?.(id);
+    } catch (e) { toast("No se pudo importar el audio: " + e.message, "warn"); }
+  };
+  inp.click();
+}
+/** Una grabación terminada (Grabar video): a la biblioteca y descargada. */
+async function saveRecording(r) {
+  if (!r.blob.size) { toast("La grabación salió vacía: este equipo no pudo codificar el video", "warn"); return; }
+  const file = new File([r.blob], r.name, { type: r.blob.type || "video/webm" });
+  try { await app.importFile?.(file); app.changed?.({ panel: true }); app.commitSoon?.(); } catch (e) { console.warn("grabación a la biblioteca", e); }
+  const a = h("a", { href: URL.createObjectURL(r.blob), download: r.name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  toast(`Grabación guardada (${fmtSecs(r.secs)}): ${r.name} · también en la biblioteca`);
+  if (ed.open) renderParams();
+}
+/** Una superficie que ocupa toda la salida. */
+function M_createFull(P, name) {
+  const s = createQuad({ name, corners: rectCorners(0, 0, P.width, P.height), cols: 1, rows: 1 });
+  addSurface(P, s, { type: "gen", gen: "calib" });
+  return s;
+}
+/** Ventana a un proyector (Window COMP): una superficie a pantalla completa por esa salida con la imagen. */
+function openWindowComp(net, n) {
+  const top = nodeByName(net, n.p.top);
+  if (!top || top.fam !== "TOP") { toast("Elige primero la imagen (un TOP) que quieres sacar", "warn"); return; }
+  const screen = Math.max(1, Math.min(4, Math.round(+n.p.screen || 1)));
+  const P = app.S.project;
+  let surf = P.surfaces.find(x => x.winOf === n.id);
+  app.edit(() => {
+    if (!surf) {
+      surf = M_createFull(P, `${n.name} (salida ${screen})`);
+      surf.winOf = n.id;
+    }
+    surf.screen = screen;
+    for (const sc of P.scenes) { const L = sc.looks[surf.id]; if (L) L.source = { ...L.source, type: "net", netId: net.id, netNode: top.id }; }
+  });
+  app.actions.openWindow?.(screen);
+  toast(`Salida ${screen}: ${net.name} · ${top.name} a pantalla completa (lleva la ventana al proyector y pulsa pantalla completa)`);
+}
+
 /** Importa un modelo 3D a la biblioteca (lo usan el «Modelo 3D (archivo)» SOP y la pestaña 3D). */
 function importModel(done) {
   const inp = h("input", { type: "file", accept: ".glb,.gltf,.obj,.fbx,.stl,.ply" });
@@ -1347,6 +1412,9 @@ function updateInfo(force = false) {
     const i = eng.info(net, n);
     el.classList.toggle("err", !!i.error);
     const f = el.querySelector(".tdinfo");
+    const rec = n.type === "movieout" ? eng.recInfo?.(n.id) : null;
+    el.classList.toggle("rec", !!rec);
+    if (rec && f) { f.textContent = `● REC ${fmtSecs(rec.secs)}`; continue; }
     if (f && !n.comment) f.textContent = i.error ? "⚠ " + i.error.split("\n")[0].slice(0, 40) : (n.fam === "TOP" && i.w ? `${i.w}×${i.h} · ${i.ms.toFixed(1)} ms` : `${defOf(n).label}${i.ms > 0.05 ? " · " + i.ms.toFixed(1) + " ms" : ""}`);
     if (i.error) el.title = i.error;
   }
@@ -1481,4 +1549,5 @@ export function handleNetKey(a, e) {
   return k.length === 1 && !e.altKey ? eat() : false;
 }
 ed.togglePanel = (v) => togglePanelView(v);
+ed.openWindowComp = (net, n) => openWindowComp(net, n);
 export { loop as _loopForTests, ed as _edForTests };

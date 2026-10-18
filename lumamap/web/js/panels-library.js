@@ -8,7 +8,7 @@ import { canConvert, queueState } from "./convqueue.js";
 export async function openMediaLibrary(app, { pick = false } = {}) {
   const A = app.actions, body = h("div", { class: "medialib" });
   const draw = () => {
-    const P = app.S.project, media = P.media.filter(m => m.kind !== "model");
+    const P = app.S.project, media = P.media.filter(m => m.kind !== "model" && m.kind !== "audio");
     const q = queueState(), busy = (q.running ? 1 : 0) + q.waiting.length;
     const grid = h("div", { class: "mediagrid" }, ...media.map(m => {
       const used = [...new Set(P.scenes.flatMap(sc => Object.entries(sc.looks).filter(([, l]) => l.source.mediaId === m.id).map(([sid]) => sid)))];
