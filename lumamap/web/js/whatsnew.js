@@ -7,7 +7,7 @@ import { h, btn, dialog, closeDialog, hint, toast } from "./ui.js";
 import { openExport } from "./panels-export.js";
 
 /** Cambia cuando hay novedades nuevas que enseñar. */
-export const NEWS_REV = "2026-10-18b";
+export const NEWS_REV = "2026-10-19";
 const SEEN_KEY = "lumamap:newsSeen";
 const store = () => { try { return globalThis.localStorage || null; } catch { return null; } };
 // ¿Ya se había usado LumaMap en este equipo? Se mira al cargar, antes de que la app guarde nada.
@@ -38,6 +38,8 @@ export function newsItems(app) {
     ["🔗 Como TouchDesigner", [
       ["Editor de redes de nodos", "Programa como en TouchDesigner: más de 110 operadores (imagen TOP, señales CHOP, geometría SOP, objetos 3D, materiales, texto y tablas), cables, expresiones, feedback, tu propio GLSL, instancias 3D y mover objetos 3D con la mano delante de la cámara. Con ejemplos.", () => app.openNetwork()],
       ["Redes pro: 3D, curvas y subredes", "Visor flotante con gizmo para mover, girar y escalar objetos 3D y la cámara; fotogramas clave ◆ con editor de curvas y línea de tiempo; subredes (Ctrl+G), replicador, panel de control propio, partículas, modelos 3D de archivo, audio de un archivo, MIDI/OSC In, grabar video y ventana a un proyector.", () => app.openNetwork()],
+      ["Partículas en la GPU y GLSL MAT", "Partículas → «⚡ Calcular en la GPU»: hasta un millón, con los mismos controles. Y el material GLSL: escribe cómo se ve un objeto 3D (y cómo se deforma) con tu propio shader.", () => app.openNetwork()],
+      ["Salida por red desde los nodos", "Pon una «Salida por red» detrás de cualquier imagen de la red: sale por su canal MJPEG para OBS, vMix o TouchDesigner («📋 Dirección para OBS»).", () => app.openNetwork()],
       ["Cadena de cada superficie", "La vista simple: fuente → señales → efectos → forma → mezcla → salida. Toca un nodo para abrirlo.", () => app.openNodes()],
       ["Señales en vivo", "Seguir sonido, golpe, ruido, azar y suavizado, con monitor en directo; muévelas a cualquier parámetro.", () => goToSection(app, "audio", "Señales en vivo")],
       ["Mi panel", "Tu propia mesa de control con los mandos que tú elijas.", () => { live("mix")(); goToSection(app, "live", "Mi panel"); }],
@@ -56,6 +58,7 @@ export function newsItems(app) {
       ["Calibrar el proyector con la cámara", "El proyector muestra franjas, la cámara las ve y tocas cada esquina en la foto: la cruz va sola.", () => goToSection(app, "3d", "Alinear con el proyector real")],
     ]],
     ["🛡 Estabilidad", [
+      ["Mallas que no paran el show", "Una superficie con la malla mal formada (de un proyecto viejo o roto) se repara sola al abrirla o al dibujarla, en vez de fallar en cada fotograma.", null],
       ["Protección de la tarjeta gráfica", "Si Windows reinicia el controlador, baja la resolución de los shaders y no se recarga en bucle. En Proyectar → Calidad.", () => goToSection(app, "output", "Calidad y resolución")],
     ]],
   ];
@@ -69,7 +72,7 @@ export function openNews(app) {
     ...newsItems(app).map(([group, items]) => h("div", { class: "newsgrp" }, h("h4", {}, group),
       ...items.map(([title, desc, open]) => h("div", { class: "newsitem" },
         h("div", {}, h("b", {}, title), h("small", {}, desc)),
-        btn({ label: "Abrir", kind: "small primary", onClick: () => { closeDialog(); open(); } }))))),
+        open ? btn({ label: "Abrir", kind: "small primary", onClick: () => { closeDialog(); open(); } }) : null)))),
     hint("Si no ves algo de esto, comprueba en ☰ → «Buscar actualizaciones» que tienes la última versión."));
   return dialog({ title: "✨ Novedades", content: body, wide: true });
 }
