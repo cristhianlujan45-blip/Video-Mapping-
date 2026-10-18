@@ -700,7 +700,7 @@ await test("redes de nodos: todos los TOP dan imagen sin errores de shader; 3D c
       shots[sop.type] = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 }));
       if (eng.info(net, rnd).error) bad.push("3D " + sop.type + ": " + eng.info(net, rnd).error);
     }
-    for (const m of ["constant", "normal", "wire"]) { const mm = G.addNode(net, "MAT", m); geo.p.material = mm.name; shots["mat " + m] = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 })); }
+    for (const m of ["constant", "normal", "wire", "glsl"]) { const mm = G.addNode(net, "MAT", m); geo.p.material = mm.name; shots["mat " + m] = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 })); }
     const pat = G.addNode(net, "CHOP", "pattern", { p: { length: 50, kind: 3, amp: 6, offset: -3, name: "tx" } });
     geo.p.instancing = 1; geo.p.instanceop = pat.name; geo.p.material = mat.name;
     const inst = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 }));
@@ -831,6 +831,43 @@ await test("redes de nodos: partículas en la GPU (cientos de miles), nacen tamb
   assert.equal(r.errGeo, ""); assert.ok(r.litGeo > 3, "nacen de la esfera y se ven: " + r.litGeo);
   assert.ok(r.cCpu && !r.cCpu.gpu && r.cCpu.n > 0, "en el procesador: " + JSON.stringify(r.cCpu));
   assert.ok(r.gpuFreed, "la memoria de la GPU se suelta al apagarla");
+});
+await test("redes de nodos: GLSL MAT — tu shader de color y de vértices en un objeto 3D, con su error claro si no compila", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n, mt, rnd;
+    a.edit(() => {
+      n = G.newNetwork("MAT"); a.S.project.networks.push(n);
+      G.addNode(n, "COMP", "camera", { p: { tx: 0, ty: 0, tz: 4 } });
+      const sp = G.addNode(n, "SOP", "sphere", { p: { radius: 1, detail: 32 } });
+      mt = G.addNode(n, "MAT", "glsl", { p: { code: "return vec4(0.0, 1.0, 0.0, 1.0);", vcode: "return position;" } });
+      const geo = G.addNode(n, "COMP", "geo", { p: { material: mt.name } }); G.connect(n, sp.id, geo.id, 0);
+      rnd = G.addNode(n, "TOP", "render"); n.display = rnd.id;
+    });
+    m.closeNetworkEditor();
+    const E = a.td;
+    const img = () => { E.ensureFrame(E.time + 1 / 30, {}); const o = E.output(n.id, rnd.id, { time: E.time, w: 64, h: 64 }); const d = o.el.getContext("2d").getImageData(0, 0, 64, 64).data; let R = 0, Gs = 0, B = 0, lit = 0; for (let k = 0; k < d.length; k += 4) { R += d[k]; Gs += d[k + 1]; B += d[k + 2]; if (d[k] + d[k + 1] + d[k + 2] > 60) lit++; } return { r: R / 4096, g: Gs / 4096, b: B / 4096, lit }; };
+    E.ensureFrame(E.time + 500, {});
+    const green = img(), errOk = E.info(n, mt).error;
+    // Deformar: inflar la esfera hace que ocupe más imagen.
+    a.edit(() => { mt.p.vcode = "return position * 1.6;"; });
+    const big = img();
+    // Código roto: el nodo lo dice y el objeto se ve morado.
+    a.edit(() => { mt.p.code = "return vec4(nope, 1.0);"; });
+    const broken = img(), errBad = E.info(n, mt).error;
+    // Arreglado: vuelve.
+    a.edit(() => { mt.p.code = "return vec4(tex(vUv).rgb * 0.0 + vec3(0.0, 0.0, 1.0) * light(), 1.0);"; mt.p.vcode = "return position;"; });
+    const blue = img(), errFix = E.info(n, mt).error;
+    return { green, errOk, big, broken, errBad, blue, errFix };
+  });
+  assert.equal(r.errOk, "");
+  assert.ok(r.green.g > 20 && r.green.r < 5 && r.green.b < 5, "verde: " + JSON.stringify(r.green));
+  assert.ok(r.big.lit > r.green.lit * 1.8, `al inflarla ocupa más (${r.big.lit} > ${r.green.lit})`);
+  assert.match(r.errBad, /GLSL[\s\S]*nope/, "el error de GLSL dice qué falla");
+  assert.ok(r.broken.r > r.broken.g, "con error se ve morado: " + JSON.stringify(r.broken));
+  assert.equal(r.errFix, "");
+  assert.ok(r.blue.b > 10 && r.blue.g < 5, "azul con luz: " + JSON.stringify(r.blue));
 });
 await test("redes de nodos: animar un parámetro con fotogramas clave (◆), autoclave al moverlo, editor de curvas y línea de tiempo", async () => {
   await page.evaluate(async () => {

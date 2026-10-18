@@ -23,13 +23,8 @@ const MAX_SIDE = MOBILE ? 1280 : 2048;
 
 /* ---------------- Shaders ---------------- */
 const VERT = `in vec3 position; in vec2 uv; out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
-const HEAD = `precision highp float; precision highp int;
-in vec2 vUv; out vec4 fragColor;
-uniform vec2 res; uniform float time; uniform vec2 px;
-uniform sampler2D s0; uniform sampler2D s1; uniform sampler2D s2; uniform sampler2D s3;
-uniform float has0; uniform float has1; uniform float has2; uniform float has3;
-vec4 tex0(vec2 u) { return texture(s0, u); } vec4 tex1(vec2 u) { return texture(s1, u); }
-vec4 tex2(vec2 u) { return texture(s2, u); } vec4 tex3(vec2 u) { return texture(s3, u); }
+// Funciones de ayuda (también en los materiales GLSL): luma, rot2, hsv2rgb, rgb2hsv, snoise, fbm.
+const HELPERS_SRC = `
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 vec3 hsv2rgb(vec3 c) { vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0); return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y); }
@@ -48,6 +43,14 @@ float snoise(vec3 v) { const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0); const vec4 D =
   vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0); m = m * m; return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3))); }
 float fbm(vec3 p, int oct) { float a = 0.5, s = 0.0; for (int k = 0; k < 8; k++) { if (k >= oct) break; s += a * snoise(p); p *= 2.02; a *= 0.5; } return s; }
 `;
+const HEAD = `precision highp float; precision highp int;
+in vec2 vUv; out vec4 fragColor;
+uniform vec2 res; uniform float time; uniform vec2 px;
+uniform sampler2D s0; uniform sampler2D s1; uniform sampler2D s2; uniform sampler2D s3;
+uniform float has0; uniform float has1; uniform float has2; uniform float has3;
+vec4 tex0(vec2 u) { return texture(s0, u); } vec4 tex1(vec2 u) { return texture(s1, u); }
+vec4 tex2(vec2 u) { return texture(s2, u); } vec4 tex3(vec2 u) { return texture(s3, u); }
+` + HELPERS_SRC;
 const uniName = (k) => "p_" + k;
 /** Uniforms de los parámetros numéricos y de color de un operador. */
 function paramUniforms(def) {
@@ -536,6 +539,7 @@ export class NetEngine {
   /** Material de un MAT (se actualiza cada fotograma con sus parámetros). */
   material(net, node) {
     if (!node || node.fam !== "MAT") return null;
+    if (node.type === "glsl") return this.glslMaterial(net, node);
     const ck = this.cooker(net), p = ck.params(node), mk = "mat:" + node.id;
     let x = this.extra.get(mk);
     if (!x || x.type !== node.type) {
@@ -560,6 +564,54 @@ export class NetEngine {
       if (has !== x.hasMap) { x.hasMap = has; m.needsUpdate = true; }
       m.map = img ? img.tex : null;
     }
+    return m;
+  }
+  /**
+   * GLSL MAT: un material con el código del usuario (color y, opcional, deformar los vértices).
+   * Se compila a prueba en un dibujo pequeño; si falla, el nodo dice el error y el objeto se ve a
+   * cuadros morados (como un GLSL TOP que no compila).
+   */
+  glslMaterial(net, node) {
+    const ck = this.cooker(net), p = ck.params(node), mk = "mat:" + node.id;
+    const sig = hashStr(String(p.code) + "\u0000" + String(p.vcode));
+    let x = this.extra.get(mk);
+    if (!x || x.type !== "glsl" || x.sig !== sig) {
+      x?.mat?.dispose();
+      const key = "glslmat:" + node.id + ":" + sig;
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 }, u1: { value: 0 }, u2: { value: 0 }, u3: { value: 0 }, u4: { value: 0 }, map: { value: this.black }, hasMap: { value: 0 }, opacity: { value: 1 } },
+        vertexShader: glslMatVert(p.vcode), fragmentShader: glslMatFrag(p.code),
+      });
+      x = { type: "glsl", sig, mat, key, failed: false };
+      this.extra.set(mk, x);
+      // Compilar a prueba (y ver si hay errores) con un dibujo de 1×1.
+      const pr = this._probe ||= { scene: new THREE.Scene(), mesh: new THREE.Mesh(new THREE.PlaneGeometry(1, 1)), cam: new THREE.PerspectiveCamera(45, 1, 0.1, 10), rt: new THREE.WebGLRenderTarget(1, 1) };
+      if (!pr.mesh.parent) { pr.scene.add(pr.mesh); pr.cam.position.set(0, 0, 2); pr.cam.lookAt(0, 0, 0); }
+      pr.mesh.material = mat;
+      this.shaderErrors.delete(key);
+      this.compiling = key;
+      try { this.r.setRenderTarget(pr.rt); this.r.render(pr.scene, pr.cam); } catch (e) { this.shaderErrors.set(key, String(e.message || e)); }
+      this.compiling = null;
+      pr.mesh.material = null;
+      if (this.shaderErrors.has(key)) { x.failed = true; x.err = "Error de GLSL:\n" + this.shaderErrors.get(key); }
+    }
+    if (x.failed) {
+      ck.errors.set(node.id, x.err);
+      return (this._failMat ||= new THREE.MeshBasicMaterial({ color: 0x8a0059, wireframe: false }));
+    }
+    ck.errors.delete(node.id);
+    const m = x.mat, U = m.uniforms;
+    U.time.value = this.time;
+    for (const k of ["u1", "u2", "u3", "u4"]) U[k].value = +p[k] || 0;
+    U.opacity.value = p.opacity ?? 1;
+    const mapNode = p.map ? nodeByName(net, p.map) : null;
+    const img = mapNode && mapNode !== node ? this.top(net, mapNode) : null;
+    U.map.value = img ? img.tex : this.black; U.hasMap.value = img ? 1 : 0;
+    m.transparent = (p.opacity ?? 1) < 1 || !!p.additive;
+    m.blending = p.additive ? THREE.AdditiveBlending : THREE.NormalBlending;
+    m.depthWrite = !p.additive;
+    m.wireframe = !!p.wire;
+    m.side = p.double ? THREE.DoubleSide : THREE.FrontSide;
     return m;
   }
   renderTop(net, node, p, w, h) {
@@ -1062,6 +1114,51 @@ function pointsObject(sim) {
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   return new THREE.Points(G, M);
+}
+/* ---------------- GLSL MAT ---------------- */
+// El código del usuario va dentro de shade() (color) y deform() (vértices). Los colores que
+// escribe son como los ve (sRGB): se pasan a lineal al salir, igual que las imágenes de la red.
+const MAT_COMMON = `uniform float time; uniform float u1; uniform float u2; uniform float u3; uniform float u4;
+varying vec2 vUv; varying vec3 vNormal; varying vec3 vPos; varying vec3 vLocal; varying vec3 vInst;
+${HELPERS_SRC}`;
+function glslMatVert(code) {
+  const c = String(code || "").trim() || "return position;";
+  return `${MAT_COMMON}
+vec3 deform(vec3 position, vec3 normal, vec2 uv) {
+${c}
+}
+void main() {
+  vUv = uv;
+  vec3 p = deform(position, normal, uv);
+  vLocal = p;
+  vec4 lp = vec4(p, 1.0); vec3 nn = normal;
+  #ifdef USE_INSTANCING
+    lp = instanceMatrix * lp; nn = mat3(instanceMatrix) * nn;
+  #endif
+  #ifdef USE_INSTANCING_COLOR
+    vInst = instanceColor;
+  #else
+    vInst = vec3(1.0);
+  #endif
+  vec4 wp = modelMatrix * lp;
+  vPos = wp.xyz; vNormal = normalize(mat3(modelMatrix) * nn);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+}
+function glslMatFrag(code) {
+  const c = String(code || "").trim() || "return vec4(1.0);";
+  return `${MAT_COMMON}
+uniform sampler2D map; uniform float hasMap; uniform float opacity;
+vec4 tex(vec2 u) { return hasMap > 0.5 ? texture2D(map, u) : vec4(1.0); }
+float light() { return 0.3 + 0.7 * max(0.0, dot(normalize(vNormal), normalize(vec3(2.0, 3.0, 4.0)))); }
+float fresnel() { return pow(1.0 - abs(dot(normalize(vNormal), normalize(cameraPosition - vPos))), 3.0); }
+vec4 shade() {
+${c}
+}
+void main() {
+  vec4 col = shade();
+  gl_FragColor = vec4(pow(max(col.rgb, 0.0), vec3(2.2)), col.a * opacity);
+}`;
 }
 function srgb(h) { const n = parseInt(h.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; }
 function hashStr(s) { let h = 2166136261; for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }

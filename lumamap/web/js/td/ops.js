@@ -544,6 +544,11 @@ mat("pbr", "Material realista (PBR)", "Color, metal, rugosidad, brillo propio y 
 mat("constant", "Material plano (sin luz)", "Un color o una imagen sin sombras: lo que más se parece a proyectar video (Constant MAT).",
   [c("color", "Color", "#ffffff"), opRef("map", "Textura (un TOP)", "TOP"), f("opacity", "Opacidad", 1), t("wire", "Solo líneas", 0), t("double", "Dos caras", 1)]);
 mat("normal", "Colores por dirección", "Pinta cada cara según hacia dónde mira (Normal MAT): para ver la forma.", [t("wire", "Solo líneas", 0)]);
+mat("glsl", "GLSL (tu shader)", "Escribe cómo se ve la superficie (y, si quieres, cómo se deforma) con tu propio shader, como el GLSL MAT de TouchDesigner. Tienes vUv, vNormal, vPos, time, u1…u4, tex(uv) (la textura), light() y snoise().",
+  [{ k: "code", label: "Color (GLSL)", type: "code", def: "// vUv, vNormal, vPos (en el mundo), time, u1..u4, tex(vUv), light(), snoise(), hsv2rgb()\nvec3 col = hsv2rgb(vec3(fract(vPos.y * 0.3 + time * 0.1), 0.8, 1.0));\nreturn vec4(col * light(), 1.0);" },
+    { k: "vcode", label: "Deformar (GLSL de los vértices)", type: "code", def: "// position, normal, uv, time, u1..u4 → la posición nueva\nreturn position + normal * snoise(position * 2.0 + time * 0.5) * 0.1 * u1;" },
+    opRef("map", "Textura (un TOP)", "TOP"), f("u1", "u1", 1, 0, 1), f("u2", "u2", 0, 0, 1), f("u3", "u3", 0, 0, 1), f("u4", "u4", 0, 0, 1),
+    f("opacity", "Opacidad", 1), t("wire", "Solo líneas", 0), t("double", "Dos caras", 1), t("additive", "Sumar luz (brillo)", 0)]);
 mat("wire", "Líneas (neón)", "Solo las aristas, de un color brillante (Wireframe MAT).", [c("color", "Color", "#00e5ff"), f("opacity", "Opacidad", 1)]);
 
 /* ======================= DAT · Texto y tablas ======================= */
