@@ -1676,6 +1676,7 @@ await test("3D para proyectar: objeto real con la cámara (automático) — reco
     await g.locator("#panelBody").getByRole("button", { name: /Detectar el objeto y calibrar/ }).click();
     await g.locator("#panelBody .autokind", { hasText: "Caja" }).waitFor({ timeout: 240000 });
     assert.match(await g.locator("#panelBody .autokind").textContent(), /3 caras/);
+    assert.equal(await g.evaluate(async () => (await import("./js/objscan.js")).analyzeAndSolve.lastPath), "worker", "el cálculo va en un hilo aparte");
     assert.equal(await g.locator("#panelBody .sec", { hasText: "Objeto real con la cámara" }).locator("canvas.calibcam").count(), 1, "foto con las caras marcadas");
     assert.equal(await g.evaluate(() => window.__lumamap.S.pattern), null, "sin franjas al terminar");
     await g.locator("#panelBody").getByRole("button", { name: /Poner la caja en el 3D/ }).click();

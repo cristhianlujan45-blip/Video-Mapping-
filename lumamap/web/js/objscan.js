@@ -322,6 +322,37 @@ export async function solveBoxAsync(ana, projector, opts = {}, onProgress = () =
   onProgress(1);
   return r.value;
 }
+/**
+ * Reconocer y (si es una caja) calcular, en un hilo aparte si se puede (objscan-worker.js); si el
+ * equipo no admite hilos de módulos, aquí mismo cediendo el paso. Devuelve { ana, sol }.
+ * proj: lente del proyector (o null para solo reconocer) · onProgress(0..1) del cálculo.
+ */
+export function analyzeAndSolve(map, proj, opts = {}, onProgress = () => {}) {
+  const inPage = async () => {
+    analyzeAndSolve.lastPath = "page";
+    const ana = analyzeObject(map);
+    const sol = ana.kind === "box" && proj ? await solveBoxAsync(ana, proj, opts, onProgress) : null;
+    return { ana, sol };
+  };
+  if (typeof Worker === "undefined") return inPage();
+  return new Promise((resolve) => {
+    let w;
+    try { w = new Worker(new URL("./objscan-worker.js", import.meta.url), { type: "module" }); }
+    catch { resolve(inPage()); return; }
+    const done = (v) => { try { w.terminate(); } catch {} resolve(v); };
+    w.onmessage = (e) => {
+      const m = e.data || {};
+      if (m.progress !== undefined) return onProgress(m.progress);
+      if (m.error) return done(inPage());
+      onProgress(1);
+      analyzeAndSolve.lastPath = "worker";
+      done({ ana: m.ana, sol: m.sol });
+    };
+    w.onerror = (e) => { e.preventDefault?.(); done(inPage()); };
+    w.postMessage({ id: 1, map, proj, opts });
+  });
+}
+export const solveBoxSteps = (ana, projector, opts) => solveSteps(ana, projector, opts);
 function* solveSteps(ana, projector, { width = 0.5, dims = null, fixLens = true } = {}) {
   const hyps = boxHypotheses(ana);
   if (!hyps.length) return { ok: false, why: "No se pudieron ordenar las esquinas de la caja." };

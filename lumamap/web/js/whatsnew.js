@@ -19,7 +19,7 @@ export function goToSection(app, tab, text) {
   let tries = 0;
   const find = () => {
     const el = [...document.querySelectorAll("#panelBody .sec h3, #panelBody details > summary")].find(x => x.textContent.includes(text));
-    if (!el) { if (++tries < 20) return setTimeout(find, 100); return toast(`Busca «${text}» en la pestaña`, ""); }
+    if (!el) { if (++tries < 60) return setTimeout(find, 100); return toast(`Busca «${text}» en la pestaña`, ""); }
     const box = el.closest(".sec, details") || el;
     if (box.tagName === "DETAILS") box.open = true;
     box.scrollIntoView({ block: "start", behavior: "smooth" });

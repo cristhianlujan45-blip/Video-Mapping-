@@ -8,7 +8,7 @@
 //   · si es plano, crea superficies ya alineadas encima de cada cara.
 // La parte de reconocer y calcular está en objscan.js (probada con una escena sintética).
 import { h, section, row, btn, hint, toast } from "./ui.js";
-import { analyzeObject, solveBoxAsync } from "./objscan.js";
+import { analyzeAndSolve } from "./objscan.js";
 import { scanCamera, cameraSelect } from "./panels-3dcalib.js";
 import { fovFromThrow } from "./calib3d.js";
 import * as M from "./model.js";
@@ -71,15 +71,15 @@ async function run(app, st, status) {
     const scan = await scanCamera(app, st, (i, n) => say(`Escaneando… ${i}/${n} (no muevas la cámara ni el objeto)`));
     if (scan.map.coverage < 0.01) throw new Error(scan.map.contrast < 25 ? "La cámara no ve cambiar la proyección: apúntala al objeto y comprueba que el proyector sale por su pantalla (Proyectar)." : "La cámara casi no distingue las franjas: menos luz en la sala o la cámara más cerca.");
     say("Reconociendo el objeto…");
-    await new Promise(r => setTimeout(r, 30));
-    const ana = analyzeObject(scan.map);
+    // Reconocer y calcular en un hilo aparte (la app sigue fluida y el cálculo va a toda velocidad).
+    const p = st.data.projectors[0];
+    const proj = { fov: p?.fov || fovFromThrow(1.5, [app.S.project.width, app.S.project.height]), res: p?.res || [app.S.project.width, app.S.project.height], shift: p?.shift || [0, 0] };
+    const dims = ui.dims.map(v => +v / 100);
+    const known = dims.every(v => v > 0) ? dims : null;
+    const { ana, sol } = await analyzeAndSolve(scan.map, proj, { width: dims[0] > 0 ? dims[0] : 0.5, dims: known }, (f) => say(`Calculando la caja y el proyector… ${Math.round(f * 100)} %`));
     const res = { ana, photo: scan.photo, at: Date.now() };
-    if (ana.kind === "box") {
-      const p = st.data.projectors[0];
-      const proj = { fov: p?.fov || fovFromThrow(1.5, [app.S.project.width, app.S.project.height]), res: p?.res || [app.S.project.width, app.S.project.height], shift: p?.shift || [0, 0] };
-      const dims = ui.dims.map(v => +v / 100);
-      const known = dims.every(v => v > 0) ? dims : null;
-      res.sol = await solveBoxAsync(ana, proj, { width: dims[0] > 0 ? dims[0] : 0.5, dims: known }, (f) => say(`Calculando la caja y el proyector… ${Math.round(f * 100)} %`));
+    if (ana.kind === "box" && sol) {
+      res.sol = sol;
       if (!res.sol.ok) res.note = res.sol.why;
     }
     st.autoRes = res;
