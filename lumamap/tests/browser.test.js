@@ -869,6 +869,29 @@ await test("redes de nodos: GLSL MAT — tu shader de color y de vértices en un
   assert.equal(r.errFix, "");
   assert.ok(r.blue.b > 10 && r.blue.g < 5, "azul con luz: " + JSON.stringify(r.blue));
 });
+await test("redes de nodos: Salida por red (TOP) — cada nodo por su canal MJPEG para OBS (/frame.jpg?ch=…), con su dirección", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n, no;
+    a.edit(() => { n = G.newNetwork("Red out"); a.S.project.networks.push(n); const nz = G.addNode(n, "TOP", "noise"); no = G.addNode(n, "TOP", "netout", { p: { channel: "Prueba Ñ", size: 540, fps: 30 } }); G.connect(n, nz.id, no.id, 0); });
+    let img = null, st = 0;
+    for (let k = 0; k < 60 && st !== 200; k++) { await new Promise(r => setTimeout(r, 150)); const res = await fetch("/frame.jpg?ch=prueba_n", { cache: "no-store" }); st = res.status; if (st === 200) img = await createImageBitmap(await res.blob()); }
+    const list = (await (await fetch("/stream/channels", { cache: "no-store" })).json()).channels.map(c => c.name);
+    const info = a.td.netInfo(no.id);
+    const url = await m._edForTests.copyNetUrl(no);
+    a.edit(() => { no.p.active = 0; });
+    m.closeNetworkEditor();
+    return { st, h: img?.height, w: img?.width, list, ch: info?.ch, sent: info?.sent, url, err: a.td.info(n, no).error };
+  });
+  assert.equal(r.st, 200, "el canal tiene imagen");
+  assert.equal(r.h, 540); assert.ok(Math.abs(r.w / r.h - 16 / 9) < 0.02, "con la forma de la imagen: " + r.w + "×" + r.h);
+  assert.ok(r.list.includes("prueba_n"), JSON.stringify(r.list));
+  assert.equal(r.ch, "prueba_n", "el nombre del canal sin símbolos ni acentos");
+  assert.ok(r.sent >= 1);
+  assert.match(r.url, /^http:\/\/.+\/stream\.mjpg\?(pin=\w+&)?ch=prueba_n$/);
+  assert.equal(r.err, "");
+});
 await test("redes de nodos: animar un parámetro con fotogramas clave (◆), autoclave al moverlo, editor de curvas y línea de tiempo", async () => {
   await page.evaluate(async () => {
     const a = window.__lumamap; await a.openNetwork();

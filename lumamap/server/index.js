@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import dgram from "node:dgram";
 import os from "node:os";
 import { decodeOSC, encodeOSC } from "./osc.js";
-import { FrameHub } from "./stream.js";
+import { FrameHub, ChannelHubs, parseChannelFrame } from "./stream.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -92,6 +92,7 @@ let PIN = "";              // código para los mandos y cámaras (vacío = sin c
 let oscOut = null;         // socket UDP para enviar OSC (feedback)
 let HTTPS_PORT = 0;        // puerto https (cámara del móvil), si está activo
 export const outHub = new FrameHub();   // «Salida por red»: la proyección en MJPEG (/stream.mjpg)
+export const netHubs = new ChannelHubs();   // y la de cada «Salida por red (TOP)» de las redes (/stream.mjpg?ch=…)
 /** Puerto del servidor https (lo fija quien lo arranca). */
 export function setHttpsPort(p) { HTTPS_PORT = Number(p) || 0; }
 
@@ -185,7 +186,7 @@ function onUpgrade(req, sock) {
       else if (f.opcode === 0x1 && f.fin) handleWsMessage(client, f.payload);
       else if (f.opcode === 0x2 && f.fin) {
         // Del motor (este mismo equipo): un fotograma de la salida por red. De un móvil: su cámara.
-        if (client.role === "display" && client.ok && client.local) outHub.push(f.payload);
+        if (client.role === "display" && client.ok && client.local) { const c = parseChannelFrame(f.payload); if (c) netHubs.push(c.ch, c.jpeg); else outHub.push(f.payload); }
         else relayFrame(client, f.payload);
       }
       // Nota: la fragmentación no la usa el protocolo LumaMap.
@@ -259,9 +260,12 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
       return;
     }
     // Salida por red (MJPEG): con código, hay que pasarlo en la dirección (?pin=1234).
-    if (url.pathname === "/stream.mjpg" || url.pathname === "/frame.jpg") {
+    if (url.pathname === "/stream.mjpg" || url.pathname === "/frame.jpg" || url.pathname === "/stream/channels") {
       if (PIN && url.searchParams.get("pin") !== PIN) { res.writeHead(401, { "content-type": "text/plain; charset=utf-8" }); res.end("Falta el código: añade ?pin=XXXX a la dirección."); return; }
-      outHub.handle(url.pathname, req, res);
+      if (url.pathname === "/stream/channels") { res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*", "cache-control": "no-store" }); res.end(JSON.stringify({ channels: netHubs.list() })); return; }
+      const ch = url.searchParams.get("ch");
+      if (ch) netHubs.handle(ch, url.pathname, req, res);
+      else outHub.handle(url.pathname, req, res);
       return;
     }
     // Estáticos

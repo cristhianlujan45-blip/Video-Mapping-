@@ -194,6 +194,29 @@ await test("móvil por cable USB: sus imágenes JPEG llegan al motor con su nomb
   assert.equal(fake, false); assert.equal(leaked, false);
   display.sock.end(); ctl.sock.end(); cam.sock.end();
 });
+await test("salida por red de las redes de nodos: cada canal con su MJPEG (/stream.mjpg?ch=…), la lista de canales y la proyección sigue aparte", async () => {
+  const { channelFrame, parseChannelFrame } = await import("../server/stream.js");
+  const display = wsClient(port, "display");
+  await nextMsg(display, "__open");
+  const jpeg = (n) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(n), Buffer.from([0xff, 0xd9])]);
+  const mainBefore = (await fetch(base + "/frame.jpg")).status;
+  const a = jpeg(3000), b = jpeg(4000);
+  assert.deepEqual(parseChannelFrame(channelFrame("red1", a)).jpeg, a);
+  assert.equal(parseChannelFrame(channelFrame("Mal nombre!", a)), null, "solo nombres simples");
+  display.sock.write(encodeFrame(channelFrame("red1", a), { mask: true, opcode: 0x2 }));
+  display.sock.write(encodeFrame(channelFrame("luces_2", b), { mask: true, opcode: 0x2 }));
+  await new Promise(r => setTimeout(r, 150));
+  assert.deepEqual(Buffer.from(await (await fetch(base + "/frame.jpg?ch=red1")).arrayBuffer()), a);
+  assert.deepEqual(Buffer.from(await (await fetch(base + "/frame.jpg?ch=luces_2")).arrayBuffer()), b);
+  const list = await (await fetch(base + "/stream/channels")).json();
+  assert.deepEqual(list.channels.map(c => c.name).sort(), ["luces_2", "red1"]);
+  assert.ok(list.channels.every(c => c.live));
+  const none = await fetch(base + "/frame.jpg?ch=nada");
+  assert.equal(none.status, 404); assert.match(await none.text(), /Salida por red/);
+  // La proyección (sin canal) no cambia: sigue sin imagen.
+  assert.equal(mainBefore, 503); assert.equal((await fetch(base + "/frame.jpg")).status, 503);
+  display.sock.end();
+});
 await test("salida por red: el motor manda la proyección en JPEG y sale por /stream.mjpg y /frame.jpg (para OBS, vMix, TouchDesigner)", async () => {
   const http = await import("node:http");
   // Sin nada enviado todavía: lo dice claro.

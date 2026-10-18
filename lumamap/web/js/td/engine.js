@@ -243,6 +243,7 @@ export class NetEngine {
       for (const n of net.nodes) {
         if (n.bypass) continue;
         if (n.fam === "TOP" && n.type === "movieout" && (n.p.record || this.recs.has(n.id))) this.top(net, n);
+        else if (n.fam === "TOP" && n.type === "netout" && n.p.active) this.top(net, n);
         else if (n.fam === "CHOP" && n.type === "audiofile") this.cooker(net).chop(n);
       }
       if (!net.nodes.some(n => n.type === "export" && n.fam === "CHOP")) continue;
@@ -334,6 +335,7 @@ export class NetEngine {
       case "select": { const n = nodeByName(net, p.top); return n && n !== node ? this.top(net, n) : null; }
       case "in": return this.top(net, subIn(net, node));
       case "movieout": if (first) this.record(net, node, p, first); return first || null;
+      case "netout": if (first && p.active) this.netSend(net, node, p, first); return first || null;
       case "feedback": {
         const target = nodeByName(net, p.target);
         let f = this.fb.get(node.id);
@@ -889,6 +891,40 @@ export class NetEngine {
   /** Estado de la grabación de un nodo: null o { secs, state, frames } (fotogramas ya entregados). */
   recInfo(id) { const R = this.recs.get(id); return R ? { secs: (performance.now() - R.t0) / 1000, state: R.state, frames: R.frames } : null; }
 
+  /* ---------------- Salida por red (MJPEG por canales) ---------------- */
+  /**
+   * Manda la imagen de un nodo al servidor local por su WebSocket, como JPEG, al canal del nodo
+   * (lo ven OBS, vMix, TouchDesigner… en /stream.mjpg?ch=canal). Si va lento se salta fotogramas.
+   */
+  netSend(net, node, p, img) {
+    const ck = this.cooker(net), key = node.id + "/red";
+    const ws = this.opts.app?.remote?.ws;
+    if (!ws || ws.readyState !== 1) { ck.errors.set(key, "sin servidor local: la salida por red es de la app de escritorio (o abriendo LumaMap desde su servidor)"); return; }
+    ck.errors.delete(key);
+    let N = this.nets ||= new Map(), R = N.get(node.id);
+    if (!R) { const c = document.createElement("canvas"); N.set(node.id, R = { c, g: c.getContext("2d"), last: 0, busy: false, sent: 0, bytes: 0, t0: performance.now() }); }
+    const now = performance.now(), fps = +p.fps || 25;
+    if (R.busy || now - R.last < 1000 / fps - 2 || ws.bufferedAmount > 4_000_000) return;
+    R.last = now; R.busy = true;
+    const hh = Math.max(64, Math.min(1080, +p.size || 720)) & ~1, ww = Math.max(64, Math.round(hh * img.w / img.h)) & ~1;
+    if (R.c.width !== ww || R.c.height !== hh) { R.c.width = ww; R.c.height = hh; }
+    this.ensureCanvas(ww, hh);
+    this.pass(this.mat("blit", BLIT), null, { s0: img.tex, srcSize: [img.w, img.h], fit: 1, flipX: 0 }, [0, 0, ww, hh]);
+    R.g.drawImage(this.canvas, 0, this.canvas.height - hh, ww, hh, 0, 0, ww, hh);
+    R.ch = netChannel(p.channel, node.name);
+    R.c.toBlob(async (blob) => {
+      try {
+        if (!blob || ws.readyState !== 1) return;
+        const jpeg = new Uint8Array(await blob.arrayBuffer()), name = new TextEncoder().encode(R.ch);
+        const buf = new Uint8Array(5 + name.length + jpeg.length);
+        buf.set([0x4c, 0x4d, 0x43, 0x48, name.length]); buf.set(name, 5); buf.set(jpeg, 5 + name.length);
+        ws.send(buf); R.sent++; R.bytes += buf.length;
+      } finally { R.busy = false; }
+    }, "image/jpeg", Math.max(0.3, Math.min(0.95, +p.quality || 0.8)));
+  }
+  /** Estado de la salida por red de un nodo: null o { ch, sent, fps } (fps medidos). */
+  netInfo(id) { const R = this.nets?.get(id); return R ? { ch: R.ch, sent: R.sent, fps: R.sent / Math.max(1, (performance.now() - R.t0) / 1000) } : null; }
+
   /** Simula las partículas de un nodo una vez por fotograma. */
   particleSim(net, node, pp) {
     const key = node.id + ":ps";
@@ -1064,6 +1100,7 @@ export class NetEngine {
       this.extra.delete(k);
     }
     for (const [id, f] of this.fb) if (!live.has(id)) { f.prev?.dispose(); this.fb.delete(id); }
+    for (const id of [...(this.nets?.keys() || [])]) if (!live.has(id)) this.nets.delete(id);
     for (const k of [...this.mats.keys()]) if (k.startsWith("glsl:") && !live.has(k.split(":")[1])) { this.mats.get(k).dispose(); this.mats.delete(k); this.shaderErrors.delete(k); }
   }
   dispose() {
@@ -1159,6 +1196,11 @@ void main() {
   vec4 col = shade();
   gl_FragColor = vec4(pow(max(col.rgb, 0.0), vec3(2.2)), col.a * opacity);
 }`;
+}
+/** Nombre del canal de una Salida por red: el escrito (o el del nodo), en minúsculas y sin símbolos. */
+export function netChannel(ch, fallback = "red") {
+  const c = String(ch || fallback || "red").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
+  return c || "red";
 }
 function srgb(h) { const n = parseInt(h.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; }
 function hashStr(s) { let h = 2166136261; for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }

@@ -824,6 +824,7 @@ function nodePanel(net, n) {
     n.type === "animation" ? btn({ label: "◆ Curvas", kind: "small primary", onClick: () => openAnim(n.id) }) : null,
     n.type === "base" ? btn({ label: "📦 Entrar (I)", kind: "small primary", onClick: () => enterBase(n.id) }) : null,
     n.type === "window" ? btn({ label: "▶ Abrir la ventana", kind: "small primary", onClick: () => openWindowComp(net, n) }) : null,
+    n.type === "netout" ? btn({ label: "📋 Dirección para OBS", kind: "small primary", title: "Copia la dirección de este canal (para OBS, vMix, TouchDesigner o un navegador)", onClick: () => copyNetUrl(n) }) : null,
     n.type === "movieout" ? btn({ label: n.p.record ? "■ Parar y guardar" : "● Grabar", kind: `small ${n.p.record ? "danger" : "primary"}`, onClick: () => { app.edit(() => { n.p.record = n.p.record ? 0 : 1; }); renderParams(); refreshNode(n); } }) : null,
     ["TOP", "CHOP"].includes(n.fam) ? btn({ label: "⧉ Visor", kind: "small", title: "Visor flotante (V)", onClick: () => openViewer(n.id) }) : null,
     btn({ label: "Borrar", kind: "small danger", onClick: () => { ed.sel = new Set([n.id]); deleteSel(); } }));
@@ -1366,6 +1367,17 @@ async function saveRecording(r) {
   toast(`Grabación guardada (${fmtSecs(r.secs)}): ${r.name} · también en la biblioteca`);
   if (ed.open) renderParams();
 }
+/** Copia la dirección MJPEG del canal de una «Salida por red» (y la enseña). */
+async function copyNetUrl(n) {
+  const { netChannel } = await import("./td/engine.js");
+  const ch = netChannel(n.p.channel, n.name);
+  const urls = (await app.actions.netOutUrls?.().catch(() => null)) || [`${location.origin}/stream.mjpg`];
+  const list = urls.map(u => u + (u.includes("?") ? "&" : "?") + "ch=" + encodeURIComponent(ch));
+  const url = list.find(u => !u.includes("127.0.0.1")) || list[0];
+  try { await navigator.clipboard.writeText(url); } catch {}
+  toast(`Canal «${ch}»: ${url} (copiada). En OBS: Fuente multimedia → desmarca «Archivo local» y pégala.`);
+  return url;
+}
 /** Una superficie que ocupa toda la salida. */
 function M_createFull(P, name) {
   const s = createQuad({ name, corners: rectCorners(0, 0, P.width, P.height) });
@@ -1437,6 +1449,8 @@ function updateInfo(force = false) {
     const rec = n.type === "movieout" ? eng.recInfo?.(n.id) : null;
     el.classList.toggle("rec", !!rec);
     if (rec && f) { f.textContent = `● REC ${fmtSecs(rec.secs)} · ${rec.frames} fot.`; continue; }
+    const no = n.type === "netout" && n.p.active ? eng.netInfo?.(n.id) : null;
+    if (no && f && !i.error) { f.textContent = `📡 ${no.ch} · ${no.fps.toFixed(0)} fps`; continue; }
     const pc = n.type === "particles" ? eng.particleCount?.(n) : null;
     if (f && !n.comment) f.textContent = i.error ? "⚠ " + i.error.split("\n")[0].slice(0, 40) : pc ? `${pc.n.toLocaleString("es")} partículas${pc.gpu ? " · ⚡ GPU" : ""}` : (n.fam === "TOP" && i.w ? `${i.w}×${i.h} · ${i.ms.toFixed(1)} ms` : `${defOf(n).label}${i.ms > 0.05 ? " · " + i.ms.toFixed(1) + " ms" : ""}`);
     if (i.error) el.title = i.error;
@@ -1582,4 +1596,5 @@ export function handleNetKey(a, e) {
 }
 ed.togglePanel = (v) => togglePanelView(v);
 ed.openWindowComp = (net, n) => openWindowComp(net, n);
+ed.copyNetUrl = (n) => copyNetUrl(n);
 export { loop as _loopForTests, ed as _edForTests };

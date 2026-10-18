@@ -47,3 +47,46 @@ export class FrameHub {
   }
   get live() { return !!this.frame && Date.now() - this.at < 3000; }
 }
+
+/* ---------------- Canales con nombre (Salida por red de las redes de nodos) ---------------- */
+// Cada «Salida por red (TOP)» de una red manda su imagen a un canal: «LMCH» + 1 byte (largo del
+// nombre) + nombre + JPEG. Se ve en /stream.mjpg?ch=nombre y /frame.jpg?ch=nombre; la lista en
+// /stream/channels. Como mucho 8 canales (el más viejo sin imagen se suelta).
+export const MAX_CHANNELS = 8;
+const CH_MAGIC = [0x4c, 0x4d, 0x43, 0x48];   // «LMCH»
+export const validChannel = (name) => /^[a-z0-9_-]{1,32}$/.test(String(name || ""));
+/** Un fotograma de canal: { ch, jpeg } (o null si no lo es). */
+export function parseChannelFrame(buf) {
+  if (!buf || buf.length < 7 || CH_MAGIC.some((b, k) => buf[k] !== b)) return null;
+  const n = buf[4];
+  const ch = Buffer.from(buf.subarray(5, 5 + n)).toString("latin1");
+  if (!validChannel(ch)) return null;
+  return { ch, jpeg: buf.subarray(5 + n) };
+}
+/** Arma un fotograma de canal (lo usan el navegador y las pruebas). */
+export function channelFrame(ch, jpeg) {
+  const name = Buffer.from(String(ch), "latin1");
+  return Buffer.concat([Buffer.from(CH_MAGIC), Buffer.from([name.length]), name, Buffer.from(jpeg)]);
+}
+export class ChannelHubs {
+  constructor() { this.hubs = new Map(); }
+  push(ch, jpeg) {
+    let h = this.hubs.get(ch);
+    if (!h) {
+      if (this.hubs.size >= MAX_CHANNELS) {
+        const stale = [...this.hubs].filter(([, x]) => !x.live && !x.viewers.size).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!stale) return false;
+        this.hubs.delete(stale[0]);
+      }
+      this.hubs.set(ch, h = new FrameHub());
+    }
+    return h.push(jpeg);
+  }
+  /** /stream.mjpg?ch= y /frame.jpg?ch= de un canal. */
+  handle(ch, pathname, req, res) {
+    const h = this.hubs.get(ch);
+    if (!h) { res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" }); res.end(`No hay ningún canal «${ch}»: pon una «Salida por red» en una red de nodos con ese nombre.`); return true; }
+    return h.handle(pathname, req, res);
+  }
+  list() { return [...this.hubs].map(([name, h]) => ({ name, live: h.live, viewers: h.viewers.size })); }
+}

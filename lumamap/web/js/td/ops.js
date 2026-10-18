@@ -111,6 +111,9 @@ top("in", "Entrada de la subred", "Dentro de una subred (Base COMP): la imagen q
 top("movieout", "Grabar video", "Graba lo que le entra en un video (.mp4 o .webm) a la resolución que elijas; al parar se guarda en la biblioteca y se descarga (Movie File Out TOP).", [1, 1],
   [t("record", "● Grabando", 0), i("w", "Ancho", 1920, 64, 3840), i("h", "Alto", 1080, 64, 2160), m("fps", "Fotogramas por segundo", [[30, "30"], [60, "60"], [25, "25"], [24, "24"]], 30),
     m("quality", "Calidad", [[0, "Normal (8 Mb/s)"], [1, "Alta (16 Mb/s)"], [2, "Máxima (40 Mb/s)"]], 1), s("name", "Nombre del archivo", "grabacion")], PASS, { special: "movieout" });
+top("netout", "Salida por red", "Manda lo que le entra por la red como video MJPEG, cada nodo en su canal: en OBS (Fuente multimedia), vMix, TouchDesigner (Web Render TOP) u otro equipo con http://IP:puerto/stream.mjpg?ch=canal. Solo en la app de escritorio (o abriendo LumaMap desde su servidor).", [1, 1],
+  [t("active", "📡 Enviando", 1), s("channel", "Canal", ""), m("size", "Tamaño", [[540, "540p"], [720, "720p"], [1080, "1080p"]], 720),
+    m("fps", "Fotogramas por segundo", [[10, "10"], [15, "15"], [25, "25"], [30, "30"]], 25), f("quality", "Calidad del JPEG", 0.8, 0.3, 0.95)], PASS, { special: "netout" });
 top("resolution", "Resolución", "Cambia la resolución de la imagen (Resolution TOP).", [1, 1], [i("w", "Ancho", 1280, 16, 4096), i("h", "Alto", 720, 16, 4096)], PASS, { special: "resolution" });
 // Filtros
 top("level", "Nivel", "Brillo, contraste, gamma, opacidad y negativo (Level TOP).", [1, 1],
