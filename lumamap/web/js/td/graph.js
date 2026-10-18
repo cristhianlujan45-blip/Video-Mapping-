@@ -12,8 +12,28 @@ let seq = 0;
 const uid = (p) => p + Date.now().toString(36) + (seq++).toString(36) + Math.random().toString(36).slice(2, 5);
 
 export function newNetwork(name = "Red 1") {
-  return { id: uid("net"), name, res: [1280, 720], display: null, nodes: [], view: { x: 0, y: 0, z: 1 } };
+  return { id: uid("net"), name, res: [1280, 720], display: null, nodes: [], view: { x: 0, y: 0, z: 1 }, timeline: newTimeline() };
 }
+/* ---------------- Línea de tiempo de la red (como la de TouchDesigner) ----------------
+   { play, rate, length, loop, t0, at }: mientras suena, el tiempo es (ahora − t0) × rate (con el
+   reloj de la pared, igual en el editor y en las ventanas de salida); en pausa se queda en `at`. */
+export const newTimeline = () => ({ play: 1, rate: 1, length: 10, loop: 1, t0: 0, at: 0 });
+const wallNow = () => Date.now() / 1000;
+/** Tiempo de la red (segundos dentro de su línea de tiempo). */
+export function netTime(net, now = wallNow()) {
+  const tl = net?.timeline || newTimeline(), L = Math.max(0.05, +tl.length || 10);
+  if (!tl.play) return Math.max(0, Math.min(L, +tl.at || 0));
+  const raw = (now - (+tl.t0 || 0)) * (+tl.rate || 1);
+  return tl.loop !== 0 ? ((raw % L) + L) % L : Math.max(0, Math.min(L, raw));
+}
+export function playNet(net, now = wallNow()) { const tl = net.timeline ||= newTimeline(); if (tl.play) return; const at = netTime(net, now); tl.play = 1; tl.t0 = now - at / (+tl.rate || 1); }
+export function pauseNet(net, now = wallNow()) { const tl = net.timeline ||= newTimeline(); if (!tl.play) return; tl.at = netTime(net, now); tl.play = 0; }
+export function seekNet(net, t, now = wallNow()) {
+  const tl = net.timeline ||= newTimeline(), L = Math.max(0.05, +tl.length || 10);
+  t = Math.max(0, Math.min(L, +t || 0));
+  if (tl.play) tl.t0 = now - t / (+tl.rate || 1); else tl.at = t;
+}
+export function setNetRate(net, rate, now = wallNow()) { const at = netTime(net, now); net.timeline.rate = +rate || 1; seekNet(net, at, now); }
 /** Arregla redes de un proyecto guardado (o de otra versión). */
 export function normalizeNetworks(list) {
   if (!Array.isArray(list)) return [];
@@ -21,6 +41,7 @@ export function normalizeNetworks(list) {
     const net = { ...newNetwork(String(n.name || "Red")), ...n };
     net.res = Array.isArray(n.res) && n.res.length === 2 ? n.res.map(v => Math.max(16, Math.min(4096, Math.round(+v || 0)))) : [1280, 720];
     net.view = { x: 0, y: 0, z: 1, ...(n.view || {}) };
+    net.timeline = { ...newTimeline(), ...(n.timeline && typeof n.timeline === "object" ? n.timeline : {}) };
     net.nodes = (Array.isArray(n.nodes) ? n.nodes : []).filter(x => x && opDef(x.fam, x.type)).map(x => {
       const def = opDef(x.fam, x.type);
       return { id: x.id || uid("n"), fam: x.fam, type: x.type, name: String(x.name || baseName(def) + "1"), x: +x.x || 0, y: +x.y || 0,
@@ -46,7 +67,7 @@ export function uniqueName(net, base) {
 /** Valores por defecto de un operador. */
 export function defaultParams(def) {
   const p = {};
-  for (const q of def.params) p[q.k] = q.def;
+  for (const q of def.params) p[q.k] = q.def && typeof q.def === "object" ? JSON.parse(JSON.stringify(q.def)) : q.def;
   return p;
 }
 export function addNode(net, fam, type, { x = 0, y = 0, name = "", p = {} } = {}) {
@@ -193,9 +214,9 @@ export class Cooker {
     const env = this.env, digits = +(/(\d+)$/.exec(node.name)?.[1] || 0);
     return {
       t: env.t, frame: env.frame, i,
-      vars: { t: env.t, time: env.t, frame: env.frame, bpm: env.levels?.bpm || env.bpm || 120, beat: env.levels?.beat || 0, i,
+      vars: { t: env.t, time: env.t, frame: env.frame, localtime: env.local ?? env.t, bpm: env.levels?.bpm || env.bpm || 120, beat: env.levels?.beat || 0, i,
         bass: env.levels?.bass || 0, mid: env.levels?.mid || 0, high: env.levels?.high || 0, level: env.levels?.level || 0 },
-      me: { name: node.name, digits, time: { seconds: env.t, frame: env.frame }, i },
+      me: { name: node.name, digits, time: { seconds: env.local ?? env.t, frame: Math.round((env.local ?? env.t) * 60) }, i },
       chop: (name) => this.chopByName(name),
       par: (name, key) => { const n = nodeByName(this.net, name); return n ? this.param(n, key) : 0; },
       tab: (name, r, c) => this.tab(name, r, c),

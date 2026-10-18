@@ -830,7 +830,7 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .tdpane.nogrid{background-image:none;}
 .tdbg{position:absolute;inset:0;width:100%;height:100%;opacity:.38;pointer-events:none;object-fit:contain;image-rendering:auto;}
 .tdws.perform .tdbg{opacity:1;z-index:5;}
-.tdws.perform .tdbar,.tdws.perform .tdparams,.tdws.perform .tdworld,.tdws.perform .tdhelp{display:none;}
+.tdws.perform .tdbar,.tdws.perform .tdparams,.tdws.perform .tdworld,.tdws.perform .tdhelp,.tdws.perform .tdtime,.tdws.perform .tdanimdock,.tdws.perform .tdvwin{display:none;}
 .tdworld{position:absolute;left:0;top:0;transform-origin:0 0;}
 .tdwires{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none;}
 .tdwire{fill:none;stroke-width:2.5;opacity:.9;}
@@ -943,6 +943,39 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .tdperf{display:flex;flex-direction:column;gap:3px;}
 .tdperfrow{display:grid;grid-template-columns:110px 1fr 90px 70px;gap:6px;font-size:12.5px;position:relative;align-items:center;}
 .tdperfrow i{position:absolute;left:0;bottom:0;height:2px;background:var(--acc);}
+/* Línea de tiempo y curvas del editor de redes */
+.tdtime{display:flex;align-items:center;gap:6px;padding:4px 8px;background:#11151d;border-top:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none;}
+.tdtime > *{flex:none;}
+.tdtbtn{background:#1c2230;border:1px solid #2b3446;color:var(--tx);border-radius:6px;min-width:30px;height:28px;cursor:pointer;font-size:14px;}
+.tdtbtn.on{border-color:var(--acc);color:var(--acc);}
+.tdtdisp{font:12px ui-monospace,monospace;min-width:118px;color:#cfe;}
+.tdtrange{flex:1 1 220px !important;min-width:120px;}
+.tdtime .text-in.tdtlen{width:64px;flex:none;}
+.tdtime .sel,.tdanimbar .sel{width:auto;flex:none;max-width:220px;}
+.tdtime .tdtrange{width:auto;}
+.tdtlab{display:flex;align-items:center;gap:3px;font-size:12px;color:var(--mut);}
+.tdtstats{margin-left:auto;font:11.5px ui-monospace,monospace;color:var(--mut);white-space:nowrap;}
+.tdanimdock{flex:none;}
+.tdws.animopen .tdanimdock{height:min(300px,38vh);border-top:1px solid var(--line);}
+.tdanim{display:flex;flex-direction:column;height:100%;background:#0d1118;outline:none;}
+.tdanimbar{display:flex;align-items:center;gap:6px;padding:4px 8px;background:#131924;flex:none;overflow-x:auto;scrollbar-width:none;}
+.tdanimbar > *{flex:none;}
+.tdanimtitle{font-size:13px;}
+.tdanimlab{display:flex;align-items:center;gap:3px;font-size:12px;color:var(--mut);}
+.tdanimbar .text-in.tdanimlen,.tdanimbar .text-in.tdanimval{width:70px;flex:none;}
+.tdanimbody{flex:1;display:flex;min-height:0;}
+.tdanimchans{width:190px;flex:none;overflow-y:auto;border-right:1px solid var(--line);padding:4px;display:flex;flex-direction:column;gap:2px;}
+.tdanimch{display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:6px;border-left:3px solid var(--c);font-size:12.5px;}
+.tdanimch.sel{background:#1c2433;}
+.tdanimch.off{opacity:.5;}
+.tdanimch b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:text;}
+.tdanimeye,.tdanimdel{background:none;border:0;color:var(--c,var(--tx));cursor:pointer;font-size:13px;padding:0 2px;}
+.tdanimdel{color:var(--mut);}
+.tdanimhelp{color:var(--mut);font-size:11px;margin-top:auto;padding:4px;}
+.tdanimwrap{flex:1;min-width:0;position:relative;}
+.tdanimcv{display:block;touch-action:none;}
+.tdprow.animated .tdplab{color:#ffd23f;}
+.tdprow.animated .tdplab::before{content:"◆ ";font-size:10px;}
 /* Visores flotantes del editor de redes */
 .tdvwin{position:absolute;z-index:30;display:flex;flex-direction:column;background:#0d1118;border:1px solid #33405a;border-radius:10px;box-shadow:0 12px 34px #000c;resize:both;overflow:hidden;min-width:220px;min-height:160px;}
 .tdvwin.active{border-color:var(--acc);}
@@ -964,6 +997,9 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
   .tdoplist{grid-template-columns:1fr;}
   .tdcreate{max-height:70vh;}
   .tdprow{grid-template-columns:86px 1fr;}
+  .tdanimchans{width:112px;}
+  .tdanimhelp,.tdtstats{display:none;}
+  .tdtdisp{min-width:84px;}
 }
 /* Con el editor de redes abierto, las ventanas, avisos y la tarjeta de Luma van encima de él. */
 body.tdopen #modal{z-index:80;}

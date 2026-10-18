@@ -7,6 +7,7 @@
 // Los parámetros pueden ser un valor o una expresión (expr.js). Este archivo no toca la GPU: el
 // motor (engine.js) usa `glsl` y las pruebas usan `cook` directamente.
 import { noise3 } from "./expr.js";
+import { animTime, evalChan, normalizeAnim } from "./anim.js";
 
 export const FAMILIES = {
   TOP: { name: "TOP · Imagen", color: "#8b5cf6", desc: "Imágenes y video en la tarjeta gráfica: generar, filtrar y mezclar." },
@@ -272,6 +273,17 @@ chop("timer", "Temporizador", "Cuenta un tiempo (con vueltas): fracción 0→1, 
     const sec = done ? L : state.acc - (p.loop ? cyc * L : 0);
     return many([["timer_fraction", sec / L], ["timer_seconds", sec], ["running", p.play && !done ? 1 : 0], ["done", done ? 1 : 0], ["cycles", p.loop ? cyc : Math.min(1, cyc)]]);
   });
+chop("animation", "Animación (fotogramas clave)", "Curvas con fotogramas clave que tú dibujas (como el Animation COMP): cada canal sube, baja o se para cuando quieras. Edítalas en «Curvas» o anima cualquier parámetro con ◆.", [0, 0],
+  [{ k: "anim", label: "Curvas", type: "anim", def: { length: 4, chans: [{ name: "chan1", keys: [{ t: 0, v: 0, e: "smooth" }, { t: 2, v: 1, e: "smooth" }, { t: 4, v: 0, e: "smooth" }] }] } },
+    m("clock", "Tiempo", [[0, "La línea de tiempo de la red"], [1, "Reloj propio (siempre corre)"], [2, "Índice (una expresión, en segundos)"]]),
+    f("index", "Índice (s)", 0, 0, 600), f("speed", "Velocidad", 1, -4, 4), t("loop", "Repetir", 1)],
+  ({ p, env, state }) => {
+    const A = p.anim && Array.isArray(p.anim.chans) ? p.anim : normalizeAnim(p.anim);   // el editor las guarda ya ordenadas
+    const T0 = (p.clock | 0) === 1 ? env.t * p.speed : (p.clock | 0) === 2 ? p.index : (env.local ?? env.t) * p.speed;
+    const T = state.T = animTime(A, T0, !!p.loop);
+    const ch = A.chans.filter(c => c.name);
+    return ch.length ? many(ch.map(c => [c.name, evalChan(c, T)])) : one("chan1", 0);
+  }, { anim: true });
 chop("audio", "Audio (niveles)", "El sonido que entra (micrófono o la canción): graves, medios, agudos, volumen y golpe (Audio Analysis CHOP).", [0, 0],
   [f("gain", "Ganancia", 1, 0, 5)],
   ({ p, env }) => { const L = env.levels || {}; const g = p.gain; return many([["bass", (L.bass || 0) * g], ["mid", (L.mid || 0) * g], ["high", (L.high || 0) * g], ["level", (L.level || 0) * g], ["beat", L.beat || 0], ["bpm", L.bpm || env.bpm || 120]]); });

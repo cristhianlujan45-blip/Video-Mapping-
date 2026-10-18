@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { compileExpr, evalExpr, renameInExpr, noise3 } from "../web/js/td/expr.js";
 import { OP_LIST, opDef, FAMILIES, searchOps, acceptsInput } from "../web/js/td/ops.js";
 import { Particles } from "../web/js/td/particles.js";
+import { evalChan, setKey, animTime, normalizeAnim, valueRange } from "../web/js/td/anim.js";
+import { netTime, playNet, pauseNet, seekNet, setNetRate } from "../web/js/td/graph.js";
 import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, Cooker, normalizeNetworks, nodeByName, uniqueName, dependsOn } from "../web/js/td/graph.js";
 
 const close = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -221,5 +223,43 @@ await test("partículas: nacen al ritmo pedido, explotan con el botón o al pasa
   for (let k = 0; k < 50; k++) C.step({ ...base, rate: 0, burstCount: 20, burst: 1, emitter: 4, speed: 0, psize: 1, sizeEnd: 0 }, 0.01, new Float32Array([5, 5, 5]), [1, 0, 0], [0, 0, 1]);
   assert.ok(C.col[0] < 0.6 && C.col[2] > 0.4 && C.size[0] < 0.6, "a media vida: entre rojo y azul, más pequeña");
   assert.ok(opDef("COMP", "particles") && acceptsInput("COMP", "particles", "SOP") && opDef("SOP", "file"), "Partículas y Modelo 3D en el catálogo");
+});
+await test("fotogramas clave: suave, recta, escalón, curva continua, acelerar/frenar; poner claves; tiempo con vueltas; Animation CHOP con la línea de tiempo de la red", () => {
+  const ch = { name: "x", keys: [] };
+  setKey(ch, 2, 10, "linear"); setKey(ch, 0, 0, "linear"); setKey(ch, 4, 0);
+  assert.deepEqual(ch.keys.map(k => k.t), [0, 2, 4], "ordenadas");
+  assert.equal(evalChan(ch, 1), 5, "recta a la mitad");
+  assert.equal(evalChan(ch, -1), 0); assert.equal(evalChan(ch, 9), 0, "fuera: el valor del extremo");
+  ch.keys[1].e = "smooth"; assert.equal(evalChan(ch, 3), 5, "suave: a la mitad también la mitad");
+  assert.ok(evalChan(ch, 2.5) > 7.5, "suave: sale despacio");
+  ch.keys[1].e = "step"; assert.equal(evalChan(ch, 3.9), 10, "escalón");
+  ch.keys[1].e = "in"; assert.equal(evalChan(ch, 3), 7.5, "acelerar");
+  ch.keys[1].e = "out"; assert.equal(evalChan(ch, 3), 2.5, "frenar");
+  ch.keys[0].e = "spline"; const sp = evalChan(ch, 1); assert.ok(sp > 5, "curva continua: pasa más alta que la recta " + sp);
+  setKey(ch, 2, 3); assert.equal(ch.keys.length, 3, "misma clave: cambia el valor"); assert.equal(ch.keys[1].v, 3);
+  assert.equal(animTime({ length: 4 }, 9), 1); assert.equal(animTime({ length: 4 }, -1), 3); assert.equal(animTime({ length: 4 }, 9, false), 4);
+  assert.deepEqual(normalizeAnim({ length: -2, chans: [{ name: "a b", keys: [{ t: 2, v: 1 }, { t: "x", v: 2 }, { t: 0, v: 5, e: "raro" }] }, null] }), { length: 0.05, chans: [{ name: "a_b", keys: [{ t: 0, v: 5, e: "smooth" }, { t: 2, v: 1, e: "smooth" }] }] });
+  assert.deepEqual(valueRange([]), [0, 1]);
+  // Línea de tiempo de la red: con el reloj de la pared, pausa, buscar, velocidad, vueltas.
+  const net = newNetwork("t"); net.timeline.t0 = 100; net.timeline.length = 10;
+  assert.equal(netTime(net, 103), 3);
+  assert.equal(netTime(net, 113), 3, "da la vuelta a los 10 s");
+  pauseNet(net, 104); assert.equal(netTime(net, 200), 4, "en pausa se queda");
+  seekNet(net, 7, 200); assert.equal(netTime(net, 300), 7);
+  playNet(net, 300); assert.equal(netTime(net, 301), 8);
+  setNetRate(net, 2, 301); assert.equal(netTime(net, 302), 0, "a doble velocidad: 8 + 2 = 10 → 0");
+  net.timeline.loop = 0; seekNet(net, 9, 400); assert.equal(netTime(net, 410), 10, "sin repetir: se para al final");
+  // Animation CHOP: sigue la línea de tiempo de la red.
+  const a = addNode(net, "CHOP", "animation", { p: { anim: { length: 4, chans: [{ name: "u", keys: [{ t: 0, v: 0, e: "linear" }, { t: 4, v: 8, e: "linear" }] }] } } });
+  const b = addNode(net, "CHOP", "animation");
+  assert.notEqual(a.p.anim, b.p.anim, "cada nodo con sus propias curvas");
+  assert.notEqual(b.p.anim, opDef("CHOP", "animation").params[0].def, "no comparte el valor por defecto");
+  const ck = new Cooker();
+  ck.begin(net, { t: 50, dt: 1 / 60, frame: 1, local: 1 });
+  assert.equal(ck.chop(a).data.u[0], 2);
+  ck.begin(net, { t: 50, dt: 1 / 60, frame: 2, local: 6 });
+  assert.equal(ck.chop(a).data.u[0], 4, "con vueltas: 6 s → 2 s de 4");
+  const lv = addNode(net, "TOP", "level", { p: { brightness: { e: "animation1.u + me.time.seconds" } } });
+  assert.equal(ck.param(lv, "brightness"), 10, "me.time.seconds es el tiempo de la red");
 });
 report();

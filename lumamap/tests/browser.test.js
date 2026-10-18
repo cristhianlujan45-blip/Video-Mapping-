@@ -794,6 +794,46 @@ await test("redes de nodos en 3D: visor flotante con gizmo (mover el objeto), c�
   await win.getByRole("button", { name: "Cerrar el visor" }).click();
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
+await test("redes de nodos: animar un parámetro con fotogramas clave (◆), autoclave al moverlo, editor de curvas y línea de tiempo", async () => {
+  await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n; a.edit(() => { n = G.newNetwork("Anim"); a.S.project.networks.push(n); G.addNode(n, "TOP", "circle", { x: 0, y: 0 }); });
+    m.closeNetworkEditor(); await a.openNetwork({ netId: n.id });
+  });
+  const ws = page.locator("#tdws.show");
+  await ws.locator('.tdnode[data-type="circle"] .tdname').click();
+  // Pausa y al segundo 1: ◆ en «Radio» crea la animación con una clave ahí.
+  await ws.locator(".tdtime").getByRole("button", { name: "Pausa" }).click();
+  await page.evaluate(async () => { const G = await import("./js/td/graph.js"); const a = window.__lumamap; G.seekNet(a.S.project.networks.at(-1), 1); });
+  await ws.locator('.tdprow[data-k="radius"]').getByRole("button", { name: "Animar Radio" }).click();
+  await ws.locator(".tdanim").waitFor();
+  // Al segundo 3, mover el radio pone otra clave (autoclave).
+  await page.evaluate(async () => { const G = await import("./js/td/graph.js"); const a = window.__lumamap; G.seekNet(a.S.project.networks.at(-1), 3); });
+  const num = ws.locator('.tdprow[data-k="radius"] input[type=number]');
+  await num.fill("0.8"); await num.press("Enter");
+  const A = () => page.evaluate(() => { const n = window.__lumamap.S.project.networks.at(-1); const an = n.nodes.find(x => x.type === "animation"); return { e: n.nodes.find(x => x.type === "circle").p.radius.e, keys: an.p.anim.chans[0].keys.map(k => [k.t, k.v]), name: an.name, ch: an.p.anim.chans[0].name }; });
+  let r = await A();
+  assert.equal(r.e, `${r.name}.${r.ch}`);
+  assert.deepEqual(r.keys, [[1, 0.3], [3, 0.8]]);
+  // En el segundo 2 el radio vale lo de en medio (suave), y el motor lo usa.
+  await page.evaluate(async () => { const G = await import("./js/td/graph.js"); const a = window.__lumamap; G.seekNet(a.S.project.networks.at(-1), 2); });
+  await page.waitForFunction(() => { const a = window.__lumamap, n = a.S.project.networks.at(-1); const v = a.td.cookers.get(n.id)?.param(n.nodes.find(x => x.type === "circle"), "radius"); return Math.abs(v - 0.55) < 0.01; }, null, { timeout: 5000 });
+  // Doble clic en las curvas pone una clave; Supr la borra.
+  const cv = await ws.locator(".tdanimcv").boundingBox();
+  await page.mouse.dblclick(cv.x + cv.width * 0.75, cv.y + cv.height * 0.6);
+  r = await A();
+  assert.equal(r.keys.length, 3, "clave nueva con doble clic");
+  await page.keyboard.press("Delete");
+  assert.equal((await A()).keys.length, 2, "Supr la borra (y no borra nodos)");
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.networks.at(-1).nodes.length), 2);
+  // La línea de tiempo vuelve a sonar.
+  await ws.locator(".tdtime").getByRole("button", { name: "Reproducir" }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.networks.at(-1).timeline.play), 1);
+  await page.keyboard.press("k");
+  await ws.locator(".tdanim").waitFor({ state: "detached" });
+  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
+});
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const g = await pctx.newPage();

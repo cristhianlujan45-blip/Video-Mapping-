@@ -11,7 +11,7 @@
 import * as THREE from "../../vendor/three/three.module.min.js";
 import { mergeGeometries } from "../../vendor/three/addons/utils/BufferGeometryUtils.js";
 import { defOf, opDef } from "./ops.js";
-import { Cooker, nodeById, nodeByName } from "./graph.js";
+import { Cooker, nodeById, nodeByName, netTime } from "./graph.js";
 import { cameraIfReady, getCamera } from "../sources.js";
 import { ShaderCache, spectrumFromLevels } from "../isf.js";
 import { getShader } from "../plugins.js";
@@ -216,7 +216,8 @@ export class NetEngine {
     this.time = time; this.levels = levels || {};
     this.memo.clear();
     const env = this.envFor(time, levels);
-    for (const net of this.project?.networks || []) this.cooker(net).begin(net, env);
+    // Cada red con el tiempo de su línea de tiempo (me.time, Animación CHOP).
+    for (const net of this.project?.networks || []) this.cooker(net).begin(net, { ...env, local: netTime(net) });
     this.lastT = time;
     // CHOPs para los visores: guardan los últimos valores.
   }

@@ -12,7 +12,9 @@
 //   · ejemplos listos y «Usar en una superficie» para proyectarlo.
 import { h, btn, dialog, closeDialog, toast, hint, prompt, confirmDlg } from "./ui.js";
 import { FAMILIES, OP_LIST, opDef, defOf, searchOps, acceptsInput } from "./td/ops.js";
-import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, nodeById, nodeByName, freeInput, isExpr, outputsOf } from "./td/graph.js";
+import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, nodeById, nodeByName, freeInput, isExpr, outputsOf, netTime, playNet, pauseNet, seekNet, setNetRate } from "./td/graph.js";
+import { AnimEditor } from "./td/animeditor.js";
+import { setKey, evalChan, uniqueChan } from "./td/anim.js";
 import { compileExpr, EXPR_FUNCS } from "./td/expr.js";
 import { EXAMPLES, buildExample } from "./td/examples.js";
 import { exportTargets } from "./td/params-net.js";
@@ -80,9 +82,13 @@ function buildUI(root) {
   pane.append(bg, world, box, h("div", { class: "tdhelp" }, MOBILE ? "Arrastra para moverte · pellizca para zoom · mantén pulsado para crear · toca la salida ● y luego otro nodo para conectar" : "Tab o clic derecho: crear · arrastra de la salida ● a la entrada ○ · rueda: zoom · espacio/botón central: moverse · H: ver todo"));
   const params = h("div", { class: "tdparams" });
   const body = h("div", { class: "tdbody" }, pane, params);
-  root.append(bar, body);
-  R = { root, bar, pane, bg, bgx: bg.getContext("2d"), world, svg, nodesEl, box, params, body };
+  const dock = h("div", { class: "tdanimdock" });
+  const timebar = h("div", { class: "tdtime" });
+  root.append(bar, body, dock, timebar);
+  R = { root, bar, pane, bg, bgx: bg.getContext("2d"), world, svg, nodesEl, box, params, body, dock, timebar };
+  ed.animEd = null;
   buildBar();
+  buildTimebar();
   bindPane();
   renderAll();
   setTimeout(() => { if (!curNet()?.nodes.length) toast("Red vacía: pulsa «＋ Operador» (o Tab) o abre un ejemplo en Archivo → Ejemplos"); else frameAll(); }, 30);
@@ -111,7 +117,7 @@ function closePop() { document.querySelectorAll("#tdws .tdpop").forEach(x => x.r
 function buildBar() {
   const net = curNet();
   const sel = h("select", { class: "tdnetsel", title: "Red que estás editando" }, ...nets().map(n => h("option", { value: n.id, selected: n.id === ed.netId }, n.name)));
-  sel.onchange = () => { ed.netId = sel.value; ed.sel.clear(); renderAll(); frameAll(); };
+  sel.onchange = () => { ed.netId = sel.value; ed.sel.clear(); closeAnim(); buildTimebar(); renderAll(); frameAll(); };
   R.bar.replaceChildren(
     h("b", { class: "tdlogo" }, "🔗 Redes"),
     sel,
@@ -159,6 +165,7 @@ function buildBar() {
       { label: "Rejilla (imán)", on: ed.grid, run: () => { ed.grid = !ed.grid; R.pane.classList.toggle("nogrid", !ed.grid); } },
       { label: "Panel de parámetros", keys: "P", on: ed.params, run: () => toggleParams() },
       { label: "Visor flotante de lo elegido (3D: mover objetos y cámara)", keys: "V", run: () => openViewerSel(), disabled: ed.sel.size !== 1 },
+      { label: "Curvas (fotogramas clave)", keys: "K", on: !!ed.animEd, run: () => ed.animEd ? closeAnim() : openAnim() },
       { label: "Visor flotante del Render 3D", run: () => { const r = curNet().nodes.find(n => n.type === "render"); r ? openViewer(r.id) : toast("Esta red no tiene un Render 3D", "warn"); } },
       "-",
       { label: "Cadena de cada superficie (vista simple)", run: () => openNodes(app) },
@@ -286,7 +293,7 @@ function bindPane() {
   P.addEventListener("dblclick", (e) => {
     const nodeE = e.target.closest(".tdnode");
     if (nodeE && e.target.closest(".tdname")) { renameDialog(nodeE.dataset.id); return; }
-    if (nodeE) { const n = nodeById(curNet(), nodeE.dataset.id); if (n?.fam === "TOP") { app.edit(() => { curNet().display = n.id; }); renderAll(); } else { ed.params = true; renderAll(); } return; }
+    if (nodeE) { const n = nodeById(curNet(), nodeE.dataset.id); if (n?.type === "animation") { openAnim(n.id); return; } if (n?.fam === "TOP") { app.edit(() => { curNet().display = n.id; }); renderAll(); } else { ed.params = true; renderAll(); } return; }
     openCreate({ at: toWorld(e.clientX, e.clientY), screen: { x: e.clientX, y: e.clientY } });
   });
   P.addEventListener("pointerdown", onDown);
@@ -777,6 +784,8 @@ function nodePanel(net, n) {
     btn({ label: n.bypass ? "⏻ Encender" : "⏻ Bypass", kind: `small ${n.bypass ? "on" : ""}`, onClick: () => { ed.sel = new Set([n.id]); toggleBypassSel(); } }),
     n.fam === "TOP" ? btn({ label: "👁 De fondo", kind: `small ${net.display === n.id ? "on" : ""}`, onClick: () => { ed.sel = new Set([n.id]); setDisplaySel(); } }) : null,
     n.fam === "TOP" ? btn({ label: "▶ Usar en superficie", kind: "small", onClick: () => useOnSurface(n.id) }) : null,
+    n.type === "animation" ? btn({ label: "◆ Curvas", kind: "small primary", onClick: () => openAnim(n.id) }) : null,
+    ["TOP", "CHOP"].includes(n.fam) ? btn({ label: "⧉ Visor", kind: "small", title: "Visor flotante (V)", onClick: () => openViewer(n.id) }) : null,
     btn({ label: "Borrar", kind: "small danger", onClick: () => { ed.sel = new Set([n.id]); deleteSel(); } }));
   box.append(head, h("p", { class: "tdppdesc" }, h("b", {}, def.label), " — ", def.desc), acts);
   const ins = def.inputs[1] ? h("p", { class: "tdppins" }, `Entradas: ${n.in.filter(Boolean).map(id => nodeById(net, id)?.name).join(", ") || "ninguna"}${def.inputs[0] ? ` (necesita ${def.inputs[0]})` : ""}`) : null;
@@ -804,6 +813,24 @@ function paramRow(net, n, q) {
   lab.ondblclick = () => { set(q.def); renderParams(); };
   const rowEl = h("div", { class: `tdprow ${expr ? "expr" : ""}`, "data-k": q.k });
   let ctl;
+  const animRef = expr && numeric ? animBinding(net, v.e) : null;
+  if (animRef) {
+    // Parámetro animado con claves: el deslizador pone una clave ◆ en el instante del cursor (autoclave).
+    rowEl.classList.add("animated");
+    const step = q.type === "i" ? 1 : Math.max(0.001, ((q.max ?? 1) - (q.min ?? 0)) / 200);
+    const num = h("input", { type: "number", class: "text-in small tdnum", step, "aria-label": q.label + " (animado)" });
+    const rng = h("input", { type: "range", min: q.min ?? 0, max: q.max ?? 1, step, "aria-label": q.label + " (deslizador animado)" });
+    const keyAt = (val) => { const T = animTimeOf(net, animRef.node); setKey(animRef.ch, T, val); app.changed(); app.commitSoon(); ed.animEd?.rebuild(); };
+    rng.addEventListener("input", () => { num.value = rng.value; keyAt(+rng.value); });
+    num.addEventListener("change", () => { if (Number.isFinite(+num.value)) { rng.value = num.value; keyAt(+num.value); } });
+    num.addEventListener("keydown", (e) => e.stopPropagation());
+    rowEl._eval = () => { if (document.activeElement === rng || document.activeElement === num) return; const ck = app.td?.cookers.get(net.id); const val = ck ? +ck.param(n, q.k) || 0 : 0; rng.value = val; num.value = +val.toFixed(4); };
+    ctl = h("div", { class: "tdnumwrap" }, rng, num);
+    const goto = h("button", { class: "tdfx on", title: `Animado con ${animRef.node.name}.${animRef.ch.name}: ver sus curvas`, "aria-label": "Curvas de " + q.label, onclick: () => openAnim(animRef.node.id, animRef.ch.name) }, "◆");
+    const unanim = h("button", { class: "tdfx", title: "Quitar la animación (se queda el valor de ahora)", "aria-label": "Quitar animación de " + q.label, onclick: () => { const ck = app.td?.cookers.get(net.id); set(ck ? +ck.param(n, q.k) || 0 : q.def); renderParams(); } }, "✕");
+    rowEl.append(lab, h("div", { class: "tdpctl" }, ctl, goto, unanim));
+    return rowEl;
+  }
   if (expr) {
     const inp = h("input", { class: "text-in small tdexpr", value: v.e, spellcheck: "false", "aria-label": q.label + " (expresión)" });
     const valOut = h("output", { class: "tdeval" });
@@ -849,6 +876,12 @@ function paramRow(net, n, q) {
       ctl = h("div", {}, s, btn({ label: "Importar video o foto…", kind: "small", onClick: async () => { await app.actions.importMedia("library"); setTimeout(renderParams, 400); } }));
       break;
     }
+    case "anim": {
+      const A = v && Array.isArray(v.chans) ? v : { length: 4, chans: [] };
+      ctl = h("div", {}, h("small", {}, `${A.chans.length} canal${A.chans.length === 1 ? "" : "es"} · ${A.chans.reduce((s2, c) => s2 + (c.keys?.length || 0), 0)} claves · ${A.length} s`),
+        btn({ label: "◆ Editar las curvas", kind: "small primary", onClick: () => openAnim(n.id) }));
+      break;
+    }
     case "model": {
       const models = app.S.project.media.filter(m => m.kind === "model");
       const s = h("select", { class: "sel small", "aria-label": q.label }, h("option", { value: "" }, models.length ? "— elige un modelo —" : "— aún no hay modelos 3D —"), ...models.map(m => h("option", { value: m.id, selected: m.id === v }, m.name)));
@@ -889,7 +922,8 @@ function paramRow(net, n, q) {
     renderParams();
   } }, "ƒx") : null;
   const link = numeric ? h("button", { class: "tdfx", title: "Enlazar a un canal (CHOP): audio, LFO, la mano en la cámara…", "aria-label": "Enlazar " + q.label, onclick: () => bindDialog(net, n, q) }, "🔗") : null;
-  rowEl.append(lab, h("div", { class: "tdpctl" }, ctl, fx, link));
+  const key = numeric && !expr && q.type !== "pulse" ? h("button", { class: "tdfx", title: "Animar con fotogramas clave (◆): pone una clave ahora; cambia el tiempo y el valor para poner más", "aria-label": "Animar " + q.label, onclick: () => animateParam(net, n, q) }, "◆") : null;
+  rowEl.append(lab, h("div", { class: "tdpctl" }, ctl, fx, link, key));
   return rowEl;
 }
 /** Crea el nodo que falta para un parámetro de referencia (material, cámara, CHOP…). */
@@ -925,6 +959,93 @@ function bindDialog(net, n, q) {
       h("button", { class: "chip", onclick: () => quick("mouse", "tx") }, "🖱 Ratón X")),
     chops.length ? h("h4", {}, "O un canal de un CHOP de la red") : null, listEl) });
 }
+
+/* ======================================================================
+   Línea de tiempo de la red (abajo) y curvas de animación
+   ====================================================================== */
+function buildTimebar() {
+  const net = curNet();
+  if (!R.timebar || !net) return;
+  const tl = net.timeline;
+  const playB = h("button", { class: "tdtbtn", title: tl.play ? "Pausa" : "Reproducir", "aria-label": tl.play ? "Pausa" : "Reproducir", onclick: () => { app.edit(() => tl.play ? pauseNet(net) : playNet(net)); buildTimebar(); } }, tl.play ? "⏸" : "▶");
+  const startB = h("button", { class: "tdtbtn", title: "Al principio", "aria-label": "Al principio", onclick: () => { app.edit(() => seekNet(net, 0)); } }, "⏮");
+  const range = h("input", { type: "range", class: "tdtrange", min: 0, max: tl.length, step: 0.01, value: netTime(net), "aria-label": "Tiempo de la red" });
+  range.addEventListener("input", () => { seekNet(net, +range.value); app.changed(); });
+  range.addEventListener("change", () => app.commitSoon());
+  const len = h("input", { type: "number", class: "text-in small tdtlen", min: 0.1, step: 0.5, value: tl.length, title: "Duración de la línea de tiempo (s)", "aria-label": "Duración de la línea de tiempo" });
+  len.addEventListener("change", () => { const v = +len.value; if (v > 0) { app.edit(() => { const t = netTime(net); tl.length = Math.min(3600, v); seekNet(net, Math.min(t, tl.length)); }); buildTimebar(); } });
+  len.addEventListener("keydown", (e) => e.stopPropagation());
+  const loop = h("button", { class: `tdtbtn ${tl.loop ? "on" : ""}`, title: tl.loop ? "Repite (clic: parar al final)" : "Para al final (clic: repetir)", "aria-label": "Repetir", onclick: () => { app.edit(() => { const t = netTime(net); tl.loop = tl.loop ? 0 : 1; seekNet(net, t); }); buildTimebar(); } }, "🔁");
+  const rate = h("select", { class: "sel small tdtrate", title: "Velocidad", "aria-label": "Velocidad de la línea de tiempo" }, ...[0.25, 0.5, 1, 2, 4].map(r => h("option", { value: r, selected: +tl.rate === r }, r + "×")));
+  rate.onchange = () => app.edit(() => setNetRate(net, +rate.value));
+  const disp = h("span", { class: "tdtdisp" });
+  const stats = h("span", { class: "tdtstats" });
+  R.timebar.replaceChildren(startB, playB, disp, range, h("label", { class: "tdtlab" }, len, "s"), loop, rate,
+    btn({ label: "◆ Curvas", kind: `small ${ed.animEd ? "on" : ""}`, title: "Editor de curvas (K)", onClick: () => ed.animEd ? closeAnim() : openAnim() }), stats);
+  R.time = { range, disp, playB, stats };
+}
+function updateTimebar(net) {
+  const T = R.time;
+  if (!T || !net) return;
+  const t = netTime(net);
+  if (document.activeElement !== T.range) T.range.value = t;
+  T.disp.textContent = `${t.toFixed(2)} s · ${Math.floor(t * 60)} f`;
+}
+/** Tiempo (dentro de su animación) de un Animation CHOP en este fotograma. */
+function animTimeOf(net, node) {
+  const st = app.td?.cookers.get(net.id)?.state.get(node.id);
+  if (st && Number.isFinite(st.T)) return st.T;
+  const p = node.p, L = Math.max(0.01, +p.anim?.length || 4), T = netTime(net) * (+p.speed || 1);
+  return p.loop ? ((T % L) + L) % L : Math.min(L, T);
+}
+/** ¿Esta expresión es un canal de un Animation CHOP («anim1.chan1»)? */
+function animBinding(net, e) {
+  const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(String(e || ""));
+  if (!m) return null;
+  const node = nodeByName(net, m[1]);
+  if (!node || node.type !== "animation" || !Array.isArray(node.p.anim?.chans)) return null;
+  const ch = node.p.anim.chans.find(c => c.name === m[2]);
+  return ch ? { node, ch } : null;
+}
+/** ◆ Animar un parámetro: canal nuevo en el Animation CHOP de la red (o uno nuevo) con una clave ahora. */
+function animateParam(net, n, q) {
+  let anim = net.nodes.find(x => x.type === "animation" && x.fam === "CHOP");
+  const ck = app.td?.cookers.get(net.id);
+  const val = ck ? +ck.param(n, q.k) || 0 : +n.p[q.k] || 0;
+  let chName = "";
+  app.edit(() => {
+    if (!anim) { const pos = freeSpot(n.x - NW - 60, n.y + 160); anim = addNode(net, "CHOP", "animation", { x: pos[0], y: pos[1], p: { anim: { length: Math.max(1, +net.timeline?.length || 10), chans: [] } } }); }
+    const A = anim.p.anim;
+    chName = uniqueChan(A, `${n.name}_${q.k}`);
+    const ch = { name: chName, keys: [] };
+    A.chans.push(ch);
+    setKey(ch, animTimeOf(net, anim), val);
+    n.p[q.k] = { e: `${anim.name}.${chName}` };
+  });
+  renderAll();
+  openAnim(anim.id, chName);
+  toast("◆ Animado: mueve el tiempo (abajo) y cambia el valor; cada cambio pone una clave");
+}
+function openAnim(nodeId = null, chan = null) {
+  const net = curNet();
+  const node = nodeById(net, nodeId) || nodeById(net, [...ed.sel][0]);
+  const target = node?.type === "animation" ? node : net.nodes.find(x => x.type === "animation");
+  if (!target) {
+    let a;
+    app.edit(() => { const pos = centerWorld(); a = addNode(net, "CHOP", "animation", { x: pos[0], y: pos[1] }); });
+    renderAll();
+    return openAnim(a.id);
+  }
+  const opts = { app, netId: net.id, nodeId: target.id, chan,
+    getTime: () => { const n2 = nodeById(curNet(), ed.animEd?.nodeId); return n2 ? animTimeOf(curNet(), n2) : 0; },
+    seek: (t) => { const n2 = nodeById(curNet(), ed.animEd?.nodeId); if (!n2) return; if ((n2.p.clock | 0) !== 0) { if (!ed.warnClock) { ed.warnClock = 1; toast(`${n2.name} usa su propio reloj: el cursor no lo mueve`, "warn"); } return; } seekNet(curNet(), t / (+n2.p.speed || 1)); app.changed(); },
+    onClose: () => closeAnim(), onChange: () => { for (const r of R.params.querySelectorAll(".tdprow.animated")) r._eval?.(); } };
+  if (ed.animEd) ed.animEd.setNode(target.id, chan);
+  else { ed.animEd = new AnimEditor(opts); R.dock.replaceChildren(ed.animEd.el); R.root.classList.add("animopen"); }
+  buildTimebar();
+  return ed.animEd;
+}
+function closeAnim() { ed.animEd = null; R.dock?.replaceChildren(); R.root?.classList.remove("animopen"); if (R.timebar) buildTimebar(); }
 
 /* ======================================================================
    Visores flotantes (como los «viewers» de TouchDesigner): ventanas que se mueven y se cambian de
@@ -1138,6 +1259,7 @@ function loop() {
     if (list.length) eng.viewers(list, time, lv);
   }
   if (ed.vwins.length && now - (ed.lastV || 0) > (MOBILE ? 50 : 16)) { ed.lastV = now; drawViewers(net, eng, time, lv); }
+  if (now - (ed.lastTime || 0) > 50) { ed.lastTime = now; updateTimebar(net); ed.animEd?.draw(); }
   if (now - ed.lastInfo > 400) { ed.lastInfo = now; updateInfo(); }
 }
 
@@ -1168,7 +1290,9 @@ export function handleNetKey(a, e) {
   if (ctrl && lk === "a") { ed.sel = new Set(curNet().nodes.map(n => n.id)); markSelection(); renderParams(); return eat(); }
   if (ctrl && lk === "s") return false;   // guardar: lo hace LumaMap
   if (ctrl) return eat();
-  if (ed.activeV?.view3d && !e.altKey && ed.activeV.view3d.key(k)) return eat();
+  if (document.activeElement?.closest?.(".tdanim")) { if (k === "Delete" || k === "Backspace") return false; }
+  else if (ed.activeV?.view3d && !e.altKey && ed.activeV.view3d.key(k)) return eat();
+  if (lk === "k") { ed.animEd ? closeAnim() : openAnim(); return eat(); }
   if (lk === "v") { openViewerSel(); return eat(); }
   if (k === "Delete" || k === "Backspace") { deleteSel(); return eat(); }
   if (lk === "h") { frameAll(); return eat(); }
