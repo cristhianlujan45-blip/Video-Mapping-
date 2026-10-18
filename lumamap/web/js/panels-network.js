@@ -169,6 +169,7 @@ function buildBar() {
       "-",
       { label: "Visores en los nodos", on: ed.viewers, run: () => { ed.viewers = !ed.viewers; renderAll(); } },
       { label: "Imagen de fondo", on: ed.bg, run: () => { ed.bg = !ed.bg; } },
+      { label: "Tiempos en colores (lo que más tarda)", on: !!ed.heat, run: () => { ed.heat = !ed.heat; updateInfo(); } },
       { label: "Rejilla (imán)", on: ed.grid, run: () => { ed.grid = !ed.grid; R.pane.classList.toggle("nogrid", !ed.grid); } },
       { label: "Panel de parámetros", keys: "P", on: ed.params, run: () => toggleParams() },
       { label: "Visor flotante de lo elegido (3D: mover objetos y cámara)", keys: "V", run: () => openViewerSel(), disabled: ed.sel.size !== 1 },
@@ -336,6 +337,8 @@ function onDown(e) {
   // Dos dedos: pellizcar para zoom.
   if (pointers.size === 2) { const [a, b] = [...pointers.values()]; drag = { kind: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y), z0: view().z, mid: [(a.x + b.x) / 2, (a.y + b.y) / 2], v0: { ...view() } }; clearTimeout(longT); return; }
   const net = curNet(), t = e.target;
+  // Al tocar la red, las teclas (F, S…) vuelven a ser de la red y no del visor 3D.
+  if (ed.activeV) { ed.activeV.el.classList.remove("active"); ed.activeV = null; }
   const flag = t.closest(".tdflag");
   if (flag) { e.stopPropagation(); const id = t.closest(".tdnode").dataset.id; flagClick(id, flag.dataset.flag); return; }
   const nodeE = t.closest(".tdnode");
@@ -836,8 +839,10 @@ function nodePanel(net, n) {
   }
   if (!def.params.filter(q => !q.hidden).length) box.append(hint("Este operador no tiene parámetros: deja pasar lo que le entra (sirve para nombrar un punto de la red)."));
   if (n.fam === "CHOP") box.append(h("div", { class: "tdchans" }));
-  box.append(info);
-  box._info = info;
+  const why = btn({ label: "🤖 ¿Qué pasa aquí?", kind: "small", title: "Que la IA (o la guía, sin IA) explique el error y cómo arreglarlo", onClick: () => explainError(net, n) });
+  why.style.display = "none";
+  box.append(info, why);
+  box._info = info; box._why = why;
   return box;
 }
 
@@ -1320,6 +1325,18 @@ function drawViewers(net, eng, time, lv) {
     } catch (e) { console.warn("visor flotante", e); }
   }
 }
+/** 🤖 ¿Qué pasa aquí?: explica el error de un nodo (con la IA si hay; si no, con la guía). */
+async function explainError(net, n) {
+  const i = app.td?.info(net, n) || {};
+  if (!i.error) { toast("Este nodo no tiene errores ahora mismo"); return; }
+  const def = defOf(n);
+  const body = h("div", { class: "tdhelptext" }, h("p", {}, "Pensando…"));
+  dialog({ title: `🤖 ¿Qué le pasa a ${n.name}?`, wide: true, content: body });
+  let r;
+  try { const { aiOf } = await import("./panels-assistant.js"); r = await aiOf(app).explainNodeError({ name: n.name, op: def.label, fam: n.fam, error: i.error, inputs: n.in.filter(Boolean).length, needs: def.inputs[0] }); }
+  catch (e) { const { explainNodeErrorRules } = await import("./ai/providers.js"); r = { text: explainNodeErrorRules({ error: i.error, inputs: n.in.filter(Boolean).length, needs: def.inputs[0] }), fallback: true }; void e; }
+  body.replaceChildren(h("p", {}, r.text), h("pre", { class: "tdppinfo err" }, i.error), hint(r.source && !r.fallback ? `Respuesta de: ${r.source}` : "Explicación de la guía (sin IA)"));
+}
 const fmtSecs = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 /** Importa un audio a la biblioteca de la red (para el «Audio de un archivo» CHOP). */
 function importAudio(done) {
@@ -1406,11 +1423,16 @@ function refreshNode(n) {
 function updateInfo(force = false) {
   const net = curNet(), eng = app.td;
   if (!net || !eng) return;
+  let total = 0, errs = 0;
   for (const el of R.nodesEl.children) {
     const n = nodeById(net, el.dataset.id);
     if (!n) continue;
     const i = eng.info(net, n);
+    total += i.ms || 0; if (i.error) errs++;
     el.classList.toggle("err", !!i.error);
+    // Tiempos en colores (como el «perform» de TouchDesigner): naranja > 1 ms, rojo > 4 ms.
+    el.classList.toggle("hot1", ed.heat && i.ms > 1 && i.ms <= 4);
+    el.classList.toggle("hot2", ed.heat && i.ms > 4);
     const f = el.querySelector(".tdinfo");
     const rec = n.type === "movieout" ? eng.recInfo?.(n.id) : null;
     el.classList.toggle("rec", !!rec);
@@ -1425,11 +1447,18 @@ function updateInfo(force = false) {
       const i = eng.info(net, n);
       pp._info.textContent = (n.fam === "TOP" && i.w ? `Imagen ${i.w}×${i.h} · ` : "") + `cálculo ${i.ms.toFixed(2)} ms` + (i.error ? `\n⚠ ${i.error}` : "");
       pp._info.classList.toggle("err", !!i.error);
+      if (pp._why) pp._why.style.display = i.error ? "" : "none";
       const ch = pp.querySelector(".tdchans");
       if (ch) { const c = eng.cookers.get(net.id)?.chop(n); ch.replaceChildren(...(c?.names || []).slice(0, 16).map(nm => h("div", { class: "tdchan" }, h("b", {}, nm), h("span", {}, c.len > 1 ? `${c.len} muestras · [0] ${(+c.data[nm][0]).toFixed(3)}` : (+c.data[nm][0]).toFixed(3))))); }
     }
   }
-  for (const r of R.params.querySelectorAll(".tdprow.expr")) r._eval?.();
+  for (const r of R.params.querySelectorAll(".tdprow.expr, .tdprow.animated")) r._eval?.();
+  // Barra de estado (abajo a la derecha).
+  if (R.time?.stats) {
+    const [w, hh] = net.res || [0, 0];
+    R.time.stats.textContent = `${Math.round(ed.fps || 0)} fps · ${total.toFixed(1)} ms · ${net.nodes.length} nodos · ${w}×${hh}${errs ? ` · ⚠ ${errs}` : ""}${ed.path.length ? " · 📦 " + (nodeById(net, ed.path.at(-1))?.name || "") : ""}`;
+    R.time.stats.classList.toggle("err", errs > 0);
+  }
   void force;
 }
 function drawChop(canvas, data) {
@@ -1464,6 +1493,8 @@ function loop() {
   const net = curNet(), eng = app.td;
   if (!net || !eng) return;
   const now = performance.now();
+  if (ed.lastLoop) ed.fps = (ed.fps || 60) * 0.95 + (1000 / Math.max(1, now - ed.lastLoop)) * 0.05;
+  ed.lastLoop = now;
   const time = now / 1000, lv = app.S.levels;
   // Imagen de fondo (display): a la mitad de resolución, ~30 fps (en pantalla completa, entera).
   const disp = nodeById(net, net.display);

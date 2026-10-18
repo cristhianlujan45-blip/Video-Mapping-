@@ -172,8 +172,24 @@ LEVELS.push(
     { text: "¡Ya programas como en TouchDesigner! En Archivo → Ejemplos tienes más: mover un objeto 3D con la mano, barras 3D del sonido, túneles de feedback y tu propio GLSL.", info: true },
   ] },
 );
+LEVELS.push(
+  { level: 20, title: "Redes pro: 3D, animación y subredes", steps: [
+    { text: "Abre el editor de redes con «Nodos» (arriba).", target: '#top [data-act="nodes"]', check: () => netOpen(), doIt: (app) => app.openNetwork?.() },
+    { text: "Crea una «Caja» de la familia SOP (Tab → «caja»): se crean solos su Objeto 3D, una cámara y un Render 3D.", check: (app) => allNodes(app).some(n => n.type === "geo") && allNodes(app).some(n => n.type === "render"),
+      doIt: (app) => tdDo(app, (G, net) => { const b = G.addNode(net, "SOP", "box", { x: 0, y: 300 }); const g = G.addNode(net, "COMP", "geo", { x: 230, y: 300 }); G.connect(net, b.id, g.id, 0); if (!net.nodes.some(n => n.type === "camera")) G.addNode(net, "COMP", "camera", { x: 230, y: 470 }); if (!net.nodes.some(n => n.type === "render")) G.addNode(net, "TOP", "render", { x: 460, y: 300 }); }) },
+    { text: "Abre el visor 3D: clic derecho en «render1» → «Visor flotante 3D» (o elígelo y pulsa V). Arrastra en el visor para girar la cámara; la rueda acerca.", check: () => typeof document !== "undefined" && !!document.querySelector("#tdws .tdvwin"),
+      doIt: async (app) => { if (!netOpen()) await app.openNetwork?.(); const m = await import("../panels-network.js"); const r = firstNet(app)?.nodes.find(n => n.type === "render"); if (r) m.openViewer(r.id); } },
+    { text: "Haz clic en el cubo del visor y arrastra una flecha del gizmo para moverlo (G mover, R girar, S escalar).", check: (app) => allNodes(app).some(n => n.type === "geo" && ["tx", "ty", "tz", "rx", "ry", "rz"].some(k => typeof n.p[k] === "number" && Math.abs(n.p[k]) > 0.01)),
+      doIt: (app) => tdDo(app, (G, net) => { const g = net.nodes.find(n => n.type === "geo"); if (g) g.p.tx = 0.8; }) },
+    { text: "Anímalo: en los parámetros del Objeto 3D pulsa ◆ junto a «Girar Y». Mueve el tiempo de abajo, cambia el valor y se pondrá otra clave ◆. Verás la curva en el editor de curvas (K).", check: (app) => allNodes(app).some(n => n.type === "animation" && (n.p.anim?.chans || []).some(c => (c.keys || []).length >= 2)),
+      doIt: (app) => tdDo(app, (G, net) => { const g = net.nodes.find(n => n.type === "geo"); const a = G.addNode(net, "CHOP", "animation", { x: 0, y: 520, p: { anim: { length: 4, chans: [{ name: "giro", keys: [{ t: 0, v: 0, e: "smooth" }, { t: 4, v: 360, e: "smooth" }] }] } } }); if (g) g.p.ry = { e: a.name + ".giro" }; }) },
+    { text: "Ordena la red: elige la caja y su Objeto 3D (Mayús + clic) y pulsa Ctrl+G. Quedan dentro de una subred 📦: doble clic para entrar y U para salir.", check: (app) => allNodes(app).some(n => n.type === "base"),
+      doIt: (app) => tdDo(app, (G, net) => { const ids = net.nodes.filter(n => n.type === "box" || n.type === "geo").map(n => n.id); if (ids.length) G.groupIntoBase(net, ids); }) },
+    { text: "¡Eres pro! Prueba también: Partículas, Modelo 3D (archivo) con tus .glb/.obj, Audio de un archivo, Grabar video, Ventana a un proyector y el Panel de control con deslizadores y botones (Red → Panel de control).", info: true },
+  ] },
+);
 /** El curso completo, en el orden recomendado (cada número es un capítulo de LEVELS). */
-export const COURSE = [13, 1, 14, 2, 3, 4, 15, 10, 16, 6, 7, 11, 19, 12, 9, 8, 17, 5, 18];
+export const COURSE = [13, 1, 14, 2, 3, 4, 15, 10, 16, 6, 7, 11, 19, 20, 12, 9, 8, 17, 5, 18];
 
 const KEY = "lumamap:academy", CUR = "lumamap:academyCur";
 export class Academy {

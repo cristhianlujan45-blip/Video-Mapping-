@@ -138,6 +138,34 @@ export const EXAMPLES = [
     wire(net, src, geo); wire(net, rnd, out);
     return out;
   } },
+  { id: "keys", name: "Título animado con fotogramas clave", desc: "Un texto que entra, se para y sale con curvas ◆ (Animación CHOP + línea de tiempo). Abre «Curvas» (K) para cambiarlas.", build(net) {
+    const an = at(net, "CHOP", "animation", 0, 1, { anim: { length: 6, chans: [
+      { name: "x", keys: [{ t: 0, v: -0.8, e: "out" }, { t: 1.5, v: 0, e: "smooth" }, { t: 4.5, v: 0, e: "in" }, { t: 6, v: 0.8, e: "smooth" }] },
+      { name: "escala", keys: [{ t: 0, v: 0.6, e: "spline" }, { t: 1.5, v: 1, e: "spline" }, { t: 3, v: 1.15, e: "spline" }, { t: 4.5, v: 1, e: "spline" }, { t: 6, v: 0.6, e: "spline" }] },
+      { name: "brillo", keys: [{ t: 0, v: 0, e: "linear" }, { t: 1, v: 1, e: "step" }, { t: 5, v: 1, e: "linear" }, { t: 6, v: 0, e: "linear" }] }] } });
+    const txt = at(net, "TOP", "text", 0, 0, { text: "LUMAMAP", size: 0.22, glow: 0.5, color: "#00e5ff" });
+    const tr = at(net, "TOP", "transform", 1, 0, { tx: { e: "animation1.x" }, sx: { e: "animation1.escala" }, sy: { e: "animation1.escala" } });
+    const lv = at(net, "TOP", "level", 2, 0, { brightness: { e: "animation1.brillo" } });
+    const out = at(net, "TOP", "out", 3, 0);
+    wire(net, txt, tr, lv, out);
+    net.timeline.length = 6;
+    void an;
+    return out;
+  } },
+  { id: "panel", name: "Panel de control para un efecto", desc: "Deslizadores, un botón y un pad XY que mueven un caleidoscopio en vivo (Red → Panel de control, o F11 para actuar con ellos).", build(net) {
+    const sl1 = at(net, "COMP", "slider", 0, 2, { value: 0.3, min: 2, max: 16, label: "Partes" });
+    const sl2 = at(net, "COMP", "slider", 0, 3, { value: 0.5, min: 0, max: 2, label: "Color" });
+    const bt = at(net, "COMP", "button", 1, 3, { label: "Flash", mode: 0 });
+    const xy = at(net, "COMP", "xy", 1, 2, { label: "Centro" });
+    const nz = at(net, "TOP", "noise", 0, 0, { mono: 0, period: 4, speed: 0.4 });
+    const kal = at(net, "TOP", "kaleido", 1, 0, { segments: { e: `round(${sl1.name}.value)` }, rot: { e: "absTime.seconds * 20" } });
+    const tr = at(net, "TOP", "transform", 2, 0, { tx: { e: `(${xy.name}.x - 0.5) * 0.5` }, ty: { e: `(${xy.name}.y - 0.5) * 0.5` }, extend: 2 });
+    const hsv = at(net, "TOP", "hsv", 3, 0, { sat: { e: `${sl2.name}.value` } });
+    const lv = at(net, "TOP", "level", 4, 0, { brightness: { e: `1 + ${bt.name}.value * 1.5` } });
+    const out = at(net, "TOP", "out", 5, 0);
+    wire(net, nz, kal, tr, hsv, lv, out);
+    return out;
+  } },
 ];
 
 /** Crea una red nueva a partir de un ejemplo. Devuelve { net, out }. */

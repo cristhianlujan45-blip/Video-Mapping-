@@ -146,6 +146,14 @@ export class AIProvider {
       return { text: out.reply, articles: arts };
     } catch { return { text: arts[0].text, articles: arts, fallback: true }; }
   }
+  /** ¿Qué le pasa a este nodo de la red? info = { name, op, fam, error, inputs, needs } */
+  async explainNodeError(info) {
+    const local = explainNodeErrorRules(info);
+    try {
+      const out = await this.ask({ system: SYSTEM, user: `Un nodo del editor de redes de LumaMap (como TouchDesigner) tiene un error. Explica en 2 a 4 frases sencillas qué pasa y cómo arreglarlo, sin inventar botones.\nNodo: ${info.name} (${info.op}, familia ${info.fam})\nError: ${info.error}\nLo que ya sabemos: ${local}\nResponde JSON {"reply": "..."}`, schema: { type: "object", properties: { reply: { type: "string" } }, required: ["reply"] } });
+      return { text: String(out.reply || "").trim() || local, source: this.label };
+    } catch { return { text: local, fallback: true }; }
+  }
   async diagnoseProblem(ctx, question = "") {
     const an = analyzeProject(ctx);
     const issues = /lento|velocidad|fps|tirones|rendim/i.test(question) ? an.issues.filter(i => i.area === "performance" || i.area === "media") : an.issues;
@@ -194,6 +202,27 @@ export class NoAIProvider extends AIProvider {
     return { text: arts.length ? arts[0].text : "No tengo una guía sobre eso todavía.", articles: arts };
   }
   async generateShowPlan(text, ctx) { return planFromRules(text, ctx); }
+  async explainNodeError(info) { return { text: explainNodeErrorRules(info), source: this.label }; }
+}
+
+/** Explicación sin IA de los errores más comunes de un nodo de la red. */
+export function explainNodeErrorRules(info = {}) {
+  const e = String(info.error || "");
+  const parts = [];
+  if (/GLSL/i.test(e)) {
+    const und = /undeclared identifier[^']*'([^']+)'/i.exec(e) || /'([^']+)' *: *undeclared/i.exec(e);
+    if (und) parts.push(`El código usa «${und[1]}», que no existe: revisa cómo está escrito (tienes uv, time, res, tex0(uv), tex1(uv) y u1…u4).`);
+    if (/syntax error/i.test(e)) parts.push("Hay un fallo de escritura: suele faltar un «;» al final de una línea o sobra un paréntesis.");
+    if (/cannot convert|no matching overloaded|type mismatch|wrong operand types/i.test(e)) parts.push("Se mezclan tipos: por ejemplo un vec3 donde va un vec4 (devuelve vec4(color, 1.0)) o un entero donde va un decimal (escribe 1.0 en vez de 1).");
+    if (!parts.length) parts.push("El código GLSL no compila. Mira la primera línea con «ERROR»: dice en qué línea está el problema.");
+    parts.push("Mientras tanto el nodo enseña un tablero morado para que se vea que algo falla.");
+  } else if (/modelo/i.test(e)) parts.push("No se pudo leer el modelo 3D: prueba a exportarlo de nuevo como .glb (el formato más seguro) o .obj, y vuelve a importarlo.");
+  else if (/audio/i.test(e)) parts.push("No se pudo leer el audio: usa un .mp3, .wav u .ogg normal y vuelve a importarlo.");
+  else if (/no existe|no hay ningún|desconocid|not defined|no se encuentra/i.test(e)) parts.push("Una expresión nombra un nodo, un canal o una función que no existe (o está mal escrito). Los nombres van tal cual se ven en la red, por ejemplo lfo1.chan1.");
+  else if (/bucle/i.test(e)) parts.push("Eso crearía un bucle. Para volver atrás en la red usa un «Feedback» TOP.");
+  if (info.needs && (info.inputs ?? 0) < info.needs) parts.push(`Además necesita ${info.needs} entrada${info.needs === 1 ? "" : "s"} conectada${info.needs === 1 ? "" : "s"} y tiene ${info.inputs || 0}.`);
+  if (!parts.length) parts.push(`El nodo dice: «${e.split("\n")[0]}». Revisa sus entradas y sus parámetros (los que tienen ƒx calculan una expresión).`);
+  return parts.join(" ");
 }
 
 export class LocalAIProvider extends AIProvider {
@@ -441,6 +470,7 @@ export class AIEngine {
   next() { return nextStep(this.context()); }
   showPlan(text) { return this.run("generateShowPlan", text, this.context()); }
   explain(topic) { return this.run("explainFunction", topic); }
+  explainNodeError(info) { return this.run("explainNodeError", info); }
   diagnose(q) { return this.run("diagnoseProblem", this.context(), q); }
   optimize() { return this.run("optimizeProject", this.context()); }
   vision(img) { return this.run("analyzeImage", img); }

@@ -522,7 +522,7 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   await page.locator("#panelBody .item", { hasText: "Tutorial interactivo con Luma" }).click();
   const card = page.locator("#academyCard");
   await card.locator(".coachtext", { hasText: "Soy Luma" }).waitFor();
-  assert.match(await card.textContent(), /capítulo 1\/19: Conoce LumaMap/);
+  assert.match(await card.textContent(), /capítulo 1\/20: Conoce LumaMap/);
   await card.getByRole("button", { name: "Siguiente ▶" }).click();
   await card.locator(".coachtext", { hasText: "☰ es el menú" }).waitFor();
   // Resalta el botón que hay que tocar; hacerlo de verdad pasa solo al siguiente paso.
@@ -558,7 +558,7 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   // Capítulos: cualquiera, cuando quieras.
   await card.getByRole("button", { name: "📚 Capítulos" }).click();
   await page.locator("#modal .coachlist .lesson").first().waitFor();
-  assert.equal(await page.locator("#modal .coachlist .lesson").count(), 19);
+  assert.equal(await page.locator("#modal .coachlist .lesson").count(), 20);
   await page.locator("#modal .coachlist .lesson", { hasText: "3D: mapping sobre objetos" }).click();
   await card.locator(".coachtext", { hasText: "pestaña «3D»" }).waitFor();
   // Salir y «Continuar» vuelve al mismo sitio.
@@ -940,6 +940,41 @@ await test("redes de nodos: MIDI In y OSC In (todos los controles), audio de un 
   assert.ok(Math.abs(r.audioLen - 2) < 0.05, "el audio dura 2 s: " + r.audioLen);
   assert.deepEqual(r.surf, { screen: 2, type: "net", netNode: true });
   for (const p of ctx.pages()) if (p !== page) await p.close();
+  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
+});
+await test("redes de nodos pro: «¿Qué pasa aquí?» explica un error, barra de estado con los errores y la lección 20 se puede hacer entera", async () => {
+  await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n; a.edit(() => { n = G.newNetwork("Pro"); a.S.project.networks.push(n); G.addNode(n, "TOP", "glsl", { x: 0, y: 0, p: { code: "return vec4(nope);" } }); });
+    m.closeNetworkEditor(); await a.openNetwork({ netId: n.id });
+  });
+  const ws = page.locator("#tdws.show");
+  await ws.locator('.tdnode[data-type="glsl"] .tdname').click();
+  const why = ws.locator(".tdparams").getByRole("button", { name: "🤖 ¿Qué pasa aquí?" });
+  await why.waitFor({ state: "visible", timeout: 15000 });
+  await why.click();
+  await page.locator("#modal.show", { hasText: "nope" }).waitFor({ timeout: 15000 });
+  assert.match(await page.locator("#modal.show").textContent(), /«nope», que no existe/);
+  await page.locator("#modal.show").getByRole("button", { name: /Cerrar|Aceptar|✕/ }).first().click().catch(() => page.evaluate(() => document.getElementById("modal")._close?.()));
+  // Barra de estado y tiempos en colores.
+  await page.waitForFunction(() => /fps · .* ms · \d+ nodos/.test(document.querySelector("#tdws .tdtstats")?.textContent || ""), null, { timeout: 5000 });
+  assert.match(await ws.locator(".tdtstats").textContent(), /⚠ 1/, "cuenta el nodo con error");
+  // Lección 20: cada paso se puede hacer (con «Hazlo tú») y se comprueba.
+  const steps = await page.evaluate(async () => {
+    const a = window.__lumamap, { LEVELS } = await import("./js/ai/academy.js");
+    const L = LEVELS.find(l => l.level === 20), out = [];
+    a.edit(() => { const n = a.S.project.networks.at(-1); a.S.project.networks.splice(a.S.project.networks.indexOf(n), 1); a.S.project.networks.unshift(n); n.nodes = []; });
+    for (const st of L.steps) {
+      if (st.info) { out.push("info"); continue; }
+      if (st.doIt) await st.doIt(a);
+      let ok = false;
+      for (let k = 0; k < 30 && !ok; k++) { ok = !!st.check(a); if (!ok) await new Promise(r => setTimeout(r, 100)); }
+      out.push(ok);
+    }
+    return out;
+  });
+  assert.deepEqual(steps, [true, true, true, true, true, true, "info"]);
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {

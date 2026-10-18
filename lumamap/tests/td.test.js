@@ -313,6 +313,10 @@ await test("replicador: N copias del maestro con me.digits, siguen sus cambios, 
   assert.ok(syncReplicators(net));
   assert.equal(net.nodes.find(n => n.name === "copia1").p.name0, "nivel", "siguen al maestro");
   assert.equal(syncReplicators(net), false, "si nada cambia, no toca nada");
+  const ids0 = net.nodes.filter(n => n.repOf).map(n => n.id).join();
+  const [again] = normalizeNetworks([JSON.parse(JSON.stringify(net))]);
+  assert.equal(syncReplicators(again), false, "al abrir el proyecto otra vez no vuelve a crear las copias");
+  assert.equal(again.nodes.filter(n => n.repOf).map(n => n.id).join(), ids0);
   rep.p.count = 1; syncReplicators(net);
   assert.deepEqual(reps(), ["copia1"]);
   removeNodes(net, [rep.id]);

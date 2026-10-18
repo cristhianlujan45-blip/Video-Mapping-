@@ -276,16 +276,19 @@ export function ungroupBase(net, baseId) {
  * Replicadores: mantiene N copias del maestro (crea las que faltan, borra las que sobran y, si se
  * pide, les copia los cambios del maestro). count(rep) = número de copias. Devuelve si cambió algo.
  */
+const repState = new WeakMap();   // replicador → { rec, sig } (no se guarda en el proyecto)
 export function syncReplicators(net, count = (r) => +r.p.count || 0) {
   let changed = false;
   for (const r of net.nodes.filter(n => n.type === "replicator" && !n.bypass)) {
+    let st = repState.get(r);
+    if (!st) repState.set(r, st = { rec: r.p.recreate, sig: undefined });
     const master = nodeByName(net, r.p.master);
     let reps = net.nodes.filter(n => n.repOf === r.id).sort((a, b) => a.repIndex - b.repIndex);
     const want = master && master !== r && !master.repOf ? Math.max(0, Math.min(200, Math.round(count(r)) || 0)) : 0;
     const sig = master ? JSON.stringify([master.fam, master.type, master.p, master.in, r.p.prefix, r.p.wire, r.p.recreate]) : "";
     // Volver a crear (botón, maestro distinto o de otro tipo): todas fuera.
-    if (reps.length && (r._rec !== r.p.recreate || reps[0].type !== master?.type || reps[0].fam !== master?.fam)) { removeNodes(net, reps.map(n => n.id)); reps = []; changed = true; }
-    r._rec = r.p.recreate;
+    if (reps.length && (st.rec !== r.p.recreate || reps[0].type !== master?.type || reps[0].fam !== master?.fam)) { removeNodes(net, reps.map(n => n.id)); reps = []; changed = true; }
+    st.rec = r.p.recreate;
     if (reps.length > want) { removeNodes(net, reps.slice(want).map(n => n.id)); reps = reps.slice(0, want); changed = true; }
     const prefix = String(r.p.prefix || "item").replace(/[^A-Za-z0-9_]/g, "_").replace(/\d+$/, "") || "item";
     for (let k = reps.length; k < want; k++) {
@@ -296,11 +299,12 @@ export function syncReplicators(net, count = (r) => +r.p.count || 0) {
       if (r.p.wire) n.in = [...master.in];
       reps.push(n); changed = true;
     }
-    if (r.p.follow && sig !== r._sig) {
-      for (const n of reps) { n.p = JSON.parse(JSON.stringify(master.p)); if (r.p.wire) n.in = [...master.in]; }
-      changed = changed || reps.length > 0;
+    // Copiar los cambios del maestro (la primera vez tras abrir el proyecto solo se mira si difieren).
+    if (r.p.follow && sig !== st.sig) {
+      const mp = JSON.stringify(master?.p ?? null);
+      for (const n of reps) if (JSON.stringify(n.p) !== mp || (r.p.wire && JSON.stringify(n.in) !== JSON.stringify(master.in))) { n.p = JSON.parse(mp); if (r.p.wire) n.in = [...master.in]; changed = true; }
     }
-    r._sig = sig;
+    st.sig = sig;
   }
   return changed;
 }

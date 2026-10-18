@@ -130,12 +130,15 @@ await test("la IA enseña los nodos (como TouchDesigner) y los efectos de cámar
   assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 12 } }).ok, true);
   assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 17 } }).ok, true);
   assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 19 } }).ok, true);
-  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 20 } }).ok, false);
+  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 20 } }).ok, true);
+  assert.equal(validateAction(app, { action: "start_lesson", parameters: { level: 21 } }).ok, false);
+  assert.equal(lesson("enséñame las subredes y los fotogramas clave"), 20);
+  assert.equal(lesson("cómo hago partículas en las redes"), 20);
   assert.equal(lesson("enséñame a usar toda la herramienta"), 13);
   assert.equal(lesson("cómo proyecto sobre un cubo en 3d"), 17);
   assert.equal(lesson("cómo exporto el show"), 15);
   const { LEVELS } = await import("../web/js/ai/academy.js");
-  assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+  assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
   const { searchKnowledge } = await import("../web/js/ai/knowledge.js");
   assert.equal(searchKnowledge("cómo uso la red de nodos")[0].id, "nodos");
   assert.equal(searchKnowledge("desactivar el tutorial")[0].id, "tutorial");
