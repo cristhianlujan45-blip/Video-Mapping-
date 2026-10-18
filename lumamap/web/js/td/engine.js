@@ -16,6 +16,7 @@ import { cameraIfReady, getCamera } from "../sources.js";
 import { ShaderCache, spectrumFromLevels } from "../isf.js";
 import { getShader } from "../plugins.js";
 import { Particles } from "./particles.js";
+import { GpuParticles, gpuParticlesSupported, gpuSizeFor } from "./gpuparticles.js";
 
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
 const MAX_SIDE = MOBILE ? 1280 : 2048;
@@ -112,6 +113,7 @@ export class NetEngine {
     this.history = new Map();     // CHOP → últimos valores (para los visores)
     this.models = new Map();      // archivo de modelo 3D → { geo, ver, err }
     this.recs = new Map();        // Grabar video: nodo → { rec, canvas, t0, chunks… }
+    this.HEAD_SRC = HEAD;         // cabecera de los shaders (la usan las partículas en la GPU)
     this.installTaps();
   }
 
@@ -620,8 +622,32 @@ export class NetEngine {
     for (const pn of net.nodes) {
       if (pn.fam !== "COMP" || pn.type !== "particles" || pn.bypass) continue;
       if (filter.length && !filter.includes(pn.name)) continue;
-      const pp = ck.params(pn), sim = this.particleSim(net, pn, pp);
-      const look = pp.look | 0, shape = look === 2 ? this.sop(net, nodeByName(net, pp.shape)) : null;
+      const pp = ck.params(pn), look = pp.look | 0;
+      // En la GPU (puntos): cientos de miles. Las copias de una geometría van en el procesador.
+      const gpu = pp.gpu && look !== 2 ? this.gpuParticleSim(net, pn, pp) : null;
+      if (gpu) {
+        let o = x.objs.get(pn.id);
+        // Un objeto por Render 3D (comparten la geometría y el material de la simulación).
+        if (!o || o.userData.sim !== gpu) {
+          if (o) { S.remove(o); if (o.userData.kind === "points") { o.geometry.dispose(); o.material.dispose(); } }
+          o = new THREE.Points(gpu.points.geometry, gpu.points.material);
+          o.frustumCulled = false; o.userData.kind = "gpu"; o.userData.sim = gpu;
+          x.objs.set(pn.id, o); S.add(o);
+        }
+        const M = o.material;
+        M.uniforms.uScale.value = h / 2; M.uniforms.uSoft.value = look === 0 ? 1 : 0;
+        M.blending = pp.additive ? THREE.AdditiveBlending : THREE.NormalBlending;
+        let px = x.proxies.get(pn.id);
+        if (!px) { px = new THREE.Object3D(); x.proxies.set(pn.id, px); S.add(px); }
+        px.position.set(pp.ex, pp.ey, pp.ez);
+        seen.add(pn.id);
+        continue;
+      }
+      const old = this.extra.get(pn.id + ":gps");
+      if (old) { old.sim.dispose(); this.extra.delete(pn.id + ":gps"); }     // se apagó la GPU: suelta su memoria
+      if (!pp.gpu) ck.errors.delete(pn.id + "/GPU");
+      const sim = this.particleSim(net, pn, pp);
+      const shape = look === 2 ? this.sop(net, nodeByName(net, pp.shape)) : null;
       const kind = shape ? "inst" : "points";
       let o = x.objs.get(pn.id);
       if (!o || o.userData.kind !== kind || o.userData.max !== sim.max || (kind === "inst" && o.geometry !== shape)) {
@@ -827,6 +853,33 @@ export class NetEngine {
     return st.sim;
   }
 
+  /**
+   * Partículas en la GPU de un nodo (una vez por fotograma). null si la tarjeta no puede (entonces
+   * van en el procesador y el nodo lo dice).
+   */
+  gpuParticleSim(net, node, pp) {
+    const key = node.id + ":gps", ck = this.cooker(net);
+    if (!gpuParticlesSupported(this.r)) { ck.errors.set(node.id + "/GPU", "esta tarjeta no guarda decimales en imágenes: van en el procesador"); return null; }
+    ck.errors.delete(node.id + "/GPU");
+    const size = gpuSizeFor(pp.gpuSize);
+    let st = this.extra.get(key);
+    if (st && st.sim.size !== size) { st.sim.dispose(); st = null; }
+    if (!st) { st = { sim: new GpuParticles(this, size), f: -1, t: this.time, dispose: null }; st.gpu = st.sim; this.extra.set(key, st); }
+    if (st.f !== this.frameNo) {
+      const dt = st.f < 0 ? 1 / 60 : Math.max(0, Math.min(0.1, this.time - st.t));
+      st.f = this.frameNo; st.t = this.time;
+      if ((pp.emitter | 0) === 4) { const g = this.sop(net, nodeById(net, node.in[0])); st.sim.setGeometry(g?.attributes.position?.array || null); }
+      const c1 = new THREE.Color(hex(pp.color1, "#ffffff")), c2 = new THREE.Color(hex(pp.color2, "#ffffff"));
+      st.sim.step(pp, dt, this.time, [c1.r, c1.g, c1.b], [c2.r, c2.g, c2.b]);
+    }
+    return st.sim;
+  }
+  /** Cuántas partículas viven ahora en un nodo (aproximado en la GPU), o null. */
+  particleCount(node) {
+    const g = this.extra.get(node.id + ":gps"), c = this.extra.get(node.id + ":ps");
+    return node.p?.gpu && g ? { n: g.sim.alive, max: g.sim.N, gpu: true } : c ? { n: c.sim.n, max: c.sim.max, gpu: false } : null;
+  }
+
   /* ---------------- Visor 3D del editor ---------------- */
   /** La escena 3D de un Render TOP ya cocinada en este fotograma (para elegir objetos y el gizmo). */
   scene3d(net, node) { if (!node || node.type !== "render") return null; this.top(net, node); return this.extra.get(node.id + ":3d") || null; }
@@ -954,7 +1007,7 @@ export class NetEngine {
     for (const [k, x] of this.extra) {
       const id = k.replace(/^(sop|mat):/, "").split(":")[0];
       if (live.has(id)) continue;
-      x.tex?.dispose?.(); x.geo?.dispose?.(); x.mat?.dispose?.(); x.rt?.dispose?.();
+      x.tex?.dispose?.(); x.geo?.dispose?.(); x.mat?.dispose?.(); x.rt?.dispose?.(); x.gpu?.dispose?.();
       if (x.el) { x.el.pause(); try { x.src?.disconnect(); } catch {} if (x.url) URL.revokeObjectURL(x.url); }
       this.extra.delete(k);
     }

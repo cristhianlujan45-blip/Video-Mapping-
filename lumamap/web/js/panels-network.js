@@ -1437,7 +1437,8 @@ function updateInfo(force = false) {
     const rec = n.type === "movieout" ? eng.recInfo?.(n.id) : null;
     el.classList.toggle("rec", !!rec);
     if (rec && f) { f.textContent = `● REC ${fmtSecs(rec.secs)} · ${rec.frames} fot.`; continue; }
-    if (f && !n.comment) f.textContent = i.error ? "⚠ " + i.error.split("\n")[0].slice(0, 40) : (n.fam === "TOP" && i.w ? `${i.w}×${i.h} · ${i.ms.toFixed(1)} ms` : `${defOf(n).label}${i.ms > 0.05 ? " · " + i.ms.toFixed(1) + " ms" : ""}`);
+    const pc = n.type === "particles" ? eng.particleCount?.(n) : null;
+    if (f && !n.comment) f.textContent = i.error ? "⚠ " + i.error.split("\n")[0].slice(0, 40) : pc ? `${pc.n.toLocaleString("es")} partículas${pc.gpu ? " · ⚡ GPU" : ""}` : (n.fam === "TOP" && i.w ? `${i.w}×${i.h} · ${i.ms.toFixed(1)} ms` : `${defOf(n).label}${i.ms > 0.05 ? " · " + i.ms.toFixed(1) + " ms" : ""}`);
     if (i.error) el.title = i.error;
   }
   const pp = R.params.firstElementChild;

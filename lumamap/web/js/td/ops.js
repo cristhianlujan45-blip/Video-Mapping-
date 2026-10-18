@@ -514,12 +514,12 @@ comp("button", "Botón (panel)", "Un botón para tu panel de control: 1 mientras
   [f("value", "Pulsado", 0, 0, 1), m("mode", "Tipo", [[0, "Mientras lo pulsas"], [1, "Alternar (encendido/apagado)"]]), s("label", "Texto", "", PANEL), c("color", "Color", "#ff2d8a", PANEL)], { panel: true });
 comp("xy", "Pad XY (panel)", "Un cuadrado para mover dos cosas a la vez con un dedo o el ratón. Canales: x, y (de 0 a 1).", [0, 0],
   [f("x", "X", 0.5, 0, 1), f("y", "Y", 0.5, 0, 1), s("label", "Texto", "", PANEL), c("color", "Color", "#ffd23f", PANEL)], { panel: true });
-const PE = "Emisión", PM = "Movimiento", PA = "Aspecto";
-comp("particles", "Partículas", "Chispas, humo, lluvia, nieve, polvo mágico…: nacen de un punto, una forma o la geometría conectada (SOP), se mueven con gravedad, viento, remolinos y un imán, y se dibujan en el Render 3D (Particle SOP / particlesGPU).", [0, 1],
+const PE = "Emisión", PM = "Movimiento", PA = "Aspecto", PG = "GPU";
+comp("particles", "Partículas", "Chispas, humo, lluvia, nieve, polvo mágico…: nacen de un punto, una forma o la geometría conectada (SOP), se mueven con gravedad, viento, remolinos y un imán, y se dibujan en el Render 3D (Particle SOP / particlesGPU). Con «⚡ Calcular en la GPU», hasta un millón.", [0, 1],
   [m("emitter", "Nacen de", [[0, "Un punto"], [1, "Una caja"], [2, "Una esfera"], [3, "Un anillo"], [4, "La geometría conectada (SOP)"]], 0, { page: PE }),
     ...XYZ("e", "Emisor", [0, 0, 0], -10, 10, PE), f("esize", "Tamaño del emisor", 0.5, 0, 10, { page: PE }),
-    f("rate", "Cuántas por segundo", 150, 0, 5000, { page: PE }), f("life", "Vida (s)", 2, 0.05, 20, { page: PE }), f("lifeVar", "Variación de la vida", 0.3, 0, 1, { page: PE }),
-    pulse("burst", "💥 Explosión", { page: PE }), i("burstCount", "Partículas por explosión", 300, 0, 20000, { page: PE }), f("trig", "Explotar al pasar de 0,5 (p. ej. el golpe)", 0, 0, 1, { page: PE }), t("play", "Emitiendo", 1, { page: PE }),
+    f("rate", "Cuántas por segundo", 150, 0, 200000, { page: PE }), f("life", "Vida (s)", 2, 0.05, 20, { page: PE }), f("lifeVar", "Variación de la vida", 0.3, 0, 1, { page: PE }),
+    pulse("burst", "💥 Explosión", { page: PE }), i("burstCount", "Partículas por explosión", 300, 0, 500000, { page: PE }), f("trig", "Explotar al pasar de 0,5 (p. ej. el golpe)", 0, 0, 1, { page: PE }), t("play", "Emitiendo", 1, { page: PE }),
     f("speed", "Velocidad", 1, 0, 20, { page: PM }), f("speedVar", "Variación de la velocidad", 0.3, 0, 1, { page: PM }), ...XYZ("d", "Dirección", [0, 1, 0], -1, 1, PM),
     f("spread", "Apertura (0 = recto, 1 = a todos lados)", 0.35, 0, 1, { page: PM }), t("outward", "Hacia fuera (esfera o anillo)", 0, { page: PM }),
     f("gravity", "Gravedad", -0.6, -20, 20, { page: PM }), ...XYZ("wind", "Viento", [0, 0, 0], -10, 10, PM), f("drag", "Rozamiento", 0.3, 0, 10, { page: PM }),
@@ -529,7 +529,8 @@ comp("particles", "Partículas", "Chispas, humo, lluvia, nieve, polvo mágico…
     m("look", "Se ven como", [[0, "Puntos que brillan"], [1, "Puntos redondos"], [2, "Copias de una geometría (SOP)"]], 0, { page: PA }),
     f("psize", "Tamaño", 0.06, 0.001, 2, { page: PA }), f("sizeEnd", "Tamaño al morir (×)", 0.3, 0, 4, { page: PA }),
     c("color1", "Color al nacer", "#ffd23f", { page: PA }), c("color2", "Color al morir", "#ff2d55", { page: PA }), t("fade", "Se apagan al morir", 1, { page: PA }), t("additive", "Sumar luz (brillo)", 1, { page: PA }),
-    opRef("shape", "Geometría de cada copia (SOP)", "SOP", { page: PA }), opRef("material", "Material de las copias", "MAT", { page: PA }), i("max", "Máximo de partículas", 5000, 100, 100000, { page: PA })]);
+    opRef("shape", "Geometría de cada copia (SOP)", "SOP", { page: PA }), opRef("material", "Material de las copias", "MAT", { page: PA }), i("max", "Máximo de partículas", 5000, 100, 100000, { page: PA }),
+    t("gpu", "⚡ Calcular en la GPU (cientos de miles)", 0, { page: PG }), m("gpuSize", "Partículas en la GPU", [[128, "16 384"], [256, "65 536"], [512, "262 144"], [1024, "1 048 576 (PC)"]], 256, { page: PG })]);
 comp("camera", "Cámara 3D", "Desde dónde se ve la escena (Camera COMP). Muévela con expresiones o con el cuerpo.", [0, 0],
   [...XYZ("t", "Posición", [0, 0.5, 4], -50, 50), ...XYZ("look", "Mira a", [0, 0, 0], -20, 20), f("fov", "Ángulo de visión", 45, 5, 150), t("ortho", "Ortográfica", 0), f("orbit", "Girar alrededor (vueltas/s)", 0, -2, 2)]);
 comp("light", "Luz", "Una luz: puntual, del sol, foco o ambiente (Light COMP).", [0, 0],

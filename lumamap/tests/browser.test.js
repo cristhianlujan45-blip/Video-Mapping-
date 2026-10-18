@@ -794,6 +794,44 @@ await test("redes de nodos en 3D: visor flotante con gizmo (mover el objeto), c�
   await win.getByRole("button", { name: "Cerrar el visor" }).click();
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
+await test("redes de nodos: partículas en la GPU (cientos de miles), nacen también de una geometría, y al apagarla vuelven al procesador", async () => {
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n, ps, rnd, sph;
+    a.edit(() => {
+      n = G.newNetwork("GPU"); a.S.project.networks.push(n);
+      G.addNode(n, "COMP", "camera", { p: { tx: 0, ty: 0, tz: 5 } });
+      sph = G.addNode(n, "SOP", "sphere", { p: { radius: 1 } });
+      ps = G.addNode(n, "COMP", "particles", { p: { gpu: 1, gpuSize: 256, rate: 60000, life: 2, gravity: 0, turb: 0.5, psize: 0.04 } });
+      rnd = G.addNode(n, "TOP", "render"); n.display = rnd.id;
+    });
+    m.closeNetworkEditor();
+    const E = a.td;
+    const lum = () => { const o = E.output(n.id, rnd.id, { time: E.time, w: 64, h: 36 }); if (!o) return 0; const d = o.el.getContext("2d").getImageData(0, 0, 64, 36).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return s / (64 * 36); };
+    const run = async (frames) => { let L = 0; for (let k = 0; k < frames; k++) { E.ensureFrame(E.time + 1 / 30, {}); L = lum(); await new Promise(r => setTimeout(r, 0)); } return L; };
+    const t0 = E.time;
+    E.ensureFrame(t0 + 1000, {});
+    const litGpu = await run(30);
+    const cGpu = E.particleCount(ps);
+    const errGpu = E.info(n, ps).error;
+    // Nacer de la geometría conectada (una esfera).
+    a.edit(() => { G.connect(n, sph.id, ps.id, 0); ps.p.emitter = 4; });
+    const litGeo = await run(10);
+    const errGeo = E.info(n, ps).error;
+    // Apagar la GPU: vuelven al procesador (y la memoria de la GPU se suelta).
+    a.edit(() => { ps.p.gpu = 0; ps.p.rate = 600; ps.p.emitter = 0; });
+    await run(20);
+    const cCpu = E.particleCount(ps), gpuFreed = !E.extra.has(ps.id + ":gps");
+    return { litGpu, cGpu, errGpu, litGeo, errGeo, cCpu, gpuFreed };
+  });
+  assert.equal(r.errGpu, "", "sin errores en la GPU");
+  assert.ok(r.cGpu?.gpu && r.cGpu.max === 65536 && r.cGpu.n > 20000, "decenas de miles en la GPU: " + JSON.stringify(r.cGpu));
+  assert.ok(r.litGpu > 3, "se ven: " + r.litGpu);
+  assert.equal(r.errGeo, ""); assert.ok(r.litGeo > 3, "nacen de la esfera y se ven: " + r.litGeo);
+  assert.ok(r.cCpu && !r.cCpu.gpu && r.cCpu.n > 0, "en el procesador: " + JSON.stringify(r.cCpu));
+  assert.ok(r.gpuFreed, "la memoria de la GPU se suelta al apagarla");
+});
 await test("redes de nodos: animar un parámetro con fotogramas clave (◆), autoclave al moverlo, editor de curvas y línea de tiempo", async () => {
   await page.evaluate(async () => {
     const a = window.__lumamap; await a.openNetwork();
