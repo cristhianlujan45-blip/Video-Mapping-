@@ -569,6 +569,8 @@ export function applyFxPreset(look, name, combine = false) {
 /* ---------------- Superficies ---------------- */
 
 export function createQuad({ name = "Superficie", corners, cols = 2, rows = 2 } = {}) {
+  // Una malla necesita al menos 2×2 puntos (las 4 esquinas): con menos no se puede dibujar.
+  cols = Math.max(2, Math.min(10, cols | 0 || 2)); rows = Math.max(2, Math.min(10, rows | 0 || 2));
   return {
     id: uid("surf"), name, type: "quad", cols, rows,
     points: gridFromCorners(corners, cols, rows),
@@ -584,6 +586,27 @@ export function createPoly({ name = "Forma", points }) {
     hidden: false, locked: false,
     mask: { enabled: false, invert: false, feather: 0.01, points: [] },
   };
+}
+
+/**
+ * Repara la malla de una superficie si está mal formada (menos de 2×2 puntos, o puntos que no
+ * cuadran con cols×rows, o coordenadas que no son números): vuelve a 2×2 con el rectángulo que
+ * ocupaban sus puntos (o la salida entera). Devuelve true si tuvo que repararla.
+ */
+export function repairQuad(s, W = 1920, H = 1080) {
+  const pts = Array.isArray(s.points) ? s.points : [];
+  const okPt = (q) => q && Number.isFinite(q.x) && Number.isFinite(q.y);
+  if (s.cols >= 2 && s.rows >= 2 && s.cols <= 10 && s.rows <= 10 && pts.length === s.cols * s.rows && pts.every(okPt)) return false;
+  const good = pts.filter(okPt);
+  let x0 = 0, y0 = 0, x1 = W, y1 = H;
+  if (good.length >= 2) {
+    x0 = Math.min(...good.map(q => q.x)); x1 = Math.max(...good.map(q => q.x));
+    y0 = Math.min(...good.map(q => q.y)); y1 = Math.max(...good.map(q => q.y));
+    if (x1 - x0 < 4 || y1 - y0 < 4) { x0 = 0; y0 = 0; x1 = W; y1 = H; }
+  }
+  s.cols = 2; s.rows = 2;
+  s.points = gridFromCorners(rectCorners(x0, y0, x1 - x0, y1 - y0), 2, 2);
+  return true;
 }
 
 export function rectCorners(x, y, w, h) {
@@ -1032,9 +1055,7 @@ export function normalizeProject(json) {
   if (!json.scenes.some(s => s.id === json.sceneId)) json.sceneId = json.scenes[0].id;
   for (const s of json.surfaces) {
     s.mask = { enabled: false, invert: false, feather: 0.01, points: [], ...(s.mask || {}) };
-    if (s.type === "quad" && (!s.cols || !s.rows || s.points.length !== s.cols * s.rows)) {
-      s.cols = 2; s.rows = 2;
-    }
+    if (s.type === "quad") repairQuad(s, json.width, json.height);
   }
   for (const sc of json.scenes) {
     sc.looks = sc.looks || {};

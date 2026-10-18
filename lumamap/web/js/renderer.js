@@ -7,7 +7,7 @@
 //  · Efectos por superficie en un solo shader: color, RGB split, pixelado,
 //    desenfoque, ruido, caleidoscopio, espejo, ondas, zoom/giro/desplazamiento,
 //    estroboscopio, borde animado (neón, persecución, pulso, arcoíris) y máscara.
-import { GEN_INDEX } from "./model.js";
+import { GEN_INDEX, repairQuad } from "./model.js";
 import { PRO_MODE_IDS } from "./fx-pro.js";
 import { UNIT_SQUARE, tryHomography, evalMesh, triangulatePolygon, bbox, surfaceUVOutline, surfaceAspect, surfaceCorners } from "./math.js";
 
@@ -1413,6 +1413,8 @@ export class Renderer {
 
   /** Malla de la superficie en coordenadas clip (con la vista aplicada). */
   mesh(s, view, cw, ch) {
+    // Una malla mal formada (p. ej. 1×1) se repara una vez en vez de fallar en cada fotograma.
+    if (s.type === "quad" && repairQuad(s)) console.warn("Malla reparada (2×2):", s.name);
     const sig = `${view.sx},${view.sy},${view.tx},${view.ty},${cw},${ch},${s.cols},${s.rows},` +
       s.points.map(p => p.x.toFixed(2) + "," + p.y.toFixed(2)).join(";");
     const cached = this.meshCache.get(s.id);

@@ -918,7 +918,8 @@ await test("redes de nodos: MIDI In y OSC In (todos los controles), audio de un 
     // Grabar 1,5 s y parar: va a la biblioteca.
     const before = a.S.project.media.filter(x => x.kind === "video").length;
     a.edit(() => { mo.p.record = 1; });
-    await new Promise(r => setTimeout(r, 1500));
+    // Hasta que haya fotogramas de verdad (en la CI, con la CPU llena, 1,5 s pueden no dar ninguno).
+    for (let k = 0; k < 100 && !(a.td.recInfo(mo.id)?.frames >= 15); k++) await new Promise(r => setTimeout(r, 100));
     const recOn = !!a.td.recInfo(mo.id);
     a.edit(() => { mo.p.record = 0; });
     for (let k = 0; k < 50 && a.S.project.media.filter(x => x.kind === "video").length === before; k++) await new Promise(r => setTimeout(r, 200));
@@ -994,7 +995,13 @@ await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo lo
     await g.evaluate(async () => { const a = window.__lumamap; await a.openNetwork(); const G = await import("./js/td/graph.js"); const n = a.S.project.networks[0]; a.edit(() => { G.addNode(n, "TOP", "noise", { x: 0, y: 0 }); G.addNode(n, "TOP", "level", { x: 260, y: 0 }); }); (await import("./js/panels-network.js"))._edForTests.sel.clear(); a.closeNetwork(); await a.openNetwork(); });
     const ws = g.locator("#tdws.show");
     await ws.locator('.tdnode[data-type="level"]').waitFor();
-    await ws.locator('.tdnode[data-type="noise"] .tdout').tap();
+    // Primer toque en la salida: la red pasa a «conectando». Con la CPU de la CI llena, un toque
+    // puede llegar tarde y contar como pulsación larga (menú): se cierra y se vuelve a tocar.
+    for (let k = 0; k < 3; k++) {
+      await ws.locator('.tdnode[data-type="noise"] .tdout').tap();
+      if (await g.locator("#tdws.connecting").waitFor({ timeout: 3000 }).then(() => true, () => false)) break;
+      await g.keyboard.press("Escape").catch(() => {});
+    }
     await ws.locator('.tdnode[data-type="level"] .tdnhead').tap();
     await g.waitForFunction(() => { const n = window.__lumamap.S.project.networks[0]; const lv = n.nodes.find(x => x.type === "level"); return lv.in[0] === n.nodes.find(x => x.type === "noise").id; }, null, { timeout: 5000 });
     // Sin nada elegido, el panel de parámetros no tapa la red; al tocar un nodo sale abajo, sin salirse de la pantalla.

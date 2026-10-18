@@ -1436,7 +1436,7 @@ function updateInfo(force = false) {
     const f = el.querySelector(".tdinfo");
     const rec = n.type === "movieout" ? eng.recInfo?.(n.id) : null;
     el.classList.toggle("rec", !!rec);
-    if (rec && f) { f.textContent = `● REC ${fmtSecs(rec.secs)}`; continue; }
+    if (rec && f) { f.textContent = `● REC ${fmtSecs(rec.secs)} · ${rec.frames} fot.`; continue; }
     if (f && !n.comment) f.textContent = i.error ? "⚠ " + i.error.split("\n")[0].slice(0, 40) : (n.fam === "TOP" && i.w ? `${i.w}×${i.h} · ${i.ms.toFixed(1)} ms` : `${defOf(n).label}${i.ms > 0.05 ? " · " + i.ms.toFixed(1) + " ms" : ""}`);
     if (i.error) el.title = i.error;
   }

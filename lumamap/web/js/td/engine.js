@@ -784,7 +784,7 @@ export class NetEngine {
       // Cada fotograma se entrega a mano (requestFrame): así no se pierde ninguno aunque el equipo vaya lento.
       const stream = c.captureStream(0);
       const rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: bps });
-      R = { state: "rec", canvas: c, g: c.getContext("2d"), rec, chunks: [], t0: performance.now(), mime: rec.mimeType || mime || "video/webm", name: String(p.name || "grabacion"), track: stream.getVideoTracks()[0], fps, last: 0 };
+      R = { state: "rec", canvas: c, g: c.getContext("2d"), rec, chunks: [], t0: performance.now(), mime: rec.mimeType || mime || "video/webm", name: String(p.name || "grabacion"), track: stream.getVideoTracks()[0], fps, last: 0, frames: 0 };
       rec.ondataavailable = (e) => { if (e.data?.size) R.chunks.push(e.data); };
       rec.start(1000);
       this.recs.set(node.id, R);
@@ -794,7 +794,7 @@ export class NetEngine {
     this.pass(this.mat("blit", BLIT), null, { s0: img.tex, srcSize: [img.w, img.h], fit: 1, flipX: 0 }, [0, 0, w, h]);
     R.g.drawImage(this.canvas, 0, this.canvas.height - h, w, h, 0, 0, w, h);
     const now = performance.now();
-    if (now - R.last >= 1000 / R.fps - 2) { R.last = now; R.track?.requestFrame?.(); }
+    if (now - R.last >= 1000 / R.fps - 2) { R.last = now; R.track?.requestFrame?.(); R.frames++; }
   }
   stopRecord(node, R) {
     R.state = "stopping";
@@ -808,8 +808,8 @@ export class NetEngine {
     };
     try { R.rec.stop(); } catch { this.recs.delete(node.id); }
   }
-  /** Estado de la grabación de un nodo: null o { secs }. */
-  recInfo(id) { const R = this.recs.get(id); return R ? { secs: (performance.now() - R.t0) / 1000, state: R.state } : null; }
+  /** Estado de la grabación de un nodo: null o { secs, state, frames } (fotogramas ya entregados). */
+  recInfo(id) { const R = this.recs.get(id); return R ? { secs: (performance.now() - R.t0) / 1000, state: R.state, frames: R.frames } : null; }
 
   /** Simula las partículas de un nodo una vez por fotograma. */
   particleSim(net, node, pp) {

@@ -164,6 +164,24 @@ await test("rechaza archivos que no son proyectos", () => {
   assert.throws(() => M.normalizeProject(null));
   assert.throws(() => M.normalizeProject({ version: 99 }));
 });
+await test("mallas mal formadas: se crean y se cargan como 2×2 (una de 1×1 rompía el dibujo)", () => {
+  const q = M.createQuad({ corners: M.rectCorners(0, 0, 100, 50), cols: 1, rows: 1 });
+  assert.equal(q.cols, 2); assert.equal(q.rows, 2); assert.equal(q.points.length, 4);
+  // Un proyecto guardado con la malla rota: 1×1, o cols×rows que no cuadra con los puntos.
+  const p = M.createProject();
+  const a = M.createQuad({ corners: M.rectCorners(10, 20, 300, 200) }); a.cols = 1; a.rows = 1; a.points = [{ x: 10, y: 20 }];
+  const b = M.createQuad({ corners: M.rectCorners(50, 60, 400, 300) }); b.cols = 3; b.rows = 3;
+  M.addSurface(p, a); M.addSurface(p, b);
+  const n = M.normalizeProject(JSON.parse(JSON.stringify(p)));
+  const [A, B] = n.surfaces.slice(-2);
+  assert.deepEqual([A.cols, A.rows, A.points.length], [2, 2, 4]);
+  assert.deepEqual([B.cols, B.rows, B.points.length], [2, 2, 4]);
+  assert.ok(near(B.points[0].x, 50) && near(B.points[3].y, 360), "conserva el rectángulo que ocupaba: " + JSON.stringify(B.points));
+  for (const s of [A, B]) assert.ok(Number.isFinite(evalMesh(s.points, s.cols, s.rows, 0.5, 0.5).x));
+  // Una malla buena no se toca.
+  const good = M.createQuad({ corners: M.rectCorners(0, 0, 10, 10), cols: 3, rows: 2 }), before = JSON.stringify(good);
+  assert.equal(M.repairQuad(good), false); assert.equal(JSON.stringify(good), before);
+});
 await test("efectos rápidos parten de valores limpios", () => {
   const l = M.createLook();
   l.fx.brightness = 1.7;
