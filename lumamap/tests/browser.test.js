@@ -1857,6 +1857,9 @@ await test("novedades: tras actualizar salen solas con la versión, y cada «Abr
   const nctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   // Alguien que ya usaba LumaMap (hay datos suyos de antes) y acaba de actualizar.
   await nctx.addInitScript(() => { if (!sessionStorage.getItem("t")) { sessionStorage.setItem("t", "1"); localStorage.setItem("lumamap:camFacing", "environment"); } });
+  // Almacenamiento lento (como un equipo cargado): abrir el proyecto guardado tarda 3 s. Antes las
+  // novedades salían primero y la bienvenida las tapaba; ahora salen después de decidir la bienvenida.
+  await nctx.addInitScript(() => { const o = indexedDB.open.bind(indexedDB); indexedDB.open = (...a) => { const r = o(...a); const real = Object.getOwnPropertyDescriptor(IDBRequest.prototype, "onsuccess"); let cb = null; Object.defineProperty(r, "onsuccess", { set(f) { cb = f; real.set.call(r, (e) => setTimeout(() => cb && cb.call(r, e), 3000)); }, get() { return cb; } }); return r; }; });
   const g = await nctx.newPage();
   const errs = [];
   g.on("pageerror", e => errs.push(e.message));

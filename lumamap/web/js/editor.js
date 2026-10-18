@@ -3634,7 +3634,6 @@ async function init() {
   app.openNews = () => openNews(app);
   // 🎓 Tutorial interactivo con Luma (todo el curso o «Continuar» donde se quedó).
   app.startTutorial = (opts) => { aiOf(app); app.academy.startCourse(opts); };
-  maybeShowNews(app);   // lo nuevo, una vez después de actualizar
   // Arrastrar y soltar desde los paneles: la superficie bajo el dedo/ratón recibe lo soltado;
   // en un hueco vacío se crea una superficie nueva ahí mismo.
   const stagePoint = (x, y) => {
@@ -3679,6 +3678,9 @@ async function init() {
     setProject(M.createProject());
     welcome();
   }
+  // Lo nuevo, una vez después de actualizar: después de decidir si sale la bienvenida (si no, en un
+  // equipo lento las novedades salían antes y la bienvenida las tapaba a medio usar).
+  maybeShowNews(app);
   audio.bpm = S.project.settings.bpm || 120;
   requestAnimationFrame(rafLoop);
   connectRemote();

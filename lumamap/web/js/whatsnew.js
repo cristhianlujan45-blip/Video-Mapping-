@@ -15,7 +15,7 @@ const RETURNING = (() => { try { const s = store(); if (!s) return false; for (l
 
 /** Abre una pestaña y lleva a la sección cuyo título contiene `text` (resaltada un momento). */
 export function goToSection(app, tab, text) {
-  app.openTab(tab);
+  if (app.S.tab !== tab) app.openTab(tab);   // (tocar la pestaña abierta la cerraría)
   let tries = 0;
   const find = () => {
     const el = [...document.querySelectorAll("#panelBody .sec h3, #panelBody details > summary")].find(x => x.textContent.includes(text));
