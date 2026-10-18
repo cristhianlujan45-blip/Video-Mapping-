@@ -35,6 +35,8 @@ import { startDeviceNotices, cameraPlugged } from "./phoneusb-ui.js";
 import { openMediaLibrary } from "./panels-library.js";
 import { openDeck } from "./panels-deck.js";
 import { openNodes } from "./panels-nodes.js";
+import { openNetworkEditor, closeNetworkEditor, networkEditorOpen, handleNetKey } from "./panels-network.js";
+import { registerNetParams } from "./td/params-net.js";
 import { panelState } from "./mypanel.js";
 import { loadPlugins, getShader } from "./plugins.js";
 import { createLfoClock, newLfo, LFO_SHAPES, LFO_BEATS, SOUND_SHAPES, isSoundShape } from "./lfo.js";
@@ -663,6 +665,12 @@ function deckTick() {
 }
 app.openDeck = () => openDeck(app);
 app.openNodes = () => openNodes(app);
+// Redes de nodos (como TouchDesigner): el motor (three.js) se carga la primera vez que hace falta.
+let tdLoad = null;
+app.ensureTd = () => tdLoad ||= import("./td/engine.js").then(m => { app.td = m.netEngine({ project: () => S.project, app, pool }); return app.td; }).catch(e => { tdLoad = null; console.warn("redes", e); return null; });
+app.openNetwork = (o) => openNetworkEditor(app, o);
+app.closeNetwork = () => closeNetworkEditor();
+registerNetParams();
 // MIDI/OSC/teclado: lanzar columnas o casillas y el autopiloto.
 registerParams("deck", (app, id, p) => {
   const D = S.project.settings.deck, mk = (o) => ({ id, group: "Mesa de clips", min: 0, max: 1, def: 0, ...o });
@@ -2673,7 +2681,7 @@ function buildChrome() {
     else if (a === "palette") openPalette(app);
     else if (a === "next") whatNow(app);
     else if (a === "gif") A.searchGifs();
-    else if (a === "nodes") app.openNodes();
+    else if (a === "nodes") app.openNetwork();
     else if (a === "news") openNews(app);
     else if (a === "record") A.record();
   }));
@@ -2868,6 +2876,9 @@ app.renderPanel = renderPanel;
    Teclado (Bluetooth / USB / escritorio)
    ====================================================================== */
 function bindKeys() {
+  // Editor de redes abierto: sus atajos primero (Tab, Supr, Ctrl+C…), y nada llega al escenario.
+  addEventListener("keydown", (e) => { handleNetKey(app, e); }, true);
+  addEventListener("keyup", (e) => { handleNetKey(app, e); }, true);
   // Atajos del 3D (Numpad, G/R/S…) antes que los del 2D mientras la ventana 3D está abierta.
   addEventListener("keydown", (e) => { if (!S.perfMode) handle3dKey(app, e); }, true);
   addEventListener("keyup", (e) => {
@@ -2928,6 +2939,7 @@ function bindKeys() {
 /** Botón atrás (Android) / Escape: cierra lo más reciente. Devuelve true si lo consumió. */
 function back() {
   if (closeDialog()) return true;
+  if (networkEditorOpen()) { closeNetworkEditor(); return true; }
   if (S.projecting) { A.projectHere(false); return true; }
   if (S.mode === "shape" || S.mode === "mask") { setMode("edit"); return true; }
   if (S.tab) { openTab(null); return true; }
@@ -3082,6 +3094,15 @@ function tick(now) {
     params.modulateExt("lfo:" + l.id, l.param, d.kind === "bool" ? (w >= 0.5 ? 1 : 0) : d.min + (d.max - d.min) * w, "lfo");
   }, S.playing, S.levels);
   deckTick();
+  // Redes de nodos: cocinan con su propio reloj (no se paran al pausar, como absTime) y lo que se
+  // exporta a LumaMap («Exportar a LumaMap» CHOP) entra como modulación.
+  if (S.project.networks?.length) {
+    if (!app.td) app.ensureTd();
+    else for (const ex of app.td.frame(now / 1000, S.levels)) {
+      const d = describe(app, ex.target);
+      if (d && d.kind !== "trigger") params.modulateExt("net:" + ex.node, ex.target, d.kind === "bool" ? (ex.value >= 0.5 ? 1 : 0) : ex.value, "net");
+    }
+  }
   S.mods = params.modList(now);
   const RP = applyModList(S.project, S.master, S.mods);
   S.renderProject = RP.project; S.renderMaster = RP.master;

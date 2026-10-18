@@ -112,7 +112,8 @@ export function buildCommands(app) {
   add("Conexiones", "remote", "Control desde el móvil y OSC", () => A.remoteInfo(), { ic: "live" });
   add("Show", "emergency", "EMERGENCIA: salida segura inmediata", A.emergency, { keys: "Ctrl+Shift+E", ic: "blackout" });
   add("Show", "perfMode", "Modo actuación (pantalla limpia, sin ediciones)", () => A.togglePerfMode(), { keys: "F10", ic: "live" });
-  add("Ver", "nodes", "Red de nodos (la cadena de cada superficie, como TouchDesigner)", () => app.openNodes(), { ic: "layers" });
+  add("Ver", "nodes", "Redes de nodos (editor como TouchDesigner)", () => app.openNetwork(), { ic: "layers" });
+  add("Ver", "chain", "Cadena de cada superficie (vista simple de nodos)", () => app.openNodes(), { ic: "layers" });
   add("Ver", "news", "Novedades de esta versión", () => app.openNews?.(), { ic: "info" });
   add("Ayuda", "luma", "Tutorial interactivo con Luma (aprender la herramienta)", () => app.startTutorial?.(), { ic: "ai" });
   add("Ver", "pro", "Modo profesional (activar / desactivar)", A.togglePro, { ic: "knob" });

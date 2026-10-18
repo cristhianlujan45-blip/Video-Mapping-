@@ -12,6 +12,7 @@ import { normalizePanel } from "./mypanel.js";
 import { defaultDeck, normalizeDeck } from "./deck.js";
 import { DEFAULT_PLAY, normalizePlay } from "./transport.js";
 
+import { normalizeNetworks } from "./td/graph.js";
 export const VERSION = 2;
 
 let uidCounter = 1;
@@ -860,6 +861,7 @@ export function createProject(name = "Mi mapping", width = 1920, height = 1080) 
     media: [],   // metadatos; los archivos viven en IndexedDB (store.js)
     settings: defaultSettings(),
     stage3d: defaultStage3d(),
+    networks: [],   // redes de nodos (como TouchDesigner): td/graph.js
   };
 }
 
@@ -1025,6 +1027,7 @@ export function normalizeProject(json) {
     deck: normalizeDeck(st.deck),
   };
   json.stage3d = normalizeStage3d(json.stage3d);
+  json.networks = normalizeNetworks(json.networks);
   if (!json.scenes.length) json.scenes.push(createScene());
   if (!json.scenes.some(s => s.id === json.sceneId)) json.sceneId = json.scenes[0].id;
   for (const s of json.surfaces) {

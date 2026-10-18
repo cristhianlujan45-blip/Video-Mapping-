@@ -46,6 +46,8 @@ page.on("console", m => { if (m.type() === "error" || /WebMediaPlayer|too many/i
 // Si una prueba falla: captura de pantalla y qué hay abierto (diálogo, pestaña), para ver la causa en la CI.
 let shotN = 0;
 setOnFail(async (name) => {
+  // Una prueba de las redes que falla no deja el editor de redes tapando las siguientes.
+  await page.evaluate(() => window.__lumamap?.closeNetwork?.()).catch(() => {});
   const info = await page.evaluate(() => ({ tab: window.__lumamap?.S.tab, dialog: document.querySelector("#modal.show h2")?.textContent || "", toast: document.querySelector(".toast")?.textContent || "" })).catch(() => ({}));
   console.error("    estado:", JSON.stringify(info));
   const recent = [...new Set(consoleErrs.slice(-40))].slice(-5);
@@ -520,7 +522,7 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   await page.locator("#panelBody .item", { hasText: "Tutorial interactivo con Luma" }).click();
   const card = page.locator("#academyCard");
   await card.locator(".coachtext", { hasText: "Soy Luma" }).waitFor();
-  assert.match(await card.textContent(), /capítulo 1\/18: Conoce LumaMap/);
+  assert.match(await card.textContent(), /capítulo 1\/19: Conoce LumaMap/);
   await card.getByRole("button", { name: "Siguiente ▶" }).click();
   await card.locator(".coachtext", { hasText: "☰ es el menú" }).waitFor();
   // Resalta el botón que hay que tocar; hacerlo de verdad pasa solo al siguiente paso.
@@ -529,7 +531,8 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   await page.waitForTimeout(700);
   assert.match(await card.textContent(), /PASO 2\//, "no avanza sin la acción");
   await page.locator('#top [data-act="menu"]').click();
-  await card.locator(".coachok").waitFor();
+  // «✓ ¡Bien hecho!» dura un momento y pasa solo al siguiente paso (con la máquina lenta puede verse solo lo segundo).
+  await page.waitForFunction(() => { const c = document.getElementById("academyCard"); return !!c?.querySelector(".coachok") || /Abre «Añadir»/.test(c?.querySelector(".coachtext")?.textContent || ""); }, null, { timeout: 15000 });
   await card.locator(".coachtext", { hasText: "Abre «Añadir»" }).waitFor();
   // Ocultar: queda una burbuja; tocarla vuelve al mismo paso.
   await card.getByTitle("Ocultar (queda una burbuja para volver)").click();
@@ -555,7 +558,7 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   // Capítulos: cualquiera, cuando quieras.
   await card.getByRole("button", { name: "📚 Capítulos" }).click();
   await page.locator("#modal .coachlist .lesson").first().waitFor();
-  assert.equal(await page.locator("#modal .coachlist .lesson").count(), 18);
+  assert.equal(await page.locator("#modal .coachlist .lesson").count(), 19);
   await page.locator("#modal .coachlist .lesson", { hasText: "3D: mapping sobre objetos" }).click();
   await card.locator(".coachtext", { hasText: "pestaña «3D»" }).waitFor();
   // Salir y «Continuar» vuelve al mismo sitio.
@@ -566,6 +569,187 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   await card.getByTitle(/Salir del tutorial/).click();
   await card.waitFor({ state: "detached" });
   await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); });
+});
+await test("redes de nodos (como TouchDesigner): crear con Tab, cables, expresión, bypass, copiar/pegar, deshacer, 3D movido por el cuerpo, exportar a LumaMap y proyectar", async () => {
+  await page.evaluate(() => { const a = window.__lumamap; a.openTab(null); if (!a.S.project.surfaces.length) a.actions.addShape("rect"); });
+  await page.locator('#top [data-act="nodes"]').click();
+  const ws = page.locator("#tdws.show");
+  await ws.waitFor({ timeout: 20000 });
+  const net = () => page.evaluate(() => { const a = window.__lumamap, n = a.S.project.networks[0]; return { nodes: n.nodes.map(x => ({ name: x.name, type: x.type, fam: x.fam, in: x.in.map(id => n.nodes.find(y => y.id === id)?.name || null), bypass: x.bypass, p: x.p })), display: n.nodes.find(x => x.id === n.display)?.name }; });
+  const create = async (q) => {
+    await page.keyboard.press("Tab");
+    await ws.locator(".tdcreate").waitFor();
+    await ws.locator(".tdsearch").fill(q);
+    await ws.locator(".tdsearch").press("Enter");
+    await ws.locator(".tdcreate").waitFor({ state: "detached" });
+  };
+  await ws.locator(".tdpane").click({ position: { x: 200, y: 200 } });
+  // Tab → buscar «ruido» → Enter. Con un nodo elegido, lo nuevo se conecta detrás (como en TouchDesigner).
+  await create("ruido");
+  await create("nivel");
+  await create("salida");
+  let N = await net();
+  assert.deepEqual(N.nodes.map(n => n.name), ["noise1", "level1", "out1"]);
+  assert.deepEqual(N.nodes.map(n => n.in[0] ?? null), [null, "noise1", "level1"]);
+  assert.equal(N.display, "noise1", "la primera imagen se ve de fondo");
+  // El visor del ruido enseña imagen de verdad.
+  await page.waitForFunction(() => { const c = document.querySelector('#tdws .tdnode[data-type="noise"] canvas.tdview'); if (!c) return false; const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let s = 0; for (let k = 0; k < d.length; k += 16) s += d[k]; return s > 1000; }, null, { timeout: 20000 });
+  // Un cable a mano: de la salida de un círculo a la 2.ª entrada de un «composite».
+  await page.keyboard.press("Escape");
+  await create("círculo");
+  await page.keyboard.press("Escape");
+  await create("composite");
+  const out = await ws.locator('.tdnode[data-type="circle"] .tdout').boundingBox();
+  const inp = await ws.locator('.tdnode[data-type="composite"] .tdin[data-in="1"]').boundingBox();
+  await page.mouse.move(out.x + out.width / 2, out.y + out.height / 2);
+  await page.mouse.down();
+  await page.mouse.move((out.x + inp.x) / 2, (out.y + inp.y) / 2 + 30, { steps: 5 });
+  await page.mouse.move(inp.x + inp.width / 2, inp.y + inp.height / 2, { steps: 5 });
+  await page.mouse.up();
+  N = await net();
+  assert.deepEqual(N.nodes.find(n => n.type === "composite").in, [null, "circle1"]);
+  // Expresión en el brillo del nivel (ƒx) y su valor en vivo.
+  await ws.locator('.tdnode[data-type="level"] .tdname').click();
+  const row = ws.locator('.tdprow[data-k="brightness"]');
+  await row.getByRole("button", { name: "Expresión Brillo" }).click();
+  await ws.locator('.tdprow[data-k="brightness"] .tdexpr').fill("0.5 + 0.5 * sin(absTime.seconds)");
+  await ws.locator('.tdprow[data-k="brightness"] .tdexpr').press("Enter");
+  N = await net();
+  assert.equal(N.nodes.find(n => n.name === "level1").p.brightness.e, "0.5 + 0.5 * sin(absTime.seconds)");
+  await page.waitForFunction(() => /^-?\d/.test(document.querySelector('#tdws .tdprow[data-k="brightness"] .tdeval')?.textContent || ""), null, { timeout: 8000 });
+  // B = bypass; Ctrl+C / Ctrl+V = copia conectada; Ctrl+Z deshace.
+  await ws.locator(".tdpane").focus();
+  await page.keyboard.press("b");
+  assert.equal((await net()).nodes.find(n => n.name === "level1").bypass, true);
+  await page.keyboard.press("b");
+  await page.keyboard.press("Control+c");
+  await page.keyboard.press("Control+v");
+  N = await net();
+  assert.ok(N.nodes.some(n => n.name === "level2"), "pegado");
+  await page.waitForTimeout(500);
+  await page.keyboard.press("Control+z");
+  await page.waitForFunction(() => !window.__lumamap.S.project.networks[0].nodes.some(n => n.name === "level2"), null, { timeout: 5000 });
+  // Las ventanas (renombrar, ejemplos, ayuda) salen encima del editor y se pueden usar.
+  await ws.locator('.tdnode[data-type="noise"] .tdname').dblclick();
+  const dlgIn = page.locator("#modal.show input.text-in");
+  await dlgIn.waitFor();
+  await dlgIn.fill("ruido_base");
+  await page.locator("#modal.show").getByRole("button", { name: "Aceptar" }).click();
+  N = await net();
+  assert.ok(N.nodes.some(n => n.name === "ruido_base") && !N.nodes.some(n => n.name === "noise1"), "renombrado desde la ventana");
+  assert.equal(await page.evaluate(() => document.elementFromPoint(innerWidth / 2, innerHeight / 2)?.closest("#modal") ? 1 : 0), 0, "la ventana ya se cerró");
+  // ▶ Usar en superficie: la superficie elegida muestra la red, y su imagen sale de verdad.
+  await ws.locator(".tdbar").getByRole("button", { name: "▶ Usar en superficie" }).click();
+  const src = await page.evaluate(() => window.__lumamap.lookSel()?.source);
+  assert.equal(src.type, "net");
+  const lit = await page.evaluate(async () => { const a = window.__lumamap, n = a.S.project.networks[0]; const o = a.td.output(n.id, n.nodes.find(x => x.type === "out").id, { time: 3, w: 64, h: 36 }); const d = o.el.getContext("2d").getImageData(0, 0, 64, 36).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return s / (64 * 36 * 3); });
+  assert.ok(lit > 5, "la salida tiene imagen: " + lit);
+  // Ejemplo «mover un objeto 3D con la mano»: con una mano simulada a la derecha, la esfera va a la derecha.
+  const tx = await page.evaluate(async () => {
+    const a = window.__lumamap, m = await import("./js/panels-network.js");
+    a.td.trackingSignals = () => ({ presence: 1, right_hand_x: 0.9, right_hand_y: 0.75, spread: 0.2 });
+    const n = m.loadExample("hand");
+    await new Promise(r => setTimeout(r, 1500));
+    const geo = n.nodes.find(x => x.type === "geo");
+    return a.td.cookers.get(n.id).param(geo, "tx");
+  });
+  assert.ok(Math.abs(tx - 1.6) < 0.25, "mano a la derecha → esfera a la derecha: " + tx);
+  // «Exportar a LumaMap»: un CHOP mueve el brillo general (como modulación, sin tocar el proyecto).
+  const master = await page.evaluate(async () => {
+    const a = window.__lumamap, G = await import("./js/td/graph.js"), n = a.S.project.networks[0];
+    a.edit(() => { const c = G.addNode(n, "CHOP", "constant", { x: 0, y: 600, p: { value0: 0.35 } }); const e = G.addNode(n, "CHOP", "export", { x: 220, y: 600, p: { target: "global/master" } }); G.connect(n, c.id, e.id, 0); });
+    await new Promise(r => setTimeout(r, 600));
+    return [a.S.renderMaster, a.S.project.settings.master ?? null];
+  });
+  assert.ok(Math.abs(master[0] - 0.35) < 0.02, "brillo general modulado: " + master[0]);
+  // Los parámetros de los nodos se pueden aprender con MIDI/OSC (aparecen en el catálogo).
+  const inCatalog = await page.evaluate(async () => { const P = await import("./js/params.js"); return P.catalog(window.__lumamap).some(g => g.group.startsWith("Red ·") && g.items.some(i => /level1 · Brillo/.test(i.name))); });
+  assert.ok(inCatalog);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.locator("#tdws").waitFor({ state: "hidden" });
+  await page.evaluate(() => { const a = window.__lumamap, n = a.S.project.networks[0]; a.edit(() => { n.nodes = n.nodes.filter(x => x.type !== "export"); }); });
+});
+await test("redes de nodos: todos los TOP dan imagen sin errores de shader; 3D con todas las geometrías, materiales e instancias; feedback deja estela; GLSL con error lo dice", async () => {
+  const r = await page.evaluate(async () => {
+    const E = await import("./js/td/engine.js"), G = await import("./js/td/graph.js"), O = await import("./js/td/ops.js");
+    const net = G.newNetwork("prueba"); net.res = [160, 90];
+    const proj = { networks: [net], settings: {}, media: [] };
+    const eng = new E.NetEngine({ project: () => proj });
+    const lum = (o) => { if (!o) return -1; const d = o.el.getContext("2d").getImageData(0, 0, o.el.width, o.el.height).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return s / (d.length / 4) / 3; };
+    const a = G.addNode(net, "TOP", "noise"), b = G.addNode(net, "TOP", "ramp");
+    const bad = [];
+    let t = 1;
+    for (const def of O.OP_LIST.filter(o => o.fam === "TOP")) {
+      if (["moviein", "videoin", "plugin", "render"].includes(def.type)) continue;   // necesitan archivo, cámara, plugin o 3D (abajo)
+      const n = G.addNode(net, "TOP", def.type);
+      for (let k = 0; k < Math.max(def.inputs[0], Math.min(def.inputs[1], 2)); k++) G.connect(net, k ? b.id : a.id, n.id, k);
+      if (def.type === "feedback") n.p.target = a.name;
+      if (def.type === "select") n.p.top = b.name;
+      const o = eng.output(net.id, n.id, { time: (t += 0.1), w: 80, h: 45 });
+      const info = eng.info(net, n);
+      if (!o || info.error) bad.push(def.type + ": " + (info.error || "sin imagen"));
+    }
+    // 3D
+    const geo = G.addNode(net, "COMP", "geo"), mat = G.addNode(net, "MAT", "pbr", { p: { color: "#ff2200", map: a.name } });
+    geo.p.material = mat.name; G.addNode(net, "COMP", "camera"); G.addNode(net, "COMP", "light");
+    const rnd = G.addNode(net, "TOP", "render");
+    const shots = {};
+    for (const sop of O.OP_LIST.filter(o => o.fam === "SOP" && o.inputs[0] === 0)) {
+      const g = G.addNode(net, "SOP", sop.type); G.connect(net, g.id, geo.id, 0);
+      shots[sop.type] = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 }));
+      if (eng.info(net, rnd).error) bad.push("3D " + sop.type + ": " + eng.info(net, rnd).error);
+    }
+    for (const m of ["constant", "normal", "wire"]) { const mm = G.addNode(net, "MAT", m); geo.p.material = mm.name; shots["mat " + m] = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 })); }
+    const pat = G.addNode(net, "CHOP", "pattern", { p: { length: 50, kind: 3, amp: 6, offset: -3, name: "tx" } });
+    geo.p.instancing = 1; geo.p.instanceop = pat.name; geo.p.material = mat.name;
+    const inst = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 }));
+    geo.p.instancing = 0;
+    const single = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 }));
+    // Feedback: el círculo que se mueve deja estela.
+    const c1 = G.addNode(net, "TOP", "circle", { p: { radius: 0.1, cx: { e: "0.5 + 0.35 * sin(absTime.seconds * 4)" } } });
+    const fb = G.addNode(net, "TOP", "feedback"); G.connect(net, c1.id, fb.id);
+    const lv = G.addNode(net, "TOP", "level", { p: { brightness: 0.97 } });
+    const cp = G.addNode(net, "TOP", "composite", { p: { mode: 6 } }); G.connect(net, fb.id, cp.id, 0); G.connect(net, c1.id, cp.id, 1); G.connect(net, cp.id, lv.id, 0);
+    fb.p.target = lv.name;
+    let trail = 0;
+    for (let k = 0; k < 40; k++) trail = lum(eng.output(net.id, lv.id, { time: (t += 1 / 30), w: 80, h: 45 }));
+    const alone = lum(eng.output(net.id, c1.id, { time: t, w: 80, h: 45 }));
+    const gl = G.addNode(net, "TOP", "glsl", { p: { code: "return vec4(nope);" } });
+    eng.output(net.id, gl.id, { time: (t += 0.1), w: 80, h: 45 });
+    const glErr = eng.info(net, gl).error;
+    eng.dispose();
+    return { bad, shots, inst, single, trail, alone, glErr };
+  });
+  assert.deepEqual(r.bad, []);
+  for (const [k, v] of Object.entries(r.shots)) assert.ok(v > 1, `3D ${k} se ve: ${v}`);
+  assert.ok(r.inst > r.single, `50 instancias dibujan más que 1 (${r.inst} > ${r.single})`);
+  assert.ok(r.trail > r.alone * 1.5, `el feedback deja estela (${r.trail} vs ${r.alone})`);
+  assert.match(r.glErr, /GLSL[\s\S]*nope/, "el error de GLSL dice qué falla");
+});
+await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
+  const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const g = await pctx.newPage();
+  const errs = [];
+  g.on("pageerror", e => errs.push(e.message));
+  try {
+    await g.goto(base);
+    await g.locator("#modal.show").waitFor();
+    await g.evaluate(() => document.getElementById("modal")._close("blank"));
+    await g.evaluate(async () => { const a = window.__lumamap; await a.openNetwork(); const G = await import("./js/td/graph.js"); const n = a.S.project.networks[0]; a.edit(() => { G.addNode(n, "TOP", "noise", { x: 0, y: 0 }); G.addNode(n, "TOP", "level", { x: 260, y: 0 }); }); (await import("./js/panels-network.js"))._edForTests.sel.clear(); a.closeNetwork(); await a.openNetwork(); });
+    const ws = g.locator("#tdws.show");
+    await ws.locator('.tdnode[data-type="level"]').waitFor();
+    await ws.locator('.tdnode[data-type="noise"] .tdout').tap();
+    await ws.locator('.tdnode[data-type="level"] .tdnhead').tap();
+    await g.waitForFunction(() => { const n = window.__lumamap.S.project.networks[0]; const lv = n.nodes.find(x => x.type === "level"); return lv.in[0] === n.nodes.find(x => x.type === "noise").id; }, null, { timeout: 5000 });
+    // Sin nada elegido, el panel de parámetros no tapa la red; al tocar un nodo sale abajo, sin salirse de la pantalla.
+    assert.equal(await ws.locator(".tdparams").isVisible(), false);
+    await ws.locator('.tdnode[data-type="level"] .tdnhead').tap();
+    await ws.locator(".tdparams .tdpphead", { hasText: "level1" }).waitFor();
+    const box = await ws.locator(".tdparams").boundingBox();
+    assert.ok(box && box.y > 300 && box.y + box.height <= 845 && box.width >= 380, JSON.stringify(box));
+    assert.deepEqual(errs, []);
+  } finally { await pctx.close(); }
 });
 await test("Show Director y diagnóstico: plan de 6 secciones aplicado como escenas; salud del proyecto con puntuación", async () => {
   await page.evaluate(() => window.__lumamap.openTab("assistant"));
@@ -1684,7 +1868,7 @@ await test("novedades: tras actualizar salen solas con la versión, y cada «Abr
     if (/Bienvenid/.test(await dlg.locator("h2").textContent())) await g.evaluate(() => document.getElementById("modal")._close(null));
     await dlg.locator("h2", { hasText: "Novedades" }).waitFor({ timeout: 30000 });
     assert.match(await dlg.textContent(), /Tienes LumaMap/);
-    for (const t of ["Red de nodos", "Señales en vivo", "Mi panel", "Línea de tiempo del show", "Exportar el show a video", "Calibrar el proyector con la cámara"]) assert.ok(await dlg.locator(".newsitem", { hasText: t }).count(), t);
+    for (const t of ["Editor de redes de nodos", "Señales en vivo", "Mi panel", "Línea de tiempo del show", "Exportar el show a video", "Calibrar el proyector con la cámara"]) assert.ok(await dlg.locator(".newsitem", { hasText: t }).count(), t);
     // Señales: lleva a la pestaña Audio y a su sección, resaltada.
     await dlg.locator(".newsitem", { hasText: "Señales en vivo" }).getByRole("button", { name: "Abrir" }).click();
     await g.waitForFunction(() => window.__lumamap.S.tab === "audio" && /Señales en vivo/.test(document.querySelector("#panelBody .sec.flash h3")?.textContent || ""), null, { timeout: 10000 });
@@ -1699,9 +1883,11 @@ await test("novedades: tras actualizar salen solas con la versión, y cada «Abr
     await dlg.locator(".newsitem", { hasText: "Exportar el show a video" }).getByRole("button", { name: "Abrir" }).click();
     await dlg.locator("h2", { hasText: "Exportar el show a video" }).waitFor({ timeout: 10000 });
     await g.evaluate(() => document.getElementById("modal")._close(null));
-    // Botón «Nodos» siempre visible arriba: abre la red de nodos.
+    // Botón «Nodos» siempre visible arriba: abre el editor de redes (como TouchDesigner).
     await g.locator('#top [data-act="nodes"]').click();
-    await g.waitForFunction(() => /nodos/i.test(document.querySelector("#modal.show h2")?.textContent || ""), null, { timeout: 10000 });
+    await g.locator("#tdws.show").waitFor({ timeout: 15000 });
+    await g.keyboard.press("Escape");
+    await g.locator("#tdws.show").waitFor({ state: "detached", timeout: 5000 }).catch(() => g.locator("#tdws").waitFor({ state: "hidden" }));
     assert.deepEqual(errs, []);
   } finally { await nctx.close(); }
 });

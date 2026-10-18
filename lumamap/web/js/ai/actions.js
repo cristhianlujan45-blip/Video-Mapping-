@@ -16,6 +16,7 @@ import { TIMER_TEMPLATES, templateSteps, targetName } from "../timers.js";
 import { EXPERIENCES, applyExperience } from "../experiences.js";
 import { STYLES } from "../renderer.js";
 import { PATTERNS } from "../overlay.js";
+import { EXAMPLES as NET_EXAMPLES } from "../td/examples.js";
 
 const SHAPES = [...Object.keys(M.SHAPES), "mesh"];
 const LIGHT_KINDS = ["strip", "matrix", "ring", "bar", "par", "moving"];
@@ -318,6 +319,12 @@ export const ACTIONS = {
     text: (app, p) => `Abrir el asistente de holograma: ${({ escenario: "escenario (como Tupac)", tul: "tela holográfica", piramide: "pirámide" })[p.type]}${p.n > 1 ? `, ${p.n} proyectores` : ""}`,
     run: (app, p) => { app.actions.hologramWizard({ type: p.type, n: p.type === "piramide" && p.n > 1 && p.n < 4 ? 1 : p.n }); return "Asistente de holograma abierto"; },
   },
+  open_network: {
+    label: "Editor de redes de nodos (como TouchDesigner), opcionalmente con un ejemplo", params: { example: NET_EXAMPLES.map(e => e.id).join("|") + " (opcional)" },
+    check: (app, p) => ({ example: p.example ? oneOf(p.example, "example", NET_EXAMPLES.map(e => e.id)) : "" }),
+    text: (app, p) => p.example ? `Abrir el editor de redes con el ejemplo «${NET_EXAMPLES.find(e => e.id === p.example).name}»` : "Abrir el editor de redes de nodos",
+    run: (app, p) => { app.openNetwork?.().then(async () => { if (p.example) (await import("../panels-network.js")).loadExample(p.example); }); return "Editor de redes abierto"; },
+  },
   duplicate_surface: {
     label: "Duplicar una superficie", params: { surface: "id o nombre (por defecto la seleccionada)" },
     check: (app, p) => ({ surface: surfaceRef(app, p.surface) }),
@@ -452,8 +459,8 @@ export const ACTIONS = {
     run: (app, p) => { const pro = ["tracking", "control", "perf"]; if (pro.includes(p.tab)) app.setPro(true); if (app.S.tab !== p.tab) app.openTab(p.tab); return "Panel abierto"; },
   },
   start_lesson: {
-    label: "Lección de la academia", params: { level: "1-18 (11 = nodos y señales como TouchDesigner, 12 = efectos de cámara y filtros, 13 = conoce LumaMap, 14 = contenido y efectos, 15 = línea de tiempo y exportar video, 16 = mesa de clips y VJ, 17 = 3D sobre objetos, 18 = la IA)" },
-    check: (app, p) => ({ level: Math.round(num(p.level, "level", 1, 18)) }),
+    label: "Lección de la academia", params: { level: "1-19 (19 = redes de nodos como TouchDesigner, 11 = nodos y señales como TouchDesigner, 12 = efectos de cámara y filtros, 13 = conoce LumaMap, 14 = contenido y efectos, 15 = línea de tiempo y exportar video, 16 = mesa de clips y VJ, 17 = 3D sobre objetos, 18 = la IA)" },
+    check: (app, p) => ({ level: Math.round(num(p.level, "level", 1, 19)) }),
     text: (app, p) => `Empezar la lección ${p.level} de la Academia`,
     run: (app, p) => { app.academy?.start(p.level); return "Lección en marcha"; },
   },

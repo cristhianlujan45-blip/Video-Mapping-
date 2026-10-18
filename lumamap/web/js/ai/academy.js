@@ -149,8 +149,31 @@ LEVELS.push(
     { text: "La IA es opcional. Con Ollama (gratis, en tu equipo) respondo mejor: Asistente → «Descargar la IA». Sin ella respondo con la guía.", info: true },
   ] },
 );
+// Redes de nodos (editor como TouchDesigner).
+const allNodes = (app) => (app.S.project.networks || []).flatMap(n => n.nodes.map(x => ({ ...x, net: n })));
+const netOpen = () => typeof document !== "undefined" && !!document.querySelector("#tdws.show");
+const firstNet = (app) => { const P = app.S.project; P.networks ||= []; return P.networks[0] || null; };
+async function tdDo(app, fn) {
+  if (!netOpen()) await app.openNetwork?.();
+  const G = await import("../td/graph.js");
+  const net = firstNet(app);
+  if (net) app.edit(() => fn(G, net));
+}
+LEVELS.push(
+  { level: 19, title: "Redes como TouchDesigner", steps: [
+    { text: "Las redes son como TouchDesigner: conectas operadores (nodos) y la imagen va pasando de uno a otro. Toca «Nodos» arriba para abrir el editor de redes.", target: '#top [data-act="nodes"]', check: () => netOpen(), doIt: (app) => app.openNetwork?.() },
+    { text: "Pulsa «＋ Operador» (o la tecla Tab) y crea un «Ruido» de la familia TOP (imágenes).", target: { sel: "#tdws .tdbar button", text: "Operador" }, check: (app) => allNodes(app).some(n => n.fam === "TOP" && n.type === "noise"),
+      doIt: (app) => tdDo(app, (G, net) => G.addNode(net, "TOP", "noise", { x: 0, y: 0 })) },
+    { text: "Crea un «Nivel» y conéctalo: arrastra desde la salida ● (derecha) del ruido hasta la entrada ○ (izquierda) del nivel. En el móvil: toca la salida y luego el nivel.", check: (app) => allNodes(app).some(n => n.type === "level" && n.in.some(id => n.net.nodes.find(x => x.id === id)?.type === "noise")),
+      doIt: (app) => tdDo(app, (G, net) => { const nz = net.nodes.find(n => n.type === "noise") || G.addNode(net, "TOP", "noise"); const lv = net.nodes.find(n => n.type === "level") || G.addNode(net, "TOP", "level", { x: nz.x + 230, y: nz.y }); G.connect(net, nz.id, lv.id, 0); }) },
+    { text: "Toca el Nivel y, en sus parámetros, pulsa ƒx al lado de «Brillo». Escribe: 1 + sin(absTime.seconds) — así late solo, como las expresiones de TouchDesigner.", check: (app) => allNodes(app).some(n => n.type === "level" && n.p.brightness && typeof n.p.brightness === "object"),
+      doIt: (app) => tdDo(app, (G, net) => { const lv = net.nodes.find(n => n.type === "level"); if (lv) lv.p.brightness = { e: "1 + sin(absTime.seconds)" }; }) },
+    { text: "Crea una «Salida» (Out TOP) después del nivel y pulsa «▶ Usar en superficie»: la red se proyecta.", target: { sel: "#tdws .tdbar button", text: "Usar en superficie" }, check: (app) => app.S.project.scenes.some(sc => Object.values(sc.looks).some(l => l.source?.type === "net")) },
+    { text: "¡Ya programas como en TouchDesigner! En Archivo → Ejemplos tienes más: mover un objeto 3D con la mano, barras 3D del sonido, túneles de feedback y tu propio GLSL.", info: true },
+  ] },
+);
 /** El curso completo, en el orden recomendado (cada número es un capítulo de LEVELS). */
-export const COURSE = [13, 1, 14, 2, 3, 4, 15, 10, 16, 6, 7, 11, 12, 9, 8, 17, 5, 18];
+export const COURSE = [13, 1, 14, 2, 3, 4, 15, 10, 16, 6, 7, 11, 19, 12, 9, 8, 17, 5, 18];
 
 const KEY = "lumamap:academy", CUR = "lumamap:academyCur";
 export class Academy {

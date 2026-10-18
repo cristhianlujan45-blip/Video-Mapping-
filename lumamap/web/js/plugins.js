@@ -181,6 +181,8 @@ export function listPlugins() {
 }
 /** Shader de un plugin activo (o null). */
 export const getShader = (id) => { loadPlugins(); return shaders.get(id) || null; };
+/** Todos los shaders de los plugins activos: [{ id, name }] (para el «Efecto de plugin» de las redes). */
+export const listShaders = () => { loadPlugins(); return [...shaders.values()].map(x => ({ id: x.id, name: x.name })); };
 
 /** Efectos de cámara que sirven para un tipo de contenido: "camera" (todos), "video" o "image" (filtros). */
 export function camFxFor(kind) {

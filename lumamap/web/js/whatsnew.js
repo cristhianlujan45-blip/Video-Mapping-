@@ -7,7 +7,7 @@ import { h, btn, dialog, closeDialog, hint, toast } from "./ui.js";
 import { openExport } from "./panels-export.js";
 
 /** Cambia cuando hay novedades nuevas que enseñar. */
-export const NEWS_REV = "2026-10-15b";
+export const NEWS_REV = "2026-10-18";
 const SEEN_KEY = "lumamap:newsSeen";
 const store = () => { try { return globalThis.localStorage || null; } catch { return null; } };
 // ¿Ya se había usado LumaMap en este equipo? Se mira al cargar, antes de que la app guarde nada.
@@ -36,7 +36,8 @@ export function newsItems(app) {
       ["Tutorial interactivo con Luma", "Una guía con IA te enseña toda la herramienta con actividades: tú lo haces y Luma lo comprueba. Ocultar, saltar, repetir o elegir capítulo cuando quieras; puedes preguntarle lo que sea.", () => app.startTutorial?.()],
     ]],
     ["🔗 Como TouchDesigner", [
-      ["Red de nodos", "La cadena de cada superficie: fuente → señales → efectos → forma → mezcla → salida. Toca un nodo para abrirlo.", () => app.openNodes()],
+      ["Editor de redes de nodos", "Programa como en TouchDesigner: más de 90 operadores (imagen TOP, señales CHOP, geometría SOP, objetos 3D, materiales, texto y tablas), cables, expresiones, feedback, tu propio GLSL, instancias 3D y mover objetos 3D con la mano delante de la cámara. Con ejemplos.", () => app.openNetwork()],
+      ["Cadena de cada superficie", "La vista simple: fuente → señales → efectos → forma → mezcla → salida. Toca un nodo para abrirlo.", () => app.openNodes()],
       ["Señales en vivo", "Seguir sonido, golpe, ruido, azar y suavizado, con monitor en directo; muévelas a cualquier parámetro.", () => goToSection(app, "audio", "Señales en vivo")],
       ["Mi panel", "Tu propia mesa de control con los mandos que tú elijas.", () => { live("mix")(); goToSection(app, "live", "Mi panel"); }],
       ["Salida por red", "La proyección en OBS, vMix, TouchDesigner (Web Render TOP) o un navegador.", () => goToSection(app, "output", "Salida por red")],

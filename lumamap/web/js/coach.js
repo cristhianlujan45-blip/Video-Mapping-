@@ -82,7 +82,7 @@ export function paintCoach(app) {
   let el = document.getElementById("academyCard");
   const stage = document.getElementById("stage");
   if (!st && !A?.finished) { el?.remove(); clearHighlight(); return; }
-  if (!el) { el = h("div", { id: "academyCard", class: "academy coach" }); stage?.append(el); }
+  if (!el) { el = h("div", { id: "academyCard", class: "academy coach" }); (document.querySelector("#tdws.show") || stage)?.append(el); }
   // Oculto: solo una burbuja para volver.
   if (A.hidden) {
     clearHighlight();
@@ -146,6 +146,10 @@ export function coachChanged(app) {
 }
 /** El resaltado sigue al botón aunque el panel se vuelva a dibujar. */
 export function coachTick(app) {
+  // Con el editor de redes abierto (pantalla completa) la tarjeta va encima de él.
+  const card = document.getElementById("academyCard");
+  const host = document.querySelector("#tdws.show") || document.getElementById("stage");
+  if (card && host && card.parentElement !== host) host.append(card);
   const st = app.academy?.step;
   if (st?.target && !app.academy.hidden && !hlEls.some(e => e.isConnected)) highlight(st.target);
 }

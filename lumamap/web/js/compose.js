@@ -12,6 +12,13 @@ import { getShader, onPluginsChange } from "./plugins.js";
 import { FFGLCache } from "./ffgl.js";
 import { DEFAULT_FX } from "./model.js";
 import { guardCap } from "./gpuguard.js";
+// El motor de las redes de nodos (three.js) se carga solo cuando una superficie usa una red.
+let TD = null, tdLoading = null;
+function tdModule() {
+  if (TD) return TD;
+  tdLoading ||= import("./td/engine.js").then(m => { TD = m; }).catch(e => { console.warn("redes", e); tdLoading = null; });
+  return null;
+}
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
 /** Alto máximo de los shaders de plugins: lo elegido en Calidad, o 4K en PC y 1080p en móvil. */
 export function shaderCap(project) {
@@ -117,6 +124,17 @@ export class Compositor {
         const audio = sh.isf.usesAudio ? (globalThis.__lumaAudio?.() || { fft: spectrumFromLevels(o.levels || {}, this._fft ||= new Uint8Array(256)), wave: null }) : null;
         const e = this.shaders.draw(key, sh.id, sh.isf, src.shaderParams || {}, { width: wid, height: hgt, time: o.time * (src.speed ?? 1), images, audio });
         return e ? { id: "sh:" + key, el: e.canvas, key: e.version } : null;
+      }
+      case "net": {
+        // Red de nodos (como TouchDesigner): la imagen de su Salida (Out TOP) o del TOP elegido.
+        if (!src.netId || !(this.project || {}).networks?.some(n => n.id === src.netId)) return null;
+        const TDm = tdModule();
+        if (!TDm) return null;
+        const eng = TDm.engineIfAny() || TDm.netEngine({ project: () => this.project, pool: this.pool });
+        const sa = surfaceAspect(s), cap = shaderCap(this.project);
+        const hgt = Math.round(Math.max(144, Math.min(cap, sa.h || 540))), wid = Math.round(Math.max(64, Math.min(4096, hgt * sa.aspect)));
+        const e = eng.output(src.netId, src.netNode || "", { time: o.time, levels: o.levels, w: wid, h: hgt });
+        return e ? { id: "net:" + src.netId + ":" + (src.netNode || ""), el: e.el, key: e.key } : null;
       }
       case "ffgl": {
         // Plugin FFGL de Resolume (solo app de Windows): lo dibuja su propio proceso, como mucho

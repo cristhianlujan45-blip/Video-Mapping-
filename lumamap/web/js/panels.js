@@ -299,6 +299,7 @@ export function sourceThumb(app, src, fx) {
     const m = app.S.project.media.find(x => x.id === src.mediaId);
     return { img: m?.thumb || "", label: m?.name || "Video / foto" };
   }
+  if (src.type === "net") return { img: "", label: "Red: " + ((app.S.project.networks || []).find(n => n.id === src.netId)?.name || "—") };
   const names = { model3d: "Objeto 3D: " + (src.model?.name || ""), text: "Texto: " + (src.text || "").slice(0, 16), camera: "Cámara en vivo", body: "Interactivo (cámara)", drawing: "Dibujo", color: "Color", none: "Solo borde" };
   return { img: "", label: names[src.type] || src.type };
 }
@@ -457,8 +458,26 @@ const SOURCE_TYPES = [
   { id: "drawing", label: "Dibujo", ic: "pen" },
   { id: "camera", label: "Cámara", ic: "camera" },
   { id: "body", label: "Interactivo (cámara)", ic: "body" },
+  { id: "net", label: "Red de nodos", ic: "layers" },
   { id: "none", label: "Solo borde", ic: "shape" },
 ];
+
+/** Contenido «Red de nodos»: qué red y qué imagen (Salida u otro TOP) se proyecta. */
+function netSourceSection(app, src) {
+  const A = app.actions, nets = app.S.project.networks || [];
+  const net = nets.find(n => n.id === src.netId);
+  const tops = net ? net.nodes.filter(n => n.fam === "TOP") : [];
+  const outs = tops.filter(n => n.type === "out");
+  return section("Red de nodos",
+    nets.length ? h("div", { class: "chips" }, ...nets.map(n => h("button", { class: `chip ${n.id === src.netId ? "on" : ""}`, onclick: () => {
+      const o = n.nodes.find(x => x.fam === "TOP" && x.type === "out") || n.nodes.find(x => x.id === n.display);
+      A.setSource({ netId: n.id, netNode: o?.id || "" });
+    } }, n.name))) : hint("Aún no hay redes: ábrelas con el botón de abajo (hay ejemplos)."),
+    net ? h("div", {}, h("small", {}, "Imagen que se proyecta:"), h("div", { class: "chips" }, ...(outs.length ? outs : tops).map(n => h("button", { class: `chip ${n.id === src.netNode ? "on" : ""}`, onclick: () => A.setSource({ netNode: n.id }) }, n.name)))) : null,
+    net && !tops.length ? hint("Esta red aún no tiene ninguna imagen (TOP).") : null,
+    btn({ label: "🔗 Abrir el editor de redes", kind: "block primary", onClick: () => app.openNetwork({ netId: src.netId }) }),
+    hint("Una red es como un programa de TouchDesigner: imágenes (TOP), señales (CHOP), 3D (SOP, COMP, MAT)… La «Salida» (Out TOP) es lo que llega aquí."));
+}
 
 const FONTS = [
   ["Impact, 'Arial Black', sans-serif", "Impacto"], ["system-ui, sans-serif", "Moderna"],
@@ -479,6 +498,13 @@ const content = {
       tiles(types.map(t => ({ ...t })), { value: src.type === "shader" ? (camBinding(src) ? (camBinding(src).kind === "media" ? "media" : "camera") : "gen") : src.type, cols: 4, onPick: (id) => {
         if (id === "media" && !app.S.project.media.length) return A.importMedia("selected");
         if (id === "projector3d") return A.setSource({ type: id, projectorId: src.projectorId || projs[0].id });
+        if (id === "net") {
+          // Red de nodos: la primera red con su salida; si no hay ninguna, se abre el editor.
+          const net = (app.S.project.networks || [])[0];
+          if (!net) { app.openNetwork(); return; }
+          const out = net.nodes.find(n => n.fam === "TOP" && n.type === "out") || net.nodes.find(n => n.id === net.display);
+          return A.setSource({ type: "net", netId: src.netId || net.id, netNode: src.netNode || out?.id || "" });
+        }
         A.setSource({ type: id });
       } }));
     if (src.type === "projector3d") {
@@ -511,6 +537,7 @@ const content = {
       wrap.append(camFxSection(app));   // filtros de los plugins para esta foto o video
     }
 
+    if (src.type === "net") wrap.append(netSourceSection(app, src));
     if (src.type === "ffgl") wrap.append(ffglControls(app, src));   // plugin FFGL de Resolume (Menú → Plugins)
     if (src.type === "shader") {
       wrap.append(shaderControls(app, src));
