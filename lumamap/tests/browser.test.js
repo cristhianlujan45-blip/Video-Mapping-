@@ -940,7 +940,12 @@ await test("redes de nodos: MIDI In y OSC In (todos los controles), audio de un 
   assert.ok(Math.abs(r.audioLen - 2) < 0.05, "el audio dura 2 s: " + r.audioLen);
   assert.deepEqual(r.surf, { screen: 2, type: "net", netNode: true });
   for (const p of ctx.pages()) if (p !== page) await p.close();
-  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
+  // La superficie de la ventana dibuja la red en cada fotograma (por software en la CI): fuera, para no frenar a las siguientes.
+  await page.evaluate(async () => {
+    const a = window.__lumamap, M = await import("./js/model.js"), m = await import("./js/panels-network.js");
+    m.closeNetworkEditor();
+    a.edit(() => { for (const s of a.S.project.surfaces.filter(x => x.winOf)) M.removeSurface(a.S.project, s.id); });
+  });
 });
 await test("redes de nodos pro: «¿Qué pasa aquí?» explica un error, barra de estado con los errores y la lección 20 se puede hacer entera", async () => {
   await page.evaluate(async () => {

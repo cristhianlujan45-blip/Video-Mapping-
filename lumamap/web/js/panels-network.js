@@ -1368,7 +1368,7 @@ async function saveRecording(r) {
 }
 /** Una superficie que ocupa toda la salida. */
 function M_createFull(P, name) {
-  const s = createQuad({ name, corners: rectCorners(0, 0, P.width, P.height), cols: 1, rows: 1 });
+  const s = createQuad({ name, corners: rectCorners(0, 0, P.width, P.height) });
   addSurface(P, s, { type: "gen", gen: "calib" });
   return s;
 }
