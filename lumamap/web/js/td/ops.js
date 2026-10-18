@@ -107,6 +107,7 @@ top("render", "Render 3D", "Dibuja los objetos 3D de la red con su cámara y luc
 top("feedback", "Feedback (memoria)", "La imagen del fotograma anterior de otro TOP: estelas, túneles, ecos (Feedback TOP).", [1, 1],
   [opRef("target", "TOP que recuerda", "TOP"), pulse("reset", "Borrar memoria")], null, { special: "feedback" });
 top("select", "Seleccionar", "Usa la imagen de otro TOP de la red sin cables (Select TOP).", [0, 0], [opRef("top", "TOP", "TOP")], null, { special: "select" });
+top("in", "Entrada de la subred", "Dentro de una subred (Base COMP): la imagen que le llega a la subred por esa entrada (In TOP).", [0, 0], [i("index", "Entrada n.º", 1, 1, 4)], null, { special: "in" });
 top("resolution", "Resolución", "Cambia la resolución de la imagen (Resolution TOP).", [1, 1], [i("w", "Ancho", 1280, 16, 4096), i("h", "Alto", 720, 16, 4096)], PASS, { special: "resolution" });
 // Filtros
 top("level", "Nivel", "Brillo, contraste, gamma, opacidad y negativo (Level TOP).", [1, 1],
@@ -178,7 +179,7 @@ top("sharpen", "Enfocar", "Más nitidez.", [1, 1], [f("amount", "Cantidad", 1, 0
   `vec4 c = tex0(uv); vec3 b = (tex0(uv + vec2(px.x, 0)).rgb + tex0(uv - vec2(px.x, 0)).rgb + tex0(uv + vec2(0, px.y)).rgb + tex0(uv - vec2(0, px.y)).rgb) * 0.25;
    return vec4(c.rgb + (c.rgb - b) * p_amount, c.a);`);
 top("null", "Null", "No cambia nada: un punto de la red para nombrar, ver o sacar la imagen (Null TOP).", [1, 1], [], PASS);
-top("out", "Salida", "La imagen que sale de la red: elígela en una superficie (Contenido → Red de nodos) (Out TOP).", [1, 1], [], PASS);
+top("out", "Salida", "La imagen que sale de la red (elígela en una superficie: Contenido → Red de nodos); dentro de una subred, lo que sale de ella (Out TOP).", [1, 1], [], PASS);
 // Mezclas
 const MODES = [[0, "Encima (over)"], [1, "Sumar"], [2, "Multiplicar"], [3, "Trama (screen)"], [4, "Restar"], [5, "Diferencia"], [6, "Máximo"], [7, "Mínimo"], [8, "Media"]];
 const COMP_GLSL = `vec4 a = tex0(uv), b = tex1(uv) * vec4(1, 1, 1, p_opacity); vec3 r;
@@ -442,6 +443,8 @@ chop("export", "Exportar a LumaMap", "Manda un canal a cualquier parámetro de L
   [s("chan", "Canal (vacío = el primero)", ""), { k: "target", label: "Parámetro de LumaMap", type: "param", def: "" }, f("lo", "Valor 0 →", 0, -10, 10), f("hi", "Valor 1 →", 1, -10, 10), t("active", "Activo", 1)],
   ({ inputs }) => inputs[0] ? chopOut([...inputs[0].names], inputs[0].data, inputs[0].len) : chopOut([], {}, 1), { exporter: true });
 chop("null", "Null (CHOP)", "No cambia nada: para nombrar y referenciar señales (Null CHOP).", [1, 1], [], ({ inputs }) => inputs[0] || chopOut([], {}, 1));
+chop("in", "Entrada de la subred (CHOP)", "Dentro de una subred: las señales que le llegan por esa entrada (In CHOP).", [0, 0], [i("index", "Entrada n.º", 1, 1, 4)], () => chopOut([], {}, 1), { subIn: true });
+chop("out", "Salida de la subred (CHOP)", "Dentro de una subred: las señales que salen de ella (Out CHOP).", [1, 1], [], ({ inputs }) => inputs[0] || chopOut([], {}, 1));
 
 /* ======================= SOP · Geometría ======================= */
 const sop = (type, label, desc, inputs, params, extra = {}) => add({ type, fam: "SOP", label, desc, inputs, params, ...extra });
@@ -462,6 +465,8 @@ sop("file", "Modelo 3D (archivo)", "Un modelo 3D tuyo: .glb, .gltf, .obj, .fbx, 
   [{ k: "model", label: "Archivo", type: "model", def: "" }, t("center", "Centrar", 1), t("fit", "Ajustar el tamaño", 1), f("size", "Tamaño (lado mayor)", 1.5, 0.01, 20)]);
 sop("merge", "Juntar (SOP)", "Junta varias geometrías en una (Merge SOP).", [1, 4], []);
 sop("null", "Null (SOP)", "No cambia nada (Null SOP).", [1, 1], []);
+sop("in", "Entrada de la subred (SOP)", "Dentro de una subred: la geometría que le llega por esa entrada (In SOP).", [0, 0], [i("index", "Entrada n.º", 1, 1, 4)]);
+sop("out", "Salida de la subred (SOP)", "Dentro de una subred: la geometría que sale de ella (Out SOP).", [1, 1], []);
 
 /* ======================= COMP · Objetos 3D ======================= */
 const comp = (type, label, desc, inputs, params, extra = {}) => add({ type, fam: "COMP", label, desc, inputs, params, ...extra });
@@ -473,6 +478,18 @@ comp("geo", "Objeto 3D (Geometry)", "Pone una geometría (SOP conectado) en la e
     s("itx", "Canal mover X", "tx", { page: "Instancias" }), s("ity", "Canal mover Y", "ty", { page: "Instancias" }), s("itz", "Canal mover Z", "tz", { page: "Instancias" }),
     s("iscale", "Canal escala", "scale", { page: "Instancias" }), s("iry", "Canal girar Y", "ry", { page: "Instancias" }),
     s("ir", "Canal rojo", "r", { page: "Instancias" }), s("ig", "Canal verde", "g", { page: "Instancias" }), s("ib", "Canal azul", "b", { page: "Instancias" })]);
+comp("base", "Subred (Base COMP)", "Una caja con su propia red dentro, para ordenar redes grandes (Base COMP). Entra con doble clic o I, sal con U. Dentro: «Entrada de la subred» recibe lo que le conectas y «Salida» es lo que sale.", [0, 4],
+  [s("note", "Nota", "")], { container: true });
+comp("replicator", "Replicador", "Hace N copias de un nodo (el maestro), como el Replicator COMP: cada copia se llama prefijo1, prefijo2… y en sus expresiones me.digits es su número.", [0, 0],
+  [opRef("master", "Maestro (el nodo que se copia)", "*"), i("count", "Copias", 4, 0, 200), s("prefix", "Nombre de las copias", "item"), t("follow", "Copiar los cambios del maestro", 1),
+    t("wire", "Conectarlas como el maestro", 1), pulse("recreate", "Volver a crear")], { replicator: true });
+const PANEL = { page: "Panel" };
+comp("slider", "Deslizador (panel)", "Un deslizador para tu panel de control: muévelo en el nodo, en «Panel de control» o con MIDI. Canal: value (Slider COMP).", [0, 0],
+  [f("value", "Posición (0…1)", 0.5, 0, 1), f("min", "Mínimo", 0, -100, 100), f("max", "Máximo", 1, -100, 100), s("label", "Texto", "", PANEL), c("color", "Color", "#00e5ff", PANEL)], { panel: true });
+comp("button", "Botón (panel)", "Un botón para tu panel de control: 1 mientras lo pulsas (o alterna). Canal: value (Button COMP).", [0, 0],
+  [f("value", "Pulsado", 0, 0, 1), m("mode", "Tipo", [[0, "Mientras lo pulsas"], [1, "Alternar (encendido/apagado)"]]), s("label", "Texto", "", PANEL), c("color", "Color", "#ff2d8a", PANEL)], { panel: true });
+comp("xy", "Pad XY (panel)", "Un cuadrado para mover dos cosas a la vez con un dedo o el ratón. Canales: x, y (de 0 a 1).", [0, 0],
+  [f("x", "X", 0.5, 0, 1), f("y", "Y", 0.5, 0, 1), s("label", "Texto", "", PANEL), c("color", "Color", "#ffd23f", PANEL)], { panel: true });
 const PE = "Emisión", PM = "Movimiento", PA = "Aspecto";
 comp("particles", "Partículas", "Chispas, humo, lluvia, nieve, polvo mágico…: nacen de un punto, una forma o la geometría conectada (SOP), se mueven con gravedad, viento, remolinos y un imán, y se dibujan en el Render 3D (Particle SOP / particlesGPU).", [0, 1],
   [m("emitter", "Nacen de", [[0, "Un punto"], [1, "Una caja"], [2, "Una esfera"], [3, "Un anillo"], [4, "La geometría conectada (SOP)"]], 0, { page: PE }),
@@ -517,11 +534,20 @@ export const opDef = (fam, type) => OPS[fam + ":" + type] || null;
 export const defOf = (node) => node ? opDef(node.fam, node.type) : null;
 /** Qué familias acepta como entrada cada familia (los cables solo unen lo que tiene sentido). */
 export function acceptsInput(dstFam, dstType, srcFam) {
+  if (dstFam === "COMP" && dstType === "base") return ["TOP", "CHOP", "SOP"].includes(srcFam);
   if (dstFam === "COMP") return (dstType === "geo" || dstType === "particles") && srcFam === "SOP";
   return dstFam === srcFam && ["TOP", "CHOP", "SOP"].includes(srcFam);
 }
 /** Nombre base de los nodos nuevos (noise → noise1, noise2…) como en TouchDesigner. */
-export const baseName = (def) => def.type === "constant" && def.fam === "CHOP" ? "constant" : def.type;
+export const baseName = (def) => (def.type === "in" || def.type === "out") && def.fam !== "TOP" ? def.type + def.fam.toLowerCase() : def.type;
+/** Los COMP de panel (deslizador, botón, pad XY) dan canales como un CHOP. */
+export function panelChop(node) {
+  const p = node.p, num = (v, d = 0) => { v = +v; return Number.isFinite(v) ? v : d; };
+  if (node.type === "slider") return chopOut(["value"], { value: [num(p.min) + num(p.value, 0.5) * (num(p.max, 1) - num(p.min))] }, 1);
+  if (node.type === "button") return chopOut(["value"], { value: [num(p.value)] }, 1);
+  if (node.type === "xy") return chopOut(["x", "y"], { x: [num(p.x, 0.5)], y: [num(p.y, 0.5)] }, 1);
+  return null;
+}
 /** Búsqueda para el diálogo «Crear operador» (Tab). */
 export function searchOps(q, fam = "") {
   const w = String(q || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();

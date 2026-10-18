@@ -11,7 +11,7 @@
 import * as THREE from "../../vendor/three/three.module.min.js";
 import { mergeGeometries } from "../../vendor/three/addons/utils/BufferGeometryUtils.js";
 import { defOf, opDef } from "./ops.js";
-import { Cooker, nodeById, nodeByName, netTime } from "./graph.js";
+import { Cooker, nodeById, nodeByName, netTime, resolveOut, subIn } from "./graph.js";
 import { cameraIfReady, getCamera } from "../sources.js";
 import { ShaderCache, spectrumFromLevels } from "../isf.js";
 import { getShader } from "../plugins.js";
@@ -295,6 +295,7 @@ export class NetEngine {
   }
   /** Imagen de un TOP en este fotograma: { tex, w, h } (null si no hay). */
   top(net, node) {
+    if (node?.type === "base") node = resolveOut(net, node, "TOP");   // una subred: lo que sale por su Salida
     if (!node || node.fam !== "TOP") return null;
     if (this.memo.has(node.id)) return this.memo.get(node.id);
     this.memo.set(node.id, null);        // cortafuegos ante referencias circulares (Select, Feedback…)
@@ -306,7 +307,7 @@ export class NetEngine {
     this.memo.set(node.id, out);
     return out;
   }
-  inputsOf(net, node) { return node.in.map(id => { const n = nodeById(net, id); return n && n.fam === "TOP" ? this.top(net, n) : null; }); }
+  inputsOf(net, node) { return node.in.map(id => this.top(net, nodeById(net, id))); }
   cookTop(net, node) {
     const def = defOf(node), ck = this.cooker(net), p = ck.params(node);
     const ins = this.inputsOf(net, node);
@@ -317,6 +318,7 @@ export class NetEngine {
     switch (def.special) {
       case "resolution": w = Math.max(16, Math.min(MAX_SIDE, p.w | 0)); h = Math.max(16, Math.min(MAX_SIDE, p.h | 0)); break;
       case "select": { const n = nodeByName(net, p.top); return n && n !== node ? this.top(net, n) : null; }
+      case "in": return this.top(net, subIn(net, node));
       case "feedback": {
         const target = nodeByName(net, p.target);
         let f = this.fb.get(node.id);
@@ -422,7 +424,9 @@ export class NetEngine {
   /* ---------------- 3D: SOP, MAT, COMP y Render TOP ---------------- */
   /** Geometría de un SOP (las que no cambian se guardan; el Ruido SOP se recalcula cada fotograma). */
   sop(net, node, depth = 0) {
+    if (node?.type === "base") node = resolveOut(net, node, "SOP");
     if (!node || node.fam !== "SOP" || depth > 32) return null;
+    if (node.type === "in") return this.sop(net, subIn(net, node), depth + 1);
     const mk = "sop:" + node.id;
     if (this.memo.has(mk)) return this.memo.get(mk);
     const ck = this.cooker(net), p = ck.params(node);
@@ -475,7 +479,7 @@ export class NetEngine {
         const list = ins.filter(Boolean).map(g => { const x = g.index ? g.toNonIndexed() : g.clone(); for (const a of Object.keys(x.attributes)) if (!["position", "normal", "uv"].includes(a)) x.deleteAttribute(a); if (!x.attributes.uv) x.setAttribute("uv", new T.Float32BufferAttribute(new Float32Array(x.attributes.position.count * 2), 2)); if (!x.attributes.normal) x.computeVertexNormals(); return x; });
         return list.length ? mergeGeometries(list) : null;
       }
-      case "null": return ins[0] ? ins[0] : null;
+      case "null": case "out": return ins[0] ? ins[0] : null;
       case "file": {
         const base = this.modelGeo(p.model);
         if (!base) return null;

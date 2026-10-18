@@ -5,7 +5,7 @@
 //            bypass, viewer, comment }
 // Funciones puras (sin GPU): crear, cablear (sin ciclos), copiar/pegar, renombrar (arregla las
 // expresiones que lo nombran) y el «cocinero» de CHOPs y parámetros, que el motor usa cada fotograma.
-import { opDef, defOf, acceptsInput, baseName } from "./ops.js";
+import { opDef, defOf, acceptsInput, baseName, panelChop } from "./ops.js";
 import { compileExpr, renameInExpr } from "./expr.js";
 
 let seq = 0;
@@ -45,10 +45,11 @@ export function normalizeNetworks(list) {
     net.nodes = (Array.isArray(n.nodes) ? n.nodes : []).filter(x => x && opDef(x.fam, x.type)).map(x => {
       const def = opDef(x.fam, x.type);
       return { id: x.id || uid("n"), fam: x.fam, type: x.type, name: String(x.name || baseName(def) + "1"), x: +x.x || 0, y: +x.y || 0,
-        p: x.p && typeof x.p === "object" ? x.p : {}, in: Array.isArray(x.in) ? x.in.slice(0, def.inputs[1]) : [], bypass: !!x.bypass, viewer: x.viewer !== false, comment: String(x.comment || "") };
+        p: x.p && typeof x.p === "object" ? x.p : {}, in: Array.isArray(x.in) ? x.in.slice(0, def.inputs[1]) : [], bypass: !!x.bypass, viewer: x.viewer !== false, comment: String(x.comment || ""),
+        parent: String(x.parent || ""), ...(x.repOf ? { repOf: String(x.repOf), repIndex: +x.repIndex || 0 } : {}) };
     });
-    const ids = new Set(net.nodes.map(x => x.id));
-    for (const x of net.nodes) x.in = x.in.map(v => ids.has(v) ? v : null);
+    const ids = new Set(net.nodes.map(x => x.id)), bases = new Set(net.nodes.filter(x => x.type === "base").map(x => x.id));
+    for (const x of net.nodes) { x.in = x.in.map(v => ids.has(v) ? v : null); if (x.parent && (!bases.has(x.parent) || x.parent === x.id)) x.parent = ""; }
     if (!ids.has(net.display)) net.display = null;
     return net;
   });
@@ -70,11 +71,13 @@ export function defaultParams(def) {
   for (const q of def.params) p[q.k] = q.def && typeof q.def === "object" ? JSON.parse(JSON.stringify(q.def)) : q.def;
   return p;
 }
-export function addNode(net, fam, type, { x = 0, y = 0, name = "", p = {} } = {}) {
+export function addNode(net, fam, type, { x = 0, y = 0, name = "", p = {}, parent = "" } = {}) {
   const def = opDef(fam, type);
   if (!def) throw new Error("Operador desconocido: " + fam + ":" + type);
   const node = { id: uid("n"), fam, type, name: name && !nodeByName(net, name) ? name : uniqueName(net, baseName(def)), x, y,
-    p: { ...defaultParams(def), ...p }, in: [], bypass: false, viewer: true, comment: "" };
+    p: { ...defaultParams(def), ...p }, in: [], bypass: false, viewer: true, comment: "", parent: parent || "" };
+  // Una «Entrada de la subred» nueva: la siguiente entrada libre.
+  if (type === "in" && parent && p.index === undefined) node.p.index = Math.min(4, net.nodes.filter(n => n.parent === parent && n.type === "in").length + 1);
   net.nodes.push(node);
   // La primera imagen de la red se ve de fondo (bandera de «display», como en TouchDesigner).
   if (fam === "TOP" && !net.display) net.display = node.id;
@@ -98,8 +101,9 @@ export function wouldCycle(net, srcId, dstId) {
 export function connect(net, srcId, dstId, idx = 0) {
   const a = nodeById(net, srcId), b = nodeById(net, dstId);
   if (!a || !b) return "No existe el nodo";
-  const db = defOf(b);
-  if (!acceptsInput(b.fam, b.type, a.fam)) return `Un ${a.fam} no se puede conectar a un ${b.fam}${b.fam === "COMP" ? " (a un Objeto 3D se le conecta una geometría SOP)" : ""}`;
+  const db = defOf(b), af = outFam(net, a);
+  if (!af) return `${a.name} no tiene salida${a.type === "base" ? ": pon una «Salida» dentro de la subred" : ""}`;
+  if (!acceptsInput(b.fam, b.type, af)) return `Un ${af} no se puede conectar a un ${b.fam}${b.fam === "COMP" ? " (a un Objeto 3D se le conecta una geometría SOP)" : ""}`;
   if (idx >= db.inputs[1]) return `${b.name} solo tiene ${db.inputs[1]} entrada${db.inputs[1] === 1 ? "" : "s"}`;
   if (wouldCycle(net, srcId, dstId)) return "Eso haría un bucle: usa un Feedback TOP para volver atrás";
   while (b.in.length <= idx) b.in.push(null);
@@ -120,6 +124,9 @@ export function disconnect(net, dstId, idx) {
 }
 export function removeNodes(net, ids) {
   const set = new Set(ids);
+  // Con una subred se va todo lo de dentro; con un replicador, sus copias.
+  for (const id of ids) for (const d of descendants(net, id)) set.add(d.id);
+  for (const n of net.nodes) if (n.repOf && set.has(n.repOf)) set.add(n.id);
   net.nodes = net.nodes.filter(n => !set.has(n.id));
   for (const n of net.nodes) n.in = n.in.map(v => set.has(v) ? null : v);
   if (set.has(net.display)) net.display = net.nodes.find(n => n.fam === "TOP")?.id || null;
@@ -138,11 +145,12 @@ export const outputsOf = (net, id) => net.nodes.filter(n => n.in.includes(id));
 /* ---------------- Copiar, pegar, duplicar, renombrar ---------------- */
 export function copyNodes(net, ids) {
   const set = new Set(ids);
+  for (const id of ids) for (const d of descendants(net, id)) set.add(d.id);
   const nodes = net.nodes.filter(n => set.has(n.id)).map(n => JSON.parse(JSON.stringify(n)));
   return { kind: "lumamap-nodes", nodes };
 }
 /** Pega (con nombres nuevos si hacen falta; los cables entre los pegados se conservan). Devuelve los nodos nuevos. */
-export function pasteNodes(net, clip, dx = 40, dy = 40) {
+export function pasteNodes(net, clip, dx = 40, dy = 40, parent = "") {
   if (!clip || clip.kind !== "lumamap-nodes" || !Array.isArray(clip.nodes)) return [];
   const map = new Map(), names = new Map(), out = [];
   for (const n of clip.nodes) {
@@ -154,6 +162,9 @@ export function pasteNodes(net, clip, dx = 40, dy = 40) {
   }
   for (const n of out) {
     n.in = n.in.map(v => map.get(v) || null);
+    // Lo que estaba dentro de una subred copiada sigue dentro de la copia; lo demás va donde estás.
+    if (n.parent && map.has(n.parent)) { n.parent = map.get(n.parent); n.x -= dx; n.y -= dy; } else n.parent = parent || "";
+    delete n.repOf; delete n.repIndex;
     // Las expresiones entre los nodos pegados apuntan a las copias.
     for (const [from, to] of names) if (from !== to) renameRefsInNode(n, from, to);
   }
@@ -180,6 +191,118 @@ export function renameNode(net, id, name) {
   n.name = name;
   for (const o of net.nodes) renameRefsInNode(o, old, name);
   return "";
+}
+
+/* ---------------- Subredes (Base COMP) ----------------
+   Los nodos de dentro de una subred tienen parent = id de la subred (los nombres siguen siendo
+   únicos en toda la red, así las expresiones funcionan desde cualquier sitio). */
+export const childrenOf = (net, id) => net.nodes.filter(n => (n.parent || "") === (id || ""));
+export function descendants(net, id) {
+  const out = [], stack = [id], seen = new Set();
+  while (stack.length) { const p = stack.pop(); if (seen.has(p)) continue; seen.add(p); for (const n of net.nodes) if (n.parent === p) { out.push(n); if (n.type === "base") stack.push(n.id); } }
+  return out;
+}
+/** La «Salida» de una subred (la de esa familia, o la primera). */
+export function subOut(net, base, fam = "") {
+  const outs = net.nodes.filter(n => n.parent === base.id && n.type === "out");
+  return (fam ? outs.find(n => n.fam === fam) : outs[0]) || null;
+}
+/** Familia de lo que sale de un nodo (de una subred: la de su Salida). */
+export function outFam(net, node) {
+  if (node?.type === "base") return subOut(net, node)?.fam || null;
+  if (!node || ["MAT", "DAT"].includes(node.fam) || (node.fam === "COMP")) return null;
+  return node.fam;
+}
+/** El nodo que de verdad da la salida de `node` como `fam` (atraviesa subredes). */
+export function resolveOut(net, node, fam, depth = 0) {
+  if (!node || depth > 16) return null;
+  if (node.type === "base") return resolveOut(net, subOut(net, node, fam), fam, depth + 1);
+  return node.fam === fam ? node : null;
+}
+/** Lo que le entra a una «Entrada de la subred»: el nodo de fuera conectado a esa entrada. */
+export function subIn(net, inNode) {
+  const base = nodeById(net, inNode?.parent);
+  if (!base) return null;
+  const k = Math.max(1, Math.min(4, Math.round(+inNode.p.index || 1))) - 1;
+  return nodeById(net, base.in[k]);
+}
+/**
+ * Agrupa nodos en una subred nueva (como «Collapse into Base» de TouchDesigner): los cables que
+ * entraban pasan por «Entradas de la subred», el que salía por una «Salida». Devuelve { base } o { error }.
+ */
+export function groupIntoBase(net, ids, parent = "") {
+  const S = new Set(ids), list = net.nodes.filter(n => S.has(n.id));
+  if (!list.length) return { error: "Elige los nodos que quieres meter en la subred" };
+  const ins = [];                 // [{ src, fam, inNode }]
+  for (const n of list) n.in.forEach((src, k) => { if (src && !S.has(src) && !ins.some(x => x.src === src)) ins.push({ src, fam: outFam(net, nodeById(net, src)) }); void k; });
+  if (ins.length > 4) return { error: "Una subred tiene como mucho 4 entradas (aquí entrarían " + ins.length + ")" };
+  const outside = net.nodes.filter(n => !S.has(n.id) && n.in.some(v => S.has(v)));
+  const outSrc = [...new Set(outside.flatMap(n => n.in.filter(v => S.has(v))))];
+  if (outSrc.length > 1) return { error: "De la subred solo puede salir una cosa (ahora saldrían " + outSrc.length + "): mete también lo que las junta" };
+  const cx = list.reduce((a, n) => a + n.x, 0) / list.length, cy = list.reduce((a, n) => a + n.y, 0) / list.length;
+  const base = addNode(net, "COMP", "base", { x: Math.round(cx / 10) * 10, y: Math.round(cy / 10) * 10, parent });
+  const minX = Math.min(...list.map(n => n.x)), minY = Math.min(...list.map(n => n.y));
+  ins.forEach((x, k) => {
+    const inN = addNode(net, x.fam || "TOP", "in", { x: minX - 220, y: minY + k * 170, parent: base.id, p: { index: k + 1 } });
+    for (const n of list) n.in = n.in.map(v => v === x.src ? inN.id : v);
+    base.in[k] = x.src;
+  });
+  for (const n of list) n.parent = base.id;
+  if (outSrc.length) {
+    const src = nodeById(net, outSrc[0]), fam = outFam(net, src);
+    const o = addNode(net, fam, "out", { x: Math.max(...list.map(n => n.x)) + 220, y: src.y, parent: base.id });
+    o.in = [src.id];
+    for (const n of outside) n.in = n.in.map(v => S.has(v) ? base.id : v);
+  }
+  return { base };
+}
+/** Deshace una subred: lo de dentro sale a su nivel y los cables vuelven a ir directos. */
+export function ungroupBase(net, baseId) {
+  const base = nodeById(net, baseId);
+  if (!base || base.type !== "base") return false;
+  const kids = childrenOf(net, base.id), out = subOut(net, base);
+  const ioIds = new Set();
+  for (const k of kids) if (k.type === "in") { ioIds.add(k.id); const src = subIn(net, k)?.id || null; for (const n of net.nodes) n.in = n.in.map(v => v === k.id ? src : v); }
+  const outSrc = out ? out.in[0] || null : null;
+  for (const k of kids) if (k.type === "out") ioIds.add(k.id);
+  for (const n of net.nodes) n.in = n.in.map(v => v === base.id ? outSrc : v);
+  for (const k of kids) if (!ioIds.has(k.id)) { k.parent = base.parent || ""; k.x += base.x - 300; k.y += base.y; }
+  net.nodes = net.nodes.filter(n => n.id !== base.id && !ioIds.has(n.id));
+  for (const n of net.nodes) { n.in = n.in.map(v => v === base.id || ioIds.has(v) ? null : v); while (n.in.length && n.in.at(-1) === null) n.in.pop(); }
+  if (net.display === base.id || ioIds.has(net.display)) net.display = net.nodes.find(n => n.fam === "TOP")?.id || null;
+  return true;
+}
+/**
+ * Replicadores: mantiene N copias del maestro (crea las que faltan, borra las que sobran y, si se
+ * pide, les copia los cambios del maestro). count(rep) = número de copias. Devuelve si cambió algo.
+ */
+export function syncReplicators(net, count = (r) => +r.p.count || 0) {
+  let changed = false;
+  for (const r of net.nodes.filter(n => n.type === "replicator" && !n.bypass)) {
+    const master = nodeByName(net, r.p.master);
+    let reps = net.nodes.filter(n => n.repOf === r.id).sort((a, b) => a.repIndex - b.repIndex);
+    const want = master && master !== r && !master.repOf ? Math.max(0, Math.min(200, Math.round(count(r)) || 0)) : 0;
+    const sig = master ? JSON.stringify([master.fam, master.type, master.p, master.in, r.p.prefix, r.p.wire, r.p.recreate]) : "";
+    // Volver a crear (botón, maestro distinto o de otro tipo): todas fuera.
+    if (reps.length && (r._rec !== r.p.recreate || reps[0].type !== master?.type || reps[0].fam !== master?.fam)) { removeNodes(net, reps.map(n => n.id)); reps = []; changed = true; }
+    r._rec = r.p.recreate;
+    if (reps.length > want) { removeNodes(net, reps.slice(want).map(n => n.id)); reps = reps.slice(0, want); changed = true; }
+    const prefix = String(r.p.prefix || "item").replace(/[^A-Za-z0-9_]/g, "_").replace(/\d+$/, "") || "item";
+    for (let k = reps.length; k < want; k++) {
+      let name = prefix + (k + 1);
+      if (nodeByName(net, name)) name = uniqueName(net, prefix);
+      const n = addNode(net, master.fam, master.type, { x: r.x + 200 + (k % 8) * 190, y: r.y + Math.floor(k / 8) * 170, name, parent: r.parent || "", p: JSON.parse(JSON.stringify(master.p)) });
+      n.repOf = r.id; n.repIndex = k;
+      if (r.p.wire) n.in = [...master.in];
+      reps.push(n); changed = true;
+    }
+    if (r.p.follow && sig !== r._sig) {
+      for (const n of reps) { n.p = JSON.parse(JSON.stringify(master.p)); if (r.p.wire) n.in = [...master.in]; }
+      changed = changed || reps.length > 0;
+    }
+    r._sig = sig;
+  }
+  return changed;
 }
 
 /* ---------------- Parámetros ---------------- */
@@ -251,9 +374,14 @@ export class Cooker {
     }
     return out;
   }
-  chopByName(name) {
-    const n = nodeByName(this.net, name);
-    return n && n.fam === "CHOP" ? this.chop(n) : null;
+  chopByName(name) { return this.chopOf(nodeByName(this.net, name)); }
+  /** Canales de un nodo: un CHOP, la salida CHOP de una subred o un COMP de panel. */
+  chopOf(n) {
+    if (!n) return null;
+    if (n.fam === "CHOP") return this.chop(n);
+    if (n.type === "base") { const r = resolveOut(this.net, n, "CHOP"); return r ? this.chop(r) : null; }
+    if (n.fam === "COMP") return panelChop(n);
+    return null;
   }
   /** Cocina un CHOP (una vez por fotograma). */
   chop(node) {
@@ -265,8 +393,9 @@ export class Cooker {
     let out = null;
     try {
       const def = defOf(node);
-      const inputs = node.in.map(id => { const n = nodeById(this.net, id); return n && n.fam === "CHOP" ? this.chop(n) : null; });
-      if (node.bypass) out = inputs.find(Boolean) || null;
+      const inputs = node.in.map(id => this.chopOf(nodeById(this.net, id)));
+      if (node.type === "in") out = this.chopOf(subIn(this.net, node));
+      else if (node.bypass) out = inputs.find(Boolean) || null;
       else {
         let state = this.state.get(node.id);
         if (!state) this.state.set(node.id, state = {});

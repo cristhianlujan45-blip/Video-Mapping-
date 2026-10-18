@@ -681,7 +681,7 @@ await test("redes de nodos: todos los TOP dan imagen sin errores de shader; 3D c
     const bad = [];
     let t = 1;
     for (const def of O.OP_LIST.filter(o => o.fam === "TOP")) {
-      if (["moviein", "videoin", "plugin", "render"].includes(def.type)) continue;   // necesitan archivo, cámara, plugin o 3D (abajo)
+      if (["moviein", "videoin", "plugin", "render", "in"].includes(def.type)) continue;   // necesitan archivo, cámara, plugin, 3D (abajo) o estar dentro de una subred (prueba aparte)
       const n = G.addNode(net, "TOP", def.type);
       for (let k = 0; k < Math.max(def.inputs[0], Math.min(def.inputs[1], 2)); k++) G.connect(net, k ? b.id : a.id, n.id, k);
       if (def.type === "feedback") n.p.target = a.name;
@@ -695,7 +695,7 @@ await test("redes de nodos: todos los TOP dan imagen sin errores de shader; 3D c
     geo.p.material = mat.name; G.addNode(net, "COMP", "camera"); G.addNode(net, "COMP", "light");
     const rnd = G.addNode(net, "TOP", "render");
     const shots = {};
-    for (const sop of O.OP_LIST.filter(o => o.fam === "SOP" && o.inputs[0] === 0 && o.type !== "file")) {   // «file» necesita un archivo (prueba aparte)
+    for (const sop of O.OP_LIST.filter(o => o.fam === "SOP" && o.inputs[0] === 0 && !["file", "in"].includes(o.type))) {   // «file» necesita un archivo e «in» estar en una subred (pruebas aparte)
       const g = G.addNode(net, "SOP", sop.type); G.connect(net, g.id, geo.id, 0);
       shots[sop.type] = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 }));
       if (eng.info(net, rnd).error) bad.push("3D " + sop.type + ": " + eng.info(net, rnd).error);
@@ -832,6 +832,61 @@ await test("redes de nodos: animar un parámetro con fotogramas clave (◆), aut
   assert.equal(await page.evaluate(() => window.__lumamap.S.project.networks.at(-1).timeline.play), 1);
   await page.keyboard.press("k");
   await ws.locator(".tdanim").waitFor({ state: "detached" });
+  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
+});
+await test("redes de nodos: subredes (Ctrl+G, entrar, subir), replicador y panel de control con deslizador y botón", async () => {
+  await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n; a.edit(() => { n = G.newNetwork("Sub"); a.S.project.networks.push(n); const nz = G.addNode(n, "TOP", "noise", { x: 0, y: 0 }), lv = G.addNode(n, "TOP", "level", { x: 220, y: 0 }), o = G.addNode(n, "TOP", "out", { x: 440, y: 0 }); G.connect(n, nz.id, lv.id, 0); G.connect(n, lv.id, o.id, 0); });
+    m.closeNetworkEditor(); await a.openNetwork({ netId: n.id });
+  });
+  const ws = page.locator("#tdws.show");
+  await ws.locator('.tdnode[data-type="level"] .tdname').click();
+  await page.keyboard.press("Control+g");
+  await ws.locator('.tdnode[data-type="base"]').waitFor();
+  assert.equal(await ws.locator('.tdnode[data-type="level"]').count(), 0, "el nivel ya está dentro");
+  // La imagen sigue llegando a la salida a través de la subred.
+  const lum = () => page.evaluate(() => { const a = window.__lumamap, n = a.S.project.networks.at(-1); const o = a.td.output(n.id, n.nodes.find(x => x.type === "out" && !x.parent).id, { time: performance.now() / 1000, w: 32, h: 18 }); if (!o) return 0; const d = o.el.getContext("2d").getImageData(0, 0, 32, 18).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k]; return s / (32 * 18); });
+  assert.ok(await lum() > 10, "la salida tiene imagen a través de la subred");
+  // Doble clic: entrar. Dentro están la entrada, el nivel y la salida; la ruta lo dice; U sube.
+  await ws.locator('.tdnode[data-type="base"] .tdsum').dblclick();
+  await ws.locator('.tdnode[data-type="level"]').waitFor();
+  assert.deepEqual((await ws.locator(".tdnode").evaluateAll(els => els.map(e => e.dataset.type))).sort(), ["in", "level", "out"]);
+  await ws.locator(".tdcrumb", { hasText: "base1" }).waitFor();
+  // Lo que se crea dentro se queda dentro.
+  await page.keyboard.press("Tab"); await ws.locator(".tdsearch").fill("desenfoque"); await ws.locator(".tdsearch").press("Enter");
+  assert.equal(await page.evaluate(() => { const n = window.__lumamap.S.project.networks.at(-1); const b = n.nodes.find(x => x.type === "base"); return n.nodes.find(x => x.type === "blur").parent === b.id; }), true);
+  await ws.locator(".tdpane").focus();
+  await page.keyboard.press("u");
+  await ws.locator('.tdnode[data-type="base"]').waitFor();
+  assert.equal(await ws.locator('.tdnode[data-type="blur"]').count(), 0);
+  // Replicador: 3 copias de un círculo.
+  await page.evaluate(async () => {
+    const a = window.__lumamap, G = await import("./js/td/graph.js"), n = a.S.project.networks.at(-1);
+    a.edit(() => { G.addNode(n, "TOP", "circle", { x: 0, y: 300, name: "bola" }); G.addNode(n, "COMP", "replicator", { x: 0, y: 500, p: { master: "bola", count: 3, prefix: "bola_copia" } }); });
+  });
+  await page.waitForFunction(() => window.__lumamap.S.project.networks.at(-1).nodes.filter(x => x.repOf).length === 3, null, { timeout: 5000 });
+  // Panel de control: un deslizador movido con el ratón cambia lo que lo usa.
+  const ids = await page.evaluate(async () => {
+    const a = window.__lumamap, G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js"), n = a.S.project.networks.at(-1);
+    let sl, bt; a.edit(() => { sl = G.addNode(n, "COMP", "slider", { x: 700, y: 0, p: { value: 0, label: "Brillo" } }); bt = G.addNode(n, "COMP", "button", { x: 700, y: 120, p: { label: "Flash" } }); });
+    m.closeNetworkEditor(); await a.openNetwork({ netId: n.id });
+    return { sl: sl.id, bt: bt.id };
+  });
+  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m._edForTests.togglePanel(); });
+  const pv = ws.locator(".tdpanelview");
+  await pv.waitFor();
+  const sb = await pv.locator(".tdwslider").boundingBox();
+  await page.mouse.click(sb.x + sb.width * 0.75, sb.y + sb.height / 2);
+  const v = await page.evaluate((ids) => window.__lumamap.S.project.networks.at(-1).nodes.find(x => x.id === ids.sl).p.value, ids);
+  assert.ok(Math.abs(v - 0.75) < 0.03, "el deslizador vale lo que marcaste: " + v);
+  const bb = await pv.locator(".tdwbtn").boundingBox();
+  await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down();
+  assert.equal(await page.evaluate((ids) => window.__lumamap.S.project.networks.at(-1).nodes.find(x => x.id === ids.bt).p.value, ids), 1, "pulsado = 1");
+  await page.mouse.up();
+  assert.equal(await page.evaluate((ids) => window.__lumamap.S.project.networks.at(-1).nodes.find(x => x.id === ids.bt).p.value, ids), 0, "al soltar = 0");
+  await pv.getByRole("button", { name: "Cerrar el panel de control" }).click();
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {

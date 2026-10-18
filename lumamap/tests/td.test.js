@@ -6,7 +6,7 @@ import { compileExpr, evalExpr, renameInExpr, noise3 } from "../web/js/td/expr.j
 import { OP_LIST, opDef, FAMILIES, searchOps, acceptsInput } from "../web/js/td/ops.js";
 import { Particles } from "../web/js/td/particles.js";
 import { evalChan, setKey, animTime, normalizeAnim, valueRange } from "../web/js/td/anim.js";
-import { netTime, playNet, pauseNet, seekNet, setNetRate } from "../web/js/td/graph.js";
+import { netTime, playNet, pauseNet, seekNet, setNetRate, groupIntoBase, ungroupBase, syncReplicators, subOut, resolveOut, childrenOf, outFam } from "../web/js/td/graph.js";
 import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, Cooker, normalizeNetworks, nodeByName, uniqueName, dependsOn } from "../web/js/td/graph.js";
 
 const close = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -261,5 +261,67 @@ await test("fotogramas clave: suave, recta, escalón, curva continua, acelerar/f
   assert.equal(ck.chop(a).data.u[0], 4, "con vueltas: 6 s → 2 s de 4");
   const lv = addNode(net, "TOP", "level", { p: { brightness: { e: "animation1.u + me.time.seconds" } } });
   assert.equal(ck.param(lv, "brightness"), 10, "me.time.seconds es el tiempo de la red");
+});
+await test("subredes (Base COMP): agrupar con entradas y salida, las señales pasan por dentro, copiar/pegar con lo de dentro, borrar y deshacer la subred", () => {
+  const net = newNetwork("s");
+  const lfo = addNode(net, "CHOP", "lfo", { p: { rate: 0, offset: 0.25, amp: 0 } });
+  const m = addNode(net, "CHOP", "math", { p: { mult: 2 } });
+  const nl = addNode(net, "CHOP", "null");
+  connect(net, lfo.id, m.id, 0); connect(net, m.id, nl.id, 0);
+  const r = groupIntoBase(net, [m.id]);
+  assert.ok(r.base, r.error);
+  const b = r.base;
+  assert.equal(m.parent, b.id);
+  const kids = childrenOf(net, b.id).map(n => n.type).sort();
+  assert.deepEqual(kids, ["in", "math", "out"], "una entrada, el nodo y una salida");
+  assert.equal(b.in[0], lfo.id, "lo de fuera entra por la subred");
+  assert.equal(nl.in[0], b.id, "lo que salía ahora sale de la subred");
+  assert.equal(outFam(net, b), "CHOP");
+  assert.equal(resolveOut(net, b, "CHOP").type, "out");
+  const ck = new Cooker(); ck.begin(net, { t: 1, dt: 1 / 60, frame: 1 });
+  assert.equal(ck.chop(nl).data.chan1[0], 0.5, "0,25 × 2 atravesando la subred");
+  assert.equal(ck.chopByName(b.name).data.chan1[0], 0.5, "la subred por nombre da su salida");
+  // Dos salidas distintas no se pueden agrupar.
+  const x = addNode(net, "CHOP", "constant"), y = addNode(net, "CHOP", "null"), z = addNode(net, "CHOP", "null"), w = addNode(net, "CHOP", "math");
+  connect(net, x.id, y.id, 0); connect(net, x.id, z.id, 0); connect(net, y.id, w.id, 0); connect(net, z.id, w.id, 1);
+  assert.match(groupIntoBase(net, [y.id, z.id]).error, /solo puede salir una/);
+  removeNodes(net, [x.id, y.id, z.id, w.id]);
+  // Copiar y pegar la subred: lo de dentro también, dentro de la copia.
+  const clip = copyNodes(net, [b.id]);
+  assert.equal(clip.nodes.length, 4);
+  const pasted = pasteNodes(net, clip, 40, 40);
+  const nb = pasted.find(n => n.type === "base");
+  assert.equal(childrenOf(net, nb.id).length, 3);
+  assert.equal(subOut(net, nb).parent, nb.id);
+  // Borrar la subred borra lo de dentro.
+  const n0 = net.nodes.length; removeNodes(net, [nb.id]); assert.equal(net.nodes.length, n0 - 4);
+  // Deshacer la subred: los cables vuelven a ir directos.
+  assert.ok(ungroupBase(net, b.id));
+  assert.equal(m.parent, ""); assert.equal(m.in[0], lfo.id); assert.equal(nl.in[0], m.id);
+  assert.ok(!net.nodes.some(n => n.type === "base" || n.type === "in" || n.type === "out"), "sin restos");
+});
+await test("replicador: N copias del maestro con me.digits, siguen sus cambios, menos copias borra las que sobran; controles de panel como canales", () => {
+  const net = newNetwork("r");
+  const master = addNode(net, "CHOP", "constant", { name: "boton", p: { value0: { e: "me.digits * 10" } } });
+  const rep = addNode(net, "COMP", "replicator", { p: { master: "boton", count: 3, prefix: "copia" } });
+  assert.ok(syncReplicators(net));
+  const reps = () => net.nodes.filter(n => n.repOf === rep.id).map(n => n.name);
+  assert.deepEqual(reps(), ["copia1", "copia2", "copia3"]);
+  const ck = new Cooker(); ck.begin(net, { t: 1, dt: 1 / 60, frame: 1 });
+  assert.equal(ck.chopByName("copia2").data.chan1[0], 20, "me.digits es el número de la copia");
+  master.p.name0 = "nivel";
+  assert.ok(syncReplicators(net));
+  assert.equal(net.nodes.find(n => n.name === "copia1").p.name0, "nivel", "siguen al maestro");
+  assert.equal(syncReplicators(net), false, "si nada cambia, no toca nada");
+  rep.p.count = 1; syncReplicators(net);
+  assert.deepEqual(reps(), ["copia1"]);
+  removeNodes(net, [rep.id]);
+  assert.deepEqual(net.nodes.map(n => n.name), ["boton"], "borrar el replicador borra sus copias");
+  // Controles de panel: canales que se leen desde expresiones.
+  const sl = addNode(net, "COMP", "slider", { p: { value: 0.25, min: 0, max: 8 } });
+  const xy = addNode(net, "COMP", "xy", { p: { x: 0.1, y: 0.9 } });
+  const lv = addNode(net, "TOP", "level", { p: { brightness: { e: `${sl.name}.value + ${xy.name}.y` } } });
+  const c2 = new Cooker(); c2.begin(net, { t: 1, dt: 1 / 60, frame: 1 });
+  assert.equal(c2.param(lv, "brightness"), 2.9);
 });
 report();

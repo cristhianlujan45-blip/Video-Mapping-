@@ -12,7 +12,7 @@
 //   · ejemplos listos y «Usar en una superficie» para proyectarlo.
 import { h, btn, dialog, closeDialog, toast, hint, prompt, confirmDlg } from "./ui.js";
 import { FAMILIES, OP_LIST, opDef, defOf, searchOps, acceptsInput } from "./td/ops.js";
-import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, nodeById, nodeByName, freeInput, isExpr, outputsOf, netTime, playNet, pauseNet, seekNet, setNetRate } from "./td/graph.js";
+import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, nodeById, nodeByName, freeInput, isExpr, outputsOf, netTime, playNet, pauseNet, seekNet, setNetRate, outFam, childrenOf, descendants, groupIntoBase, ungroupBase, syncReplicators } from "./td/graph.js";
 import { AnimEditor } from "./td/animeditor.js";
 import { setKey, evalChan, uniqueChan } from "./td/anim.js";
 import { compileExpr, EXPR_FUNCS } from "./td/expr.js";
@@ -27,7 +27,7 @@ import { uid } from "./model.js";
 const NW = 160, VIEW_H = 90, IN_Y0 = 36, IN_DY = 20, GRID = 10;
 const FAM_SHORT = { TOP: "TOP", CHOP: "CHOP", SOP: "SOP", COMP: "COMP", MAT: "MAT", DAT: "DAT" };
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
-const ed = { open: false, netId: null, sel: new Set(), selWire: null, project: null, grid: true, viewers: true, bg: true, params: true, pinParams: false, clip: null, pendingFrom: null, raf: 0, lastViewers: 0, lastInfo: 0, perform: false, famFilter: "", vwins: [], activeV: null };
+const ed = { open: false, netId: null, sel: new Set(), selWire: null, project: null, grid: true, viewers: true, bg: true, params: true, pinParams: false, clip: null, pendingFrom: null, raf: 0, lastViewers: 0, lastInfo: 0, perform: false, famFilter: "", vwins: [], activeV: null, path: [] };
 let app = null;
 
 /* ======================================================================
@@ -35,6 +35,11 @@ let app = null;
    ====================================================================== */
 const nets = () => (app.S.project.networks ||= []);
 const curNet = () => nets().find(n => n.id === ed.netId) || null;
+/** La subred en la que estás (""  = la red de arriba) y los nodos que se ven en ella. */
+const curParent = () => { const net = curNet(); while (ed.path.length && !nodeById(net, ed.path.at(-1))) ed.path.pop(); return ed.path.at(-1) || ""; };
+const visible = () => { const net = curNet(); return net ? childrenOf(net, curParent()) : []; };
+/** Crea un nodo en la subred en la que estás. */
+const addHere = (net, fam, type, o = {}) => addNode(net, fam, type, { parent: curParent(), ...o });
 export const networkEditorOpen = () => ed.open;
 
 export async function openNetworkEditor(a, { netId = null, nodeId = null } = {}) {
@@ -91,7 +96,7 @@ function buildUI(root) {
   buildTimebar();
   bindPane();
   renderAll();
-  setTimeout(() => { if (!curNet()?.nodes.length) toast("Red vacía: pulsa «＋ Operador» (o Tab) o abre un ejemplo en Archivo → Ejemplos"); else frameAll(); }, 30);
+  setTimeout(() => { if (!visible().length) toast("Red vacía: pulsa «＋ Operador» (o Tab) o abre un ejemplo en Archivo → Ejemplos"); else frameAll(); }, 30);
 }
 
 /* ---------------- Barra con menús ---------------- */
@@ -117,10 +122,11 @@ function closePop() { document.querySelectorAll("#tdws .tdpop").forEach(x => x.r
 function buildBar() {
   const net = curNet();
   const sel = h("select", { class: "tdnetsel", title: "Red que estás editando" }, ...nets().map(n => h("option", { value: n.id, selected: n.id === ed.netId }, n.name)));
-  sel.onchange = () => { ed.netId = sel.value; ed.sel.clear(); closeAnim(); buildTimebar(); renderAll(); frameAll(); };
+  sel.onchange = () => { ed.netId = sel.value; ed.sel.clear(); ed.path = []; closeAnim(); buildTimebar(); renderAll(); frameAll(); };
   R.bar.replaceChildren(
     h("b", { class: "tdlogo" }, "🔗 Redes"),
     sel,
+    h("span", { class: "tdcrumbs" }),
     menu("Archivo", () => [
       { label: "Nueva red vacía", run: () => newNet() },
       { label: "Ejemplos…", run: () => openExamples() },
@@ -144,7 +150,7 @@ function buildBar() {
       { label: "Duplicar", keys: "Ctrl+D", run: () => duplicateSel(), disabled: !ed.sel.size },
       { label: "Borrar", keys: "Supr", run: () => deleteSel(), disabled: !ed.sel.size && !ed.selWire },
       { label: "Borrar dejando pasar los cables", run: () => deleteSel(true), disabled: ed.sel.size !== 1 },
-      { label: "Seleccionar todo", keys: "Ctrl+A", run: () => { ed.sel = new Set(curNet().nodes.map(n => n.id)); renderAll(); } },
+      { label: "Seleccionar todo", keys: "Ctrl+A", run: () => { ed.sel = new Set(visible().map(n => n.id)); renderAll(); } },
       "-",
       { label: "Apagar / encender (bypass)", keys: "B", run: () => toggleBypassSel(), disabled: !ed.sel.size },
       { label: "Ver de fondo (display)", keys: "D", run: () => setDisplaySel(), disabled: ed.sel.size !== 1 },
@@ -173,6 +179,13 @@ function buildBar() {
     menu("Red", () => [
       { label: "▶ Usar en una superficie (proyectar)", run: () => useOnSurface() },
       { label: "Pantalla completa del fondo (actuar)", keys: "F11", run: () => togglePerform() },
+      "-",
+      { label: "Agrupar lo elegido en una subred", keys: "Ctrl+G", run: () => groupSel(), disabled: !ed.sel.size },
+      { label: "Deshacer la subred elegida", keys: "Ctrl+Mayús+G", run: () => ungroupSel(), disabled: nodeById(net, [...ed.sel][0])?.type !== "base" },
+      { label: "Entrar en la subred", keys: "I", run: () => enterBase([...ed.sel][0]), disabled: nodeById(net, [...ed.sel][0])?.type !== "base" },
+      { label: "Subir un nivel", keys: "U", run: () => goUp(), disabled: !ed.path.length },
+      "-",
+      { label: "Panel de control (deslizadores, botones y pads)", run: () => togglePanelView() },
       "-",
       { label: "Resolución de la red…", run: () => netResolution() },
       { label: "Rendimiento (lo que más tarda)", run: () => perfDialog() },
@@ -206,16 +219,19 @@ function renderAll() {
   const net = curNet();
   if (!net) return;
   for (const id of [...ed.sel]) if (!nodeById(net, id)) ed.sel.delete(id);
-  R.nodesEl.replaceChildren(...net.nodes.map(nodeEl));
+  R.nodesEl.replaceChildren(...visible().map(nodeEl));
+  drawCrumbs();
   applyView();
   drawWires();
   renderParams();
   R.pane.classList.toggle("nogrid", !ed.grid);
 }
-function nodeHeight(n) { const def = defOf(n); return 30 + (ed.viewers && n.viewer !== false ? (n.fam === "TOP" ? VIEW_H : n.fam === "CHOP" ? 56 : 38) : 8) + Math.max(0, def.inputs[1] - 2) * 6; }
+function nodeHeight(n) { const def = defOf(n); if (def.panel) return 30 + (n.type === "xy" ? 92 : 46); return 30 + (ed.viewers && n.viewer !== false ? (n.fam === "TOP" ? VIEW_H : n.fam === "CHOP" ? 56 : 38) : 8) + Math.max(0, def.inputs[1] - 2) * 6; }
+/** Entradas que se ven en una subred: tantas como «Entradas de la subred» tenga dentro. */
+function baseInputs(net, n) { return Math.min(4, Math.max(0, ...childrenOf(net, n.id).filter(x => x.type === "in").map(x => Math.round(+x.p.index || 1)))); }
 function nodeEl(n) {
   const def = defOf(n), fam = FAMILIES[n.fam], net = curNet();
-  const el = h("div", { class: `tdnode ${ed.sel.has(n.id) ? "sel" : ""} ${n.bypass ? "bypass" : ""} ${net.display === n.id ? "display" : ""}`, "data-id": n.id, "data-fam": n.fam, "data-type": n.type, title: `${def.label} (${n.fam}) — ${def.desc}${n.comment ? "\n💬 " + n.comment : ""}` });
+  const el = h("div", { class: `tdnode ${ed.sel.has(n.id) ? "sel" : ""} ${n.bypass ? "bypass" : ""} ${net.display === n.id ? "display" : ""} ${n.type === "base" ? "base" : ""} ${n.repOf ? "replicant" : ""}`, "data-id": n.id, "data-fam": n.fam, "data-type": n.type, title: `${def.label} (${n.fam}) — ${def.desc}${n.comment ? "\n💬 " + n.comment : ""}` });
   el.style.left = n.x + "px"; el.style.top = n.y + "px"; el.style.width = NW + "px";
   el.style.setProperty("--fam", fam.color);
   const flags = h("span", { class: "tdflags" },
@@ -224,18 +240,20 @@ function nodeEl(n) {
     h("button", { class: `tdflag ${n.viewer !== false ? "on" : ""}`, title: "Visor del nodo", "aria-label": "Visor", "data-flag": "viewer" }, "▣"));
   const head = h("div", { class: "tdnhead" }, h("i", { class: "tdfam" }, FAM_SHORT[n.fam]), h("b", { class: "tdname" }, n.name), flags);
   let viewer = null;
-  if (ed.viewers && n.viewer !== false) {
+  if (def.panel) viewer = widgetEl(n);
+  else if (ed.viewers && n.viewer !== false) {
     if (n.fam === "TOP") { viewer = h("canvas", { class: "tdview", width: NW - 8, height: VIEW_H - 6 }); }
     else if (n.fam === "CHOP") viewer = h("canvas", { class: "tdview chop", width: NW - 8, height: 50 });
     else viewer = h("div", { class: "tdsum" }, summary(n));
   }
   const ins = [];
-  for (let k = 0; k < def.inputs[1]; k++) {
+  const nIn = n.type === "base" ? baseInputs(net, n) : def.inputs[1];
+  for (let k = 0; k < nIn; k++) {
     const d = h("span", { class: `tdin ${n.in[k] ? "on" : ""} ${k < def.inputs[0] ? "need" : ""}`, "data-in": k, title: `Entrada ${k + 1}${k < def.inputs[0] ? " (necesaria)" : ""}` });
     d.style.top = (IN_Y0 + k * IN_DY - 7) + "px";
     ins.push(d);
   }
-  const out = n.fam === "MAT" || n.fam === "DAT" || (n.fam === "COMP") ? null : h("span", { class: "tdout", "data-out": "1", title: "Salida: arrástrala a la entrada de otro nodo" });
+  const out = !outFam(net, n) ? null : h("span", { class: "tdout", "data-out": "1", title: "Salida: arrástrala a la entrada de otro nodo" });
   if (out) out.style.top = (IN_Y0 - 7) + "px";
   const foot = h("small", { class: "tdinfo" }, n.comment ? "💬 " + n.comment.slice(0, 26) : def.label);
   el.append(head, viewer || h("div", { class: "tdsp" }), foot, ...ins, out || "");
@@ -247,6 +265,8 @@ function summary(n) {
   switch (n.fam) {
     case "SOP": return n.type === "file" ? (app.S.project.media.find(m => m.id === p.model)?.name || "Sin archivo: elige uno") : def.label + (p.radius !== undefined ? ` · r ${val("radius")}` : "");
     case "COMP": if (n.type === "particles") return `${val("rate")}/s · vida ${val("life")} s`;
+      if (n.type === "base") { const k = descendants(curNet(), n.id).length; return h("span", {}, `📦 ${k} nodo${k === 1 ? "" : "s"} dentro`, h("br"), h("small", {}, "doble clic: entrar")); }
+      if (n.type === "replicator") { const k = curNet().nodes.filter(x => x.repOf === n.id).length; return `${k} copia${k === 1 ? "" : "s"} de ${p.master || "?"}`; }
       return n.type === "geo" ? (p.instancing ? `Instancias de ${p.instanceop || "?"}` : `Material: ${p.material || "—"}`) : n.type === "camera" ? `Fov ${val("fov")}°` : "Luz " + ["puntual", "sol", "foco", "ambiente"][p.kind | 0];
     case "MAT": { const sw = h("i", { class: "tdswatch" }); sw.style.background = p.color || "#888"; return h("span", {}, sw, " ", p.map ? "Textura: " + p.map : def.label); }
     case "DAT": return String(p.text || "").split("\n")[0].slice(0, 30) || "(vacío)";
@@ -262,17 +282,18 @@ function wirePath(a, b) {
 function drawWires(temp = null) {
   const net = curNet(), svg = R.svg;
   const parts = [];
-  for (const n of net.nodes) n.in.forEach((src, k) => {
+  const vis = new Set(visible().map(n => n.id));
+  for (const n of net.nodes) if (vis.has(n.id)) n.in.forEach((src, k) => {
     const a = nodeById(net, src);
-    if (!a) return;
+    if (!a || !vis.has(a.id)) return;
     const sel = ed.selWire && ed.selWire.dst === n.id && ed.selWire.idx === k;
     const d = wirePath(portPos(a, "out"), portPos(n, "in", k));
     parts.push(`<path class="tdhit" data-dst="${n.id}" data-idx="${k}" d="${d}"/><path class="tdwire ${sel ? "sel" : ""} ${a.bypass ? "dim" : ""}" style="stroke:${FAMILIES[a.fam].color}" d="${d}"/>`);
   });
   // Referencias por parámetro (material, textura, CHOP de instancias, feedback…): línea punteada como en TouchDesigner.
-  for (const n of net.nodes) for (const q of defOf(n).params) if (q.type === "op" && n.p[q.k]) {
+  for (const n of net.nodes) if (vis.has(n.id)) for (const q of defOf(n).params) if (q.type === "op" && n.p[q.k]) {
     const a = nodeByName(net, n.p[q.k]);
-    if (!a || a === n) continue;
+    if (!a || a === n || !vis.has(a.id)) continue;
     parts.push(`<path class="tdref" d="${wirePath([a.x + NW / 2, a.y + nodeHeight(a)], [n.x + NW / 2, n.y])}"/>`);
   }
   if (temp) parts.push(`<path class="tdwire temp" d="${wirePath(temp.a, temp.b)}"/>`);
@@ -291,7 +312,9 @@ function bindPane() {
   P.addEventListener("contextmenu", (e) => { e.preventDefault(); const nodeE = e.target.closest(".tdnode"); if (nodeE) nodeMenu(nodeE.dataset.id, e.clientX, e.clientY); else openCreate({ at: toWorld(e.clientX, e.clientY), screen: { x: e.clientX, y: e.clientY } }); });
   P.addEventListener("wheel", (e) => { e.preventDefault(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
   P.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".tdwidget")) return;
     const nodeE = e.target.closest(".tdnode");
+    if (nodeE && !e.target.closest(".tdname")) { const n = nodeById(curNet(), nodeE.dataset.id); if (n?.type === "base") { enterBase(n.id); return; } }
     if (nodeE && e.target.closest(".tdname")) { renameDialog(nodeE.dataset.id); return; }
     if (nodeE) { const n = nodeById(curNet(), nodeE.dataset.id); if (n?.type === "animation") { openAnim(n.id); return; } if (n?.fam === "TOP") { app.edit(() => { curNet().display = n.id; }); renderAll(); } else { ed.params = true; renderAll(); } return; }
     openCreate({ at: toWorld(e.clientX, e.clientY), screen: { x: e.clientX, y: e.clientY } });
@@ -304,7 +327,7 @@ function bindPane() {
   P.addEventListener("pointermove", (e) => { const r = P.getBoundingClientRect(); if (app.td) Object.assign(app.td.pointer, { x: (e.clientX - r.left) / r.width, y: 1 - (e.clientY - r.top) / r.height }); });
 }
 function onDown(e) {
-  if (e.target.closest(".tdpop,.tdcreate")) return;
+  if (e.target.closest(".tdpop,.tdcreate,.tdwidget,.tdpanelview")) return;
   R.pane.focus({ preventScroll: true });
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (app.td) app.td.pointer.down = 1;
@@ -395,7 +418,7 @@ function onMove(e) {
     Object.assign(R.box.style, { display: w + hh > 6 ? "block" : "none", left: (x - r.left) + "px", top: (y - r.top) + "px", width: w + "px", height: hh + "px" });
     const [ax, ay] = toWorld(x, y), [bx, by] = toWorld(x + w, y + hh);
     ed.sel = new Set(drag.base);
-    for (const n of curNet().nodes) if (n.x + NW > ax && n.x < bx && n.y + nodeHeight(n) > ay && n.y < by) ed.sel.add(n.id);
+    for (const n of visible()) if (n.x + NW > ax && n.x < bx && n.y + nodeHeight(n) > ay && n.y < by) ed.sel.add(n.id);
     markSelection();
   }
 }
@@ -461,8 +484,8 @@ function frameNodes(list) {
   Object.assign(view(), { z, x: (r.width - (x1 - x0) * z) / 2 - x0 * z, y: (r.height - (y1 - y0) * z) / 2 - y0 * z });
   applyView();
 }
-const frameAll = () => frameNodes(curNet()?.nodes || []);
-const frameSel = () => frameNodes((curNet()?.nodes || []).filter(n => ed.sel.has(n.id)));
+const frameAll = () => frameNodes(visible());
+const frameSel = () => frameNodes(visible().filter(n => ed.sel.has(n.id)));
 
 /* ======================================================================
    Crear operadores (Tab)
@@ -494,16 +517,16 @@ function openCreate({ fam = "", at = null, screen = null, from = null } = {}) {
     let node = null;
     const pos = at || (src ? freeSpot(src.x + NW + 60, src.y) : centerWorld());
     app.edit(() => {
-      node = addNode(net, o.fam, o.type, { x: snap(pos[0]), y: snap(pos[1]) });
+      node = addHere(net, o.fam, o.type, { x: snap(pos[0]), y: snap(pos[1]) });
       // Conectado solo: después del nodo elegido (o del cable que se soltó en el vacío).
       if (src && o.inputs[1] > 0 && acceptsInput(o.fam, o.type, src.fam)) connect(net, src.id, node.id, 0);
       // Un MAT nuevo con un Objeto 3D elegido: se le pone; un SOP nuevo: se crea su Objeto 3D y un Render si no hay.
       if (o.fam === "MAT" && src?.type === "geo") src.p.material = node.name;
       if (o.fam === "SOP" && !src && !net.nodes.some(n => n.type === "geo")) {
-        const g = addNode(net, "COMP", "geo", { x: node.x + NW + 60, y: node.y });
+        const g = addHere(net, "COMP", "geo", { x: node.x + NW + 60, y: node.y });
         connect(net, node.id, g.id, 0);
-        if (!net.nodes.some(n => n.type === "camera")) addNode(net, "COMP", "camera", { x: g.x, y: g.y + 160 });
-        if (!net.nodes.some(n => n.type === "render")) addNode(net, "TOP", "render", { x: g.x + NW + 60, y: g.y });
+        if (!net.nodes.some(n => n.type === "camera")) addHere(net, "COMP", "camera", { x: g.x, y: g.y + 160 });
+        if (!net.nodes.some(n => n.type === "render")) addHere(net, "TOP", "render", { x: g.x + NW + 60, y: g.y });
       }
     });
     ed.sel = new Set([node.id]);
@@ -529,7 +552,7 @@ function centerWorld() {
   return freeSpot(c[0], c[1]);
 }
 function freeSpot(x, y) {
-  const nodes = curNet()?.nodes || [];
+  const nodes = visible();
   const busy = (px, py) => nodes.some(n => px < n.x + NW + 30 && px + NW + 30 > n.x && py < n.y + nodeHeight(n) + 20 && py + 150 > n.y);
   for (let ring = 0; ring < 12; ring++) for (const [dx, dy] of [[0, 0], [0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
     const px = snap(x + dx * ring * (NW + 40)), py = snap(y + dy * ring * 170);
@@ -555,6 +578,9 @@ function nodeMenu(id, x, y) {
     { label: "Renombrar…", run: () => renameDialog(id) },
     { label: "Comentario…", run: () => commentSel() },
     "-",
+    n.type === "base" ? { label: "Entrar en la subred", keys: "I", run: () => enterBase(n.id) } : null,
+    n.type === "base" ? { label: "Deshacer la subred", run: () => ungroupSel() } : null,
+    { label: "Agrupar en una subred", keys: "Ctrl+G", run: () => groupSel() },
     ["TOP", "SOP", "CHOP"].includes(n.fam) ? { label: "Añadir después…", run: () => openCreate({ from: n.id, at: [n.x + NW + 60, n.y] }) } : null,
     n.fam === "TOP" ? { label: "▶ Usar en una superficie", run: () => useOnSurface(n.id) } : null,
     { label: "Duplicar", keys: "Ctrl+D", run: () => duplicateSel() },
@@ -587,7 +613,8 @@ function pasteClip() {
   if (!ed.clip) { try { ed.clip = JSON.parse(localStorage.getItem("lumamap:tdclip") || "null"); } catch {} }
   if (!ed.clip) return;
   let out = [];
-  app.edit(() => { out = pasteNodes(curNet(), JSON.parse(JSON.stringify(ed.clip)), 40, 40); });
+  app.edit(() => { out = pasteNodes(curNet(), JSON.parse(JSON.stringify(ed.clip)), 40, 40, curParent()); });
+  out = out.filter(n => (n.parent || "") === curParent());
   ed.sel = new Set(out.map(n => n.id));
   ed.clip = copyNodes(curNet(), [...ed.sel]);   // pegar otra vez: un poco más allá
   renderAll();
@@ -619,10 +646,11 @@ function afterHistory() { ed.project = app.S.project; if (!curNet()) ed.netId = 
 function autoLayout() {
   const net = curNet(), depth = new Map();
   const d = (n, seen = new Set()) => { if (depth.has(n.id)) return depth.get(n.id); if (seen.has(n.id)) return 0; seen.add(n.id); const v = Math.max(-1, ...n.in.map(id => { const m = nodeById(net, id); return m ? d(m, seen) : -1; })) + 1; depth.set(n.id, v); return v; };
-  for (const n of net.nodes) d(n);
+  const here = visible();
+  for (const n of here) d(n);
   const BAND = { TOP: 0, CHOP: 1, SOP: 2, COMP: 3, MAT: 4, DAT: 5 };
   const cols = new Map();
-  for (const n of net.nodes) { const c = depth.get(n.id); if (!cols.has(c)) cols.set(c, []); cols.get(c).push(n); }
+  for (const n of here) { const c = depth.get(n.id); if (!cols.has(c)) cols.set(c, []); cols.get(c).push(n); }
   app.edit(() => {
     for (const [c, list] of cols) {
       list.sort((a, b) => BAND[a.fam] - BAND[b.fam] || a.y - b.y);
@@ -695,6 +723,10 @@ function useOnSurface(nodeId = null) {
 function togglePerform() {
   ed.perform = !ed.perform;
   R.root.classList.toggle("perform", ed.perform);
+  // Al actuar, los controles de panel de la red quedan abajo, encima de la imagen.
+  R.root.querySelector(".tdperfpanel")?.remove();
+  const ctl = ed.perform ? curNet().nodes.filter(n => defOf(n)?.panel) : [];
+  if (ctl.length) { R.root.append(h("div", { class: "tdperfpanel" }, ...ctl.map(n => widgetEl(n, true)))); refreshWidgets(curNet(), true); }
   if (ed.perform) toast("Pantalla completa: Esc o F11 para volver");
 }
 
@@ -785,6 +817,7 @@ function nodePanel(net, n) {
     n.fam === "TOP" ? btn({ label: "👁 De fondo", kind: `small ${net.display === n.id ? "on" : ""}`, onClick: () => { ed.sel = new Set([n.id]); setDisplaySel(); } }) : null,
     n.fam === "TOP" ? btn({ label: "▶ Usar en superficie", kind: "small", onClick: () => useOnSurface(n.id) }) : null,
     n.type === "animation" ? btn({ label: "◆ Curvas", kind: "small primary", onClick: () => openAnim(n.id) }) : null,
+    n.type === "base" ? btn({ label: "📦 Entrar (I)", kind: "small primary", onClick: () => enterBase(n.id) }) : null,
     ["TOP", "CHOP"].includes(n.fam) ? btn({ label: "⧉ Visor", kind: "small", title: "Visor flotante (V)", onClick: () => openViewer(n.id) }) : null,
     btn({ label: "Borrar", kind: "small danger", onClick: () => { ed.sel = new Set([n.id]); deleteSel(); } }));
   box.append(head, h("p", { class: "tdppdesc" }, h("b", {}, def.label), " — ", def.desc), acts);
@@ -863,10 +896,10 @@ function paramRow(net, n, q) {
       break;
     }
     case "op": {
-      const opts = net.nodes.filter(x => x.fam === q.fam && x.id !== n.id && (!q.kinds || q.kinds.includes(x.type)));
+      const opts = net.nodes.filter(x => (q.fam === "*" ? !x.repOf && x.type !== "replicator" : x.fam === q.fam) && x.id !== n.id && (!q.kinds || q.kinds.includes(x.type)));
       const s = h("select", { class: "sel small", "aria-label": q.label }, h("option", { value: "" }, "— ninguno —"), ...opts.map(x => h("option", { value: x.name, selected: x.name === v }, `${x.name} (${defOf(x).label})`)));
       s.onchange = () => set(s.value);
-      ctl = h("div", { class: "row" }, s, opts.length ? null : btn({ label: "＋ Crear", kind: "small", onClick: () => createRef(net, n, q) }));
+      ctl = h("div", { class: "row" }, s, opts.length || q.fam === "*" ? null : btn({ label: "＋ Crear", kind: "small", onClick: () => createRef(net, n, q) }));
       break;
     }
     case "media": {
@@ -929,8 +962,9 @@ function paramRow(net, n, q) {
 /** Crea el nodo que falta para un parámetro de referencia (material, cámara, CHOP…). */
 function createRef(net, n, q) {
   const type = { MAT: "pbr", COMP: q.kinds?.[0] || "camera", CHOP: "noise", TOP: "noise", DAT: "text", SOP: "box" }[q.fam];
+  if (!type) return;
   let m;
-  app.edit(() => { m = addNode(net, q.fam, type, { x: n.x, y: n.y + 180 }); n.p[q.k] = m.name; });
+  app.edit(() => { m = addHere(net, q.fam, type, { x: n.x, y: n.y + 180 }); n.p[q.k] = m.name; });
   renderAll();
 }
 /** 🔗 Enlazar un parámetro a un canal de un CHOP (o crear uno al momento). */
@@ -939,7 +973,7 @@ function bindDialog(net, n, q) {
   const lo = h("input", { type: "number", class: "text-in small", value: q.type === "t" ? 0 : q.min ?? 0, step: "any", "aria-label": "Mínimo" });
   const hi = h("input", { type: "number", class: "text-in small", value: q.type === "t" ? 1 : q.max ?? 1, step: "any", "aria-label": "Máximo" });
   const apply = (name, chan) => { closeDialog(); const a = +lo.value, b = +hi.value; const e = a === 0 && b === 1 ? `${name}.${chan}` : `fit(${name}.${chan}, 0, 1, ${a}, ${b})`; app.edit(() => { n.p[q.k] = { e }; }); renderAll(); toast(`${n.name}.${q.k} ← ${e}`); };
-  const quick = (type, chan, p = {}) => { let c; app.edit(() => { c = addNode(net, "CHOP", type, { x: n.x - NW - 60, y: n.y + 120, p }); }); apply(c.name, chan); };
+  const quick = (type, chan, p = {}) => { let c; app.edit(() => { c = addHere(net, "CHOP", type, { x: n.x - NW - 60, y: n.y + 120, p }); }); apply(c.name, chan); };
   const listEl = h("div", { class: "tdbind" }, ...chops.map(c => {
     const out = app.td?.cookers.get(net.id)?.chop(c);
     return h("div", { class: "tdbindop" }, h("b", {}, c.name), h("div", { class: "chips" }, ...(out?.names || ["chan1"]).slice(0, 24).map(ch => h("button", { class: "chip", onclick: () => apply(c.name, ch) }, ch))));
@@ -958,6 +992,136 @@ function bindDialog(net, n, q) {
       h("button", { class: "chip", onclick: () => quick("motion", "amount") }, "🌀 Movimiento en cámara"),
       h("button", { class: "chip", onclick: () => quick("mouse", "tx") }, "🖱 Ratón X")),
     chops.length ? h("h4", {}, "O un canal de un CHOP de la red") : null, listEl) });
+}
+
+/* ======================================================================
+   Subredes, replicadores y paneles de control
+   ====================================================================== */
+function drawCrumbs() {
+  const c = R.bar?.querySelector(".tdcrumbs");
+  if (!c) return;
+  const net = curNet();
+  curParent();
+  c.replaceChildren(...(ed.path.length ? [
+    h("button", { class: "tdcrumb", title: "Volver a la red de arriba", onclick: () => { ed.path = []; ed.sel.clear(); renderAll(); frameAll(); } }, net?.name || "Red"),
+    ...ed.path.map((id, k) => [h("span", { class: "tdcrumbsep" }, "›"), h("button", { class: `tdcrumb ${k === ed.path.length - 1 ? "on" : ""}`, onclick: () => { ed.path = ed.path.slice(0, k + 1); ed.sel.clear(); renderAll(); frameAll(); } }, "📦 " + (nodeById(net, id)?.name || "?"))]).flat(),
+    h("button", { class: "tdcrumb up", title: "Subir un nivel (U)", "aria-label": "Subir un nivel", onclick: () => goUp() }, "⤴"),
+  ] : []));
+  R.root.classList.toggle("insub", ed.path.length > 0);
+}
+function enterBase(id) {
+  const n = nodeById(curNet(), id);
+  if (n?.type !== "base") return;
+  ed.path.push(n.id); ed.sel.clear(); ed.selWire = null;
+  renderAll(); frameAll();
+  if (!visible().length) toast("Subred vacía: crea aquí sus nodos. «Entrada de la subred» recibe lo que le conectes fuera y «Salida» es lo que sale");
+}
+function goUp() {
+  if (!ed.path.length) return;
+  const id = ed.path.pop();
+  ed.sel = new Set([id]); renderAll(); frameAll();
+}
+function groupSel() {
+  const net = curNet(), ids = [...ed.sel].filter(id => nodeById(net, id));
+  if (!ids.length) { toast("Elige los nodos que quieres meter en la subred", "warn"); return; }
+  let r = null;
+  app.edit(() => { r = groupIntoBase(net, ids, curParent()); });
+  if (r.error) { toast(r.error, "warn"); return; }
+  ed.sel = new Set([r.base.id]); renderAll();
+  toast(`📦 ${r.base.name}: ${ids.length} nodo${ids.length === 1 ? "" : "s"} dentro (doble clic para entrar)`);
+}
+function ungroupSel() {
+  const net = curNet(), n = nodeById(net, [...ed.sel][0]);
+  if (n?.type !== "base") { toast("Elige una subred (📦)", "warn"); return; }
+  const kids = childrenOf(net, n.id).filter(k => k.type !== "in" && k.type !== "out").map(k => k.id);
+  app.edit(() => ungroupBase(net, n.id));
+  ed.sel = new Set(kids); renderAll();
+}
+function runReplicators(net, eng) {
+  if (!net.nodes.some(n => n.type === "replicator")) return;
+  const ck = eng?.cookers.get(net.id);
+  let changed = false;
+  try { changed = syncReplicators(net, (r) => ck ? +ck.param(r, "count") || 0 : +r.p.count || 0); } catch (e) { console.warn("replicador", e); }
+  if (changed) { app.changed(); app.commitSoon(); renderAll(); }
+}
+/* Controles de panel (deslizador, botón, pad XY): en el nodo, en «Panel de control» y al actuar. */
+function setPanel(n, vals, done = false) {
+  for (const [k, v] of Object.entries(vals)) if (!isExpr(n.p[k])) n.p[k] = Math.round(v * 1000) / 1000;
+  app.changed();
+  if (done) app.commitSoon();
+  refreshWidgets(curNet(), true);
+}
+function widgetEl(n, big = false) {
+  const p = n.p, col = /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : "#00e5ff";
+  const label = h("span", { class: "tdwlab" }, p.label || n.name);
+  let w;
+  const drag = (el, fn) => {
+    el.addEventListener("pointerdown", (e) => {
+      e.stopPropagation(); e.preventDefault();
+      el.setPointerCapture?.(e.pointerId);
+      const r = el.getBoundingClientRect(), at = (ev) => [Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), Math.max(0, Math.min(1, 1 - (ev.clientY - r.top) / r.height))];
+      fn(at(e), false);
+      const mv = (ev) => fn(at(ev), false);
+      const up = (ev) => { el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up); fn(at(ev), true); };
+      el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+    });
+  };
+  if (n.type === "slider") {
+    const fill = h("i", { class: "tdwfill" }), knob = h("b", { class: "tdwknob" });
+    w = h("div", { class: "tdwidget tdwslider", role: "slider", "aria-label": p.label || n.name, "aria-valuemin": 0, "aria-valuemax": 1, tabindex: "0" }, fill, knob, label, h("output", { class: "tdwval" }));
+    drag(w, ([x], done) => setPanel(n, { value: x }, done));
+    w.addEventListener("keydown", (e) => { const d = e.key === "ArrowRight" || e.key === "ArrowUp" ? 0.02 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -0.02 : 0; if (d) { e.preventDefault(); e.stopPropagation(); setPanel(n, { value: Math.max(0, Math.min(1, (+p.value || 0) + d)) }, true); } });
+  } else if (n.type === "button") {
+    w = h("button", { class: "tdwidget tdwbtn", "aria-label": p.label || n.name }, label);
+    w.addEventListener("pointerdown", (e) => {
+      e.stopPropagation(); e.preventDefault();
+      if ((p.mode | 0) === 1) { setPanel(n, { value: (+p.value || 0) > 0.5 ? 0 : 1 }, true); return; }
+      setPanel(n, { value: 1 });
+      const up = () => { setPanel(n, { value: 0 }, true); document.removeEventListener("pointerup", up); document.removeEventListener("pointercancel", up); };
+      document.addEventListener("pointerup", up); document.addEventListener("pointercancel", up);
+    });
+  } else {
+    const dot = h("b", { class: "tdwdot" });
+    w = h("div", { class: "tdwidget tdwxy", "aria-label": p.label || n.name }, dot, label);
+    drag(w, ([x, y], done) => setPanel(n, { x, y }, done));
+  }
+  w.dataset.node = n.id;
+  w.style.setProperty("--wc", col);
+  if (big) w.classList.add("big");
+  return w;
+}
+/** Los controles se ponen al día (si los mueve un MIDI, una expresión o el panel grande). */
+function refreshWidgets(net, force = false) {
+  if (!net || !R.root) return;
+  const ck = app.td?.cookers.get(net.id);
+  for (const w of R.root.querySelectorAll(".tdwidget")) {
+    const n = nodeById(net, w.dataset.node);
+    if (!n) continue;
+    const val = (k) => { const v = ck ? +ck.param(n, k) : +n.p[k]; return Number.isFinite(v) ? v : 0; };
+    if (n.type === "slider") {
+      const v = Math.max(0, Math.min(1, val("value")));
+      w.style.setProperty("--v", v);
+      const out = w.querySelector(".tdwval"), real = val("min") + v * (val("max") - val("min"));
+      if (out) out.textContent = +real.toFixed(3);
+      w.setAttribute("aria-valuenow", v);
+    } else if (n.type === "button") w.classList.toggle("on", val("value") > 0.5);
+    else { w.style.setProperty("--x", Math.max(0, Math.min(1, val("x")))); w.style.setProperty("--y", Math.max(0, Math.min(1, val("y")))); }
+  }
+  void force;
+}
+function togglePanelView(show = null) {
+  const old = R.root.querySelector(".tdpanelview");
+  if (old && show !== true) { old.remove(); return; }
+  if (old) old.remove();
+  const net = curNet(), list = net.nodes.filter(n => defOf(n)?.panel);
+  const box = h("div", { class: "tdpanelview", role: "region", "aria-label": "Panel de control" },
+    h("div", { class: "tdpvhead" }, h("b", {}, "🎛 Panel de control · " + net.name), h("small", {}, "Lo que muevas aquí mueve la red (y se puede enlazar a MIDI: clic derecho en el nodo → Parámetros → aprender)"),
+      h("span", { class: "grow" }), h("button", { class: "tdx", "aria-label": "Cerrar el panel de control", onclick: () => box.remove() }, "✕")),
+    list.length ? h("div", { class: "tdpvgrid" }, ...list.map(n => widgetEl(n, true))) :
+      h("div", { class: "tdpvempty" }, hint("Aún no hay controles. Crea un «Deslizador», un «Botón» o un «Pad XY» (Añadir → COMP) y úsalos en expresiones: slider1.value, button1.value, xy1.x."),
+        btn({ label: "＋ Deslizador", kind: "small primary", onClick: () => { box.remove(); let n; app.edit(() => { const pos = centerWorld(); n = addHere(net, "COMP", "slider", { x: pos[0], y: pos[1] }); }); ed.sel = new Set([n.id]); renderAll(); togglePanelView(true); } })));
+  R.pane.append(box);
+  refreshWidgets(net, true);
 }
 
 /* ======================================================================
@@ -993,10 +1157,12 @@ function updateTimebar(net) {
 }
 /** Tiempo (dentro de su animación) de un Animation CHOP en este fotograma. */
 function animTimeOf(net, node) {
-  const st = app.td?.cookers.get(net.id)?.state.get(node.id);
-  if (st && Number.isFinite(st.T)) return st.T;
-  const p = node.p, L = Math.max(0.01, +p.anim?.length || 4), T = netTime(net) * (+p.speed || 1);
-  return p.loop ? ((T % L) + L) % L : Math.min(L, T);
+  const p = node.p;
+  if ((+p.clock | 0) !== 0) { const st = app.td?.cookers.get(net.id)?.state.get(node.id); return st && Number.isFinite(st.T) ? st.T : 0; }
+  // Con la línea de tiempo de la red se calcula ya (sin esperar al siguiente fotograma: así la
+  // clave cae justo donde dejaste el cursor).
+  const L = Math.max(0.01, +p.anim?.length || 4), T = netTime(net) * (isExpr(p.speed) ? 1 : +p.speed || 1);
+  return (isExpr(p.loop) ? 1 : +p.loop) ? ((T % L) + L) % L : Math.max(0, Math.min(L, T));
 }
 /** ¿Esta expresión es un canal de un Animation CHOP («anim1.chan1»)? */
 function animBinding(net, e) {
@@ -1014,7 +1180,7 @@ function animateParam(net, n, q) {
   const val = ck ? +ck.param(n, q.k) || 0 : +n.p[q.k] || 0;
   let chName = "";
   app.edit(() => {
-    if (!anim) { const pos = freeSpot(n.x - NW - 60, n.y + 160); anim = addNode(net, "CHOP", "animation", { x: pos[0], y: pos[1], p: { anim: { length: Math.max(1, +net.timeline?.length || 10), chans: [] } } }); }
+    if (!anim) { const pos = freeSpot(n.x - NW - 60, n.y + 160); anim = addHere(net, "CHOP", "animation", { x: pos[0], y: pos[1], p: { anim: { length: Math.max(1, +net.timeline?.length || 10), chans: [] } } }); }
     const A = anim.p.anim;
     chName = uniqueChan(A, `${n.name}_${q.k}`);
     const ch = { name: chName, keys: [] };
@@ -1032,7 +1198,7 @@ function openAnim(nodeId = null, chan = null) {
   const target = node?.type === "animation" ? node : net.nodes.find(x => x.type === "animation");
   if (!target) {
     let a;
-    app.edit(() => { const pos = centerWorld(); a = addNode(net, "CHOP", "animation", { x: pos[0], y: pos[1] }); });
+    app.edit(() => { const pos = centerWorld(); a = addHere(net, "CHOP", "animation", { x: pos[0], y: pos[1] }); });
     renderAll();
     return openAnim(a.id);
   }
@@ -1259,7 +1425,8 @@ function loop() {
     if (list.length) eng.viewers(list, time, lv);
   }
   if (ed.vwins.length && now - (ed.lastV || 0) > (MOBILE ? 50 : 16)) { ed.lastV = now; drawViewers(net, eng, time, lv); }
-  if (now - (ed.lastTime || 0) > 50) { ed.lastTime = now; updateTimebar(net); ed.animEd?.draw(); }
+  if (now - (ed.lastTime || 0) > 50) { ed.lastTime = now; updateTimebar(net); ed.animEd?.draw(); refreshWidgets(net); }
+  if (now - (ed.lastRep || 0) > 400) { ed.lastRep = now; runReplicators(net, eng); }
   if (now - ed.lastInfo > 400) { ed.lastInfo = now; updateInfo(); }
 }
 
@@ -1287,12 +1454,15 @@ export function handleNetKey(a, e) {
   if (ctrl && lk === "x") { copySel(); deleteSel(); return eat(); }
   if (ctrl && lk === "v") { pasteClip(); return eat(); }
   if (ctrl && lk === "d") { duplicateSel(); return eat(); }
-  if (ctrl && lk === "a") { ed.sel = new Set(curNet().nodes.map(n => n.id)); markSelection(); renderParams(); return eat(); }
+  if (ctrl && lk === "a") { ed.sel = new Set(visible().map(n => n.id)); markSelection(); renderParams(); return eat(); }
+  if (ctrl && lk === "g") { e.shiftKey ? ungroupSel() : groupSel(); return eat(); }
   if (ctrl && lk === "s") return false;   // guardar: lo hace LumaMap
   if (ctrl) return eat();
   if (document.activeElement?.closest?.(".tdanim")) { if (k === "Delete" || k === "Backspace") return false; }
   else if (ed.activeV?.view3d && !e.altKey && ed.activeV.view3d.key(k)) return eat();
   if (lk === "k") { ed.animEd ? closeAnim() : openAnim(); return eat(); }
+  if (lk === "i") { const n = nodeById(curNet(), [...ed.sel][0]); if (n?.type === "base") enterBase(n.id); return eat(); }
+  if (lk === "u") { goUp(); return eat(); }
   if (lk === "v") { openViewerSel(); return eat(); }
   if (k === "Delete" || k === "Backspace") { deleteSel(); return eat(); }
   if (lk === "h") { frameAll(); return eat(); }
@@ -1310,4 +1480,5 @@ export function handleNetKey(a, e) {
   // F5, F12 y demás siguen funcionando.
   return k.length === 1 && !e.altKey ? eat() : false;
 }
+ed.togglePanel = (v) => togglePanelView(v);
 export { loop as _loopForTests, ed as _edForTests };
