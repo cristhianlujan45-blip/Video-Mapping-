@@ -28,8 +28,8 @@ const m = (k, label, opts, def = 0, o = {}) => ({ k, label, type: "m", opts, def
 const c = (k, label, def, o = {}) => ({ k, label, type: "c", def, ...o });
 const s = (k, label, def = "", o = {}) => ({ k, label, type: "s", def, ...o });
 const opRef = (k, label, fam, o = {}) => ({ k, label, type: "op", fam, def: "", ...o });
-const pulse = (k, label) => ({ k, label, type: "pulse", def: 0 });
-const XYZ = (pre, label, def = [0, 0, 0], min = -5, max = 5) => ["x", "y", "z"].map((a, n) => f(pre + a, `${label} ${a.toUpperCase()}`, def[n], min, max, { page: "Transformar" }));
+const pulse = (k, label, o = {}) => ({ k, label, type: "pulse", def: 0, ...o });
+const XYZ = (pre, label, def = [0, 0, 0], min = -5, max = 5, page = "Transformar") => ["x", "y", "z"].map((a, n) => f(pre + a, `${label} ${a.toUpperCase()}`, def[n], min, max, { page }));
 
 const ops = [];
 const add = (o) => { ops.push(o); return o; };
@@ -446,6 +446,8 @@ sop("circle", "Disco", "Un círculo plano o polígono (Circle SOP).", [0, 0], [f
 sop("transform", "Transformar (SOP)", "Mueve, gira y escala la geometría (Transform SOP).", [1, 1],
   [...XYZ("t", "Mover"), ...XYZ("r", "Girar", [0, 0, 0], -360, 360), ...XYZ("s", "Escala", [1, 1, 1], 0, 5), f("scale", "Escala uniforme", 1, 0, 5)]);
 sop("noise", "Ruido (SOP)", "Deforma la geometría con ruido que se mueve (Noise SOP).", [1, 1], [f("amp", "Fuerza", 0.2, 0, 2), f("period", "Tamaño", 1.5, 0.1, 10), f("speed", "Velocidad", 0.5, 0, 5)]);
+sop("file", "Modelo 3D (archivo)", "Un modelo 3D tuyo: .glb, .gltf, .obj, .fbx, .stl o .ply (File In SOP). Se centra y se ajusta de tamaño para que se vea a la primera.", [0, 0],
+  [{ k: "model", label: "Archivo", type: "model", def: "" }, t("center", "Centrar", 1), t("fit", "Ajustar el tamaño", 1), f("size", "Tamaño (lado mayor)", 1.5, 0.01, 20)]);
 sop("merge", "Juntar (SOP)", "Junta varias geometrías en una (Merge SOP).", [1, 4], []);
 sop("null", "Null (SOP)", "No cambia nada (Null SOP).", [1, 1], []);
 
@@ -459,6 +461,22 @@ comp("geo", "Objeto 3D (Geometry)", "Pone una geometría (SOP conectado) en la e
     s("itx", "Canal mover X", "tx", { page: "Instancias" }), s("ity", "Canal mover Y", "ty", { page: "Instancias" }), s("itz", "Canal mover Z", "tz", { page: "Instancias" }),
     s("iscale", "Canal escala", "scale", { page: "Instancias" }), s("iry", "Canal girar Y", "ry", { page: "Instancias" }),
     s("ir", "Canal rojo", "r", { page: "Instancias" }), s("ig", "Canal verde", "g", { page: "Instancias" }), s("ib", "Canal azul", "b", { page: "Instancias" })]);
+const PE = "Emisión", PM = "Movimiento", PA = "Aspecto";
+comp("particles", "Partículas", "Chispas, humo, lluvia, nieve, polvo mágico…: nacen de un punto, una forma o la geometría conectada (SOP), se mueven con gravedad, viento, remolinos y un imán, y se dibujan en el Render 3D (Particle SOP / particlesGPU).", [0, 1],
+  [m("emitter", "Nacen de", [[0, "Un punto"], [1, "Una caja"], [2, "Una esfera"], [3, "Un anillo"], [4, "La geometría conectada (SOP)"]], 0, { page: PE }),
+    ...XYZ("e", "Emisor", [0, 0, 0], -10, 10, PE), f("esize", "Tamaño del emisor", 0.5, 0, 10, { page: PE }),
+    f("rate", "Cuántas por segundo", 150, 0, 5000, { page: PE }), f("life", "Vida (s)", 2, 0.05, 20, { page: PE }), f("lifeVar", "Variación de la vida", 0.3, 0, 1, { page: PE }),
+    pulse("burst", "💥 Explosión", { page: PE }), i("burstCount", "Partículas por explosión", 300, 0, 20000, { page: PE }), f("trig", "Explotar al pasar de 0,5 (p. ej. el golpe)", 0, 0, 1, { page: PE }), t("play", "Emitiendo", 1, { page: PE }),
+    f("speed", "Velocidad", 1, 0, 20, { page: PM }), f("speedVar", "Variación de la velocidad", 0.3, 0, 1, { page: PM }), ...XYZ("d", "Dirección", [0, 1, 0], -1, 1, PM),
+    f("spread", "Apertura (0 = recto, 1 = a todos lados)", 0.35, 0, 1, { page: PM }), t("outward", "Hacia fuera (esfera o anillo)", 0, { page: PM }),
+    f("gravity", "Gravedad", -0.6, -20, 20, { page: PM }), ...XYZ("wind", "Viento", [0, 0, 0], -10, 10, PM), f("drag", "Rozamiento", 0.3, 0, 10, { page: PM }),
+    f("turb", "Remolinos (turbulencia)", 0.6, 0, 10, { page: PM }), f("turbScale", "Tamaño de los remolinos", 1, 0.1, 10, { page: PM }),
+    f("attract", "Imán (negativo = repele)", 0, -20, 20, { page: PM }), ...XYZ("a", "Imán en", [0, 0, 0], -10, 10, PM),
+    t("floor", "Rebotar en el suelo", 0, { page: PM }), f("floorY", "Altura del suelo", -1, -10, 10, { page: PM }), f("bounce", "Rebote", 0.5, 0, 1, { page: PM }),
+    m("look", "Se ven como", [[0, "Puntos que brillan"], [1, "Puntos redondos"], [2, "Copias de una geometría (SOP)"]], 0, { page: PA }),
+    f("psize", "Tamaño", 0.06, 0.001, 2, { page: PA }), f("sizeEnd", "Tamaño al morir (×)", 0.3, 0, 4, { page: PA }),
+    c("color1", "Color al nacer", "#ffd23f", { page: PA }), c("color2", "Color al morir", "#ff2d55", { page: PA }), t("fade", "Se apagan al morir", 1, { page: PA }), t("additive", "Sumar luz (brillo)", 1, { page: PA }),
+    opRef("shape", "Geometría de cada copia (SOP)", "SOP", { page: PA }), opRef("material", "Material de las copias", "MAT", { page: PA }), i("max", "Máximo de partículas", 5000, 100, 100000, { page: PA })]);
 comp("camera", "Cámara 3D", "Desde dónde se ve la escena (Camera COMP). Muévela con expresiones o con el cuerpo.", [0, 0],
   [...XYZ("t", "Posición", [0, 0.5, 4], -50, 50), ...XYZ("look", "Mira a", [0, 0, 0], -20, 20), f("fov", "Ángulo de visión", 45, 5, 150), t("ortho", "Ortográfica", 0), f("orbit", "Girar alrededor (vueltas/s)", 0, -2, 2)]);
 comp("light", "Luz", "Una luz: puntual, del sol, foco o ambiente (Light COMP).", [0, 0],
@@ -487,7 +505,7 @@ export const opDef = (fam, type) => OPS[fam + ":" + type] || null;
 export const defOf = (node) => node ? opDef(node.fam, node.type) : null;
 /** Qué familias acepta como entrada cada familia (los cables solo unen lo que tiene sentido). */
 export function acceptsInput(dstFam, dstType, srcFam) {
-  if (dstFam === "COMP") return dstType === "geo" && srcFam === "SOP";
+  if (dstFam === "COMP") return (dstType === "geo" || dstType === "particles") && srcFam === "SOP";
   return dstFam === srcFam && ["TOP", "CHOP", "SOP"].includes(srcFam);
 }
 /** Nombre base de los nodos nuevos (noise → noise1, noise2…) como en TouchDesigner. */

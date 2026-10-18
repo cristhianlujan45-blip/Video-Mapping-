@@ -20,11 +20,12 @@ import { catalog, describe } from "./params.js";
 import { listCameras, cameraName } from "./sources.js";
 import { listShaders } from "./plugins.js";
 import { openNodes } from "./panels-nodes.js";
+import { uid } from "./model.js";
 
 const NW = 160, VIEW_H = 90, IN_Y0 = 36, IN_DY = 20, GRID = 10;
 const FAM_SHORT = { TOP: "TOP", CHOP: "CHOP", SOP: "SOP", COMP: "COMP", MAT: "MAT", DAT: "DAT" };
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
-const ed = { open: false, netId: null, sel: new Set(), selWire: null, project: null, grid: true, viewers: true, bg: true, params: true, pinParams: false, clip: null, pendingFrom: null, raf: 0, lastViewers: 0, lastInfo: 0, perform: false, famFilter: "" };
+const ed = { open: false, netId: null, sel: new Set(), selWire: null, project: null, grid: true, viewers: true, bg: true, params: true, pinParams: false, clip: null, pendingFrom: null, raf: 0, lastViewers: 0, lastInfo: 0, perform: false, famFilter: "", vwins: [], activeV: null };
 let app = null;
 
 /* ======================================================================
@@ -52,6 +53,7 @@ export async function openNetworkEditor(a, { netId = null, nodeId = null } = {})
   ed.raf = requestAnimationFrame(loop);
 }
 export function closeNetworkEditor() {
+  closeAllViewers();
   ed.open = false; ed.perform = false;
   cancelAnimationFrame(ed.raf);
   document.getElementById("tdws")?.classList.remove("show");
@@ -64,6 +66,7 @@ export function closeNetworkEditor() {
    ====================================================================== */
 let R = {};   // referencias a los elementos
 function buildUI(root) {
+  closeAllViewers();
   root.innerHTML = "";
   const bar = h("div", { class: "tdbar" });
   const pane = h("div", { class: "tdpane", tabindex: "0" });
@@ -155,6 +158,8 @@ function buildBar() {
       { label: "Imagen de fondo", on: ed.bg, run: () => { ed.bg = !ed.bg; } },
       { label: "Rejilla (imán)", on: ed.grid, run: () => { ed.grid = !ed.grid; R.pane.classList.toggle("nogrid", !ed.grid); } },
       { label: "Panel de parámetros", keys: "P", on: ed.params, run: () => toggleParams() },
+      { label: "Visor flotante de lo elegido (3D: mover objetos y cámara)", keys: "V", run: () => openViewerSel(), disabled: ed.sel.size !== 1 },
+      { label: "Visor flotante del Render 3D", run: () => { const r = curNet().nodes.find(n => n.type === "render"); r ? openViewer(r.id) : toast("Esta red no tiene un Render 3D", "warn"); } },
       "-",
       { label: "Cadena de cada superficie (vista simple)", run: () => openNodes(app) },
     ]),
@@ -233,8 +238,9 @@ function summary(n) {
   const p = n.p, def = defOf(n);
   const val = (k) => { const v = p[k]; return isExpr(v) ? "ƒx" : v; };
   switch (n.fam) {
-    case "SOP": return def.label + (p.radius !== undefined ? ` · r ${val("radius")}` : "");
-    case "COMP": return n.type === "geo" ? (p.instancing ? `Instancias de ${p.instanceop || "?"}` : `Material: ${p.material || "—"}`) : n.type === "camera" ? `Fov ${val("fov")}°` : "Luz " + ["puntual", "sol", "foco", "ambiente"][p.kind | 0];
+    case "SOP": return n.type === "file" ? (app.S.project.media.find(m => m.id === p.model)?.name || "Sin archivo: elige uno") : def.label + (p.radius !== undefined ? ` · r ${val("radius")}` : "");
+    case "COMP": if (n.type === "particles") return `${val("rate")}/s · vida ${val("life")} s`;
+      return n.type === "geo" ? (p.instancing ? `Instancias de ${p.instanceop || "?"}` : `Material: ${p.material || "—"}`) : n.type === "camera" ? `Fov ${val("fov")}°` : "Luz " + ["puntual", "sol", "foco", "ambiente"][p.kind | 0];
     case "MAT": { const sw = h("i", { class: "tdswatch" }); sw.style.background = p.color || "#888"; return h("span", {}, sw, " ", p.map ? "Textura: " + p.map : def.label); }
     case "DAT": return String(p.text || "").split("\n")[0].slice(0, 30) || "(vacío)";
   }
@@ -536,6 +542,7 @@ function nodeMenu(id, x, y) {
     { label: `${n.name} · ${defOf(n).label}`, disabled: true, run: () => {} },
     "-",
     { label: "Parámetros", keys: "P", run: () => { ed.params = true; renderAll(); } },
+    ["TOP", "CHOP"].includes(n.fam) ? { label: n.type === "render" ? "Visor flotante 3D (mover objetos y cámara)" : "Visor flotante", keys: "V", run: () => openViewer(n.id) } : null,
     n.fam === "TOP" ? { label: "Ver de fondo (display)", keys: "D", run: () => setDisplaySel() } : null,
     { label: n.bypass ? "Encender (quitar bypass)" : "Apagar sin borrar (bypass)", keys: "B", run: () => toggleBypassSel() },
     { label: "Renombrar…", run: () => renameDialog(id) },
@@ -777,7 +784,7 @@ function nodePanel(net, n) {
   box.append(ins || "", outs.length ? h("p", { class: "tdppins" }, "Sale a: " + outs.map(o => o.name).join(", ")) : "");
   for (const pg of pages) {
     const qs = def.params.filter(q => !q.hidden && (q.page || "Parámetros") === pg);
-    const sec = h("details", { class: "tdpage", open: pg === "Parámetros" || pages.length === 1 || undefined }, h("summary", {}, pg));
+    const sec = h("details", { class: "tdpage", open: pg === "Parámetros" || pg === pages[0] || undefined }, h("summary", {}, pg));
     for (const q of qs) sec.append(paramRow(net, n, q));
     box.append(sec);
   }
@@ -842,6 +849,13 @@ function paramRow(net, n, q) {
       ctl = h("div", {}, s, btn({ label: "Importar video o foto…", kind: "small", onClick: async () => { await app.actions.importMedia("library"); setTimeout(renderParams, 400); } }));
       break;
     }
+    case "model": {
+      const models = app.S.project.media.filter(m => m.kind === "model");
+      const s = h("select", { class: "sel small", "aria-label": q.label }, h("option", { value: "" }, models.length ? "— elige un modelo —" : "— aún no hay modelos 3D —"), ...models.map(m => h("option", { value: m.id, selected: m.id === v }, m.name)));
+      s.onchange = () => set(s.value);
+      ctl = h("div", {}, s, btn({ label: "Importar modelo 3D (.glb .gltf .obj .fbx .stl .ply)…", kind: "small", onClick: () => importModel((id) => { set(id); renderParams(); }) }));
+      break;
+    }
     case "cam": {
       const s = h("select", { class: "sel small", "aria-label": q.label }, h("option", { value: "" }, "La cámara de LumaMap (por defecto)"));
       listCameras().then(list => { for (const c of list) s.append(h("option", { value: c.id, selected: c.id === v }, cameraName(c))); }).catch(() => {});
@@ -880,7 +894,7 @@ function paramRow(net, n, q) {
 }
 /** Crea el nodo que falta para un parámetro de referencia (material, cámara, CHOP…). */
 function createRef(net, n, q) {
-  const type = { MAT: "pbr", COMP: q.kinds?.[0] || "camera", CHOP: "noise", TOP: "noise", DAT: "text" }[q.fam];
+  const type = { MAT: "pbr", COMP: q.kinds?.[0] || "camera", CHOP: "noise", TOP: "noise", DAT: "text", SOP: "box" }[q.fam];
   let m;
   app.edit(() => { m = addNode(net, q.fam, type, { x: n.x, y: n.y + 180 }); n.p[q.k] = m.name; });
   renderAll();
@@ -910,6 +924,122 @@ function bindDialog(net, n, q) {
       h("button", { class: "chip", onclick: () => quick("motion", "amount") }, "🌀 Movimiento en cámara"),
       h("button", { class: "chip", onclick: () => quick("mouse", "tx") }, "🖱 Ratón X")),
     chops.length ? h("h4", {}, "O un canal de un CHOP de la red") : null, listEl) });
+}
+
+/* ======================================================================
+   Visores flotantes (como los «viewers» de TouchDesigner): ventanas que se mueven y se cambian de
+   tamaño, con la imagen grande de un TOP o los canales de un CHOP. El de un Render 3D deja elegir
+   los objetos y moverlos, girarlos o escalarlos con el gizmo, y mover la cámara.
+   ====================================================================== */
+function openViewerSel() { const id = [...ed.sel][0]; if (ed.sel.size === 1) openViewer(id); else toast("Elige un nodo (TOP o CHOP) para verlo en grande", "warn"); }
+export function openViewer(nodeId) {
+  const net = curNet(), n = nodeById(net, nodeId);
+  if (!n || !["TOP", "CHOP"].includes(n.fam)) { toast("El visor flotante es para imágenes (TOP) y señales (CHOP)", "warn"); return null; }
+  const old = ed.vwins.find(v => v.nodeId === n.id && v.netId === net.id);
+  if (old) { focusViewer(old); return old; }
+  const canvas = h("canvas", { class: "tdvcanvas", tabindex: "0", width: 480, height: 270 });
+  const tools = h("span", { class: "tdvtools" });
+  const title = h("b", { class: "tdvtitle" }, n.name);
+  const head = h("div", { class: "tdvhead" }, title, tools, h("button", { class: "tdx", title: "Cerrar el visor", "aria-label": "Cerrar el visor", onclick: () => closeViewer(v) }, "✕"));
+  const body = h("div", { class: "tdvbody" }, canvas);
+  const win = h("div", { class: "tdvwin", "data-node": n.id, role: "dialog", "aria-label": "Visor de " + n.name }, head, body,
+    n.type === "render" ? h("small", { class: "tdvhint" }, "Clic: elegir · arrastrar: girar la cámara · botón derecho o Mayús: desplazar · rueda: acercar · G/R/S: mover/girar/escalar · F: encuadrar") : null);
+  const k = ed.vwins.length;
+  const W = R.pane.clientWidth || 800;
+  Object.assign(win.style, { left: Math.max(8, W - (MOBILE ? 330 : 520) - 16 - k * 24) + "px", top: (60 + k * 24) + "px", width: (MOBILE ? 320 : 500) + "px", height: (MOBILE ? 240 : 340) + "px" });
+  R.root.append(win);
+  const v = { el: win, canvas, ctx: canvas.getContext("2d"), nodeId: n.id, netId: net.id, view3d: null, title, tools };
+  ed.vwins.push(v);
+  // Moverla arrastrando la barra.
+  head.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button,select")) return;
+    focusViewer(v);
+    const r = win.getBoundingClientRect(), rr = R.root.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+    const mv = (ev) => { win.style.left = Math.max(0, Math.min(rr.width - 60, ev.clientX - rr.left - ox)) + "px"; win.style.top = Math.max(0, Math.min(rr.height - 30, ev.clientY - rr.top - oy)) + "px"; };
+    const upf = () => { document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", upf); };
+    document.addEventListener("pointermove", mv); document.addEventListener("pointerup", upf);
+  });
+  win.addEventListener("pointerdown", () => focusViewer(v), true);
+  if (n.type === "render") {
+    import("./td/viewer3d.js").then(m => {
+      if (!ed.vwins.includes(v)) return;
+      v.view3d = new m.View3D({ app, canvas, netId: net.id, nodeId: n.id, getSel: () => ed.sel.size === 1 ? [...ed.sel][0] : null,
+        onSelect: (id) => { ed.sel = id ? new Set([id]) : new Set(); markSelection(); renderParams(); drawWires(); },
+        onEdited: (rebuild) => { if (rebuild) renderAll(); else renderParams(); }, toast: (t) => toast(t) });
+      drawViewTools(v);
+    }).catch(e => toast("No se pudo abrir el visor 3D: " + e.message, "warn"));
+  }
+  focusViewer(v);
+  return v;
+}
+function drawViewTools(v) {
+  const V = v.view3d;
+  if (!V) { v.tools.replaceChildren(); return; }
+  const b = (label, title, on, fn) => h("button", { class: `tdvbtn ${on ? "on" : ""}`, title, "aria-label": title, onclick: (e) => { e.stopPropagation(); fn(); drawViewTools(v); } }, label);
+  v.tools.replaceChildren(
+    b("✥", "Mover (G)", V.tool === "translate", () => V.setTool("translate")),
+    b("⟳", "Girar (R)", V.tool === "rotate", () => V.setTool("rotate")),
+    b("⤢", "Escalar (S)", V.tool === "scale", () => V.setTool("scale")),
+    h("i", { class: "tdvsep" }),
+    b("🎥", "Cámara de la red: lo que mueves es lo que se proyecta", V.mode === "cam", () => V.setMode("cam")),
+    b("👁", "Vista libre: mirar desde donde quieras sin cambiar la salida", V.mode === "free", () => V.setMode("free")),
+    b("⌖", "Encuadrar lo elegido (F)", false, () => V.frame()));
+}
+function focusViewer(v) {
+  ed.activeV = v;
+  for (const x of ed.vwins) x.el.classList.toggle("active", x === v);
+  if (R.root.lastElementChild !== v.el) R.root.append(v.el);   // encima de los demás (sin moverla si ya lo está: cortaría el arrastre)
+}
+function closeViewer(v) {
+  v.view3d?.dispose();
+  v.el.remove();
+  ed.vwins = ed.vwins.filter(x => x !== v);
+  if (ed.activeV === v) ed.activeV = ed.vwins.at(-1) || null;
+}
+function closeAllViewers() { for (const v of [...ed.vwins]) closeViewer(v); }
+function drawViewers(net, eng, time, lv) {
+  eng.follow(time, lv);
+  for (const v of [...ed.vwins]) {
+    const vn = nodeById(nets().find(x => x.id === v.netId), v.nodeId);
+    if (!vn) { closeViewer(v); continue; }
+    v.el.classList.toggle("hidden", v.netId !== net.id);
+    if (v.netId !== net.id) continue;
+    v.title.textContent = vn.name;
+    const body = v.canvas.parentElement, bw = Math.max(32, body.clientWidth), bh = Math.max(32, body.clientHeight);
+    // La imagen con su forma (sin estirar); la vista libre ocupa todo.
+    const img = vn.fam === "TOP" ? eng.info(net, vn) : null;
+    const asp = v.view3d ? v.view3d.aspect() : (img?.w ? img.w / img.h : null);
+    let w = bw, hh = bh;
+    if (asp) { if (bw / bh > asp) w = Math.round(bh * asp); else hh = Math.round(bw / asp); }
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cw = Math.max(16, Math.min(2048, Math.round(w * dpr))), ch = Math.max(16, Math.min(2048, Math.round(hh * dpr)));
+    if (v.canvas.width !== cw || v.canvas.height !== ch) { v.canvas.width = cw; v.canvas.height = ch; }
+    v.canvas.style.width = w + "px"; v.canvas.style.height = hh + "px";
+    try {
+      if (vn.fam === "CHOP") drawChop(v.canvas, eng.chop(net, vn));
+      else if (v.view3d) v.view3d.draw(v.ctx, cw, ch);
+      else eng.viewers([{ net, node: vn, ctx: v.ctx, w: cw, h: ch, fit: 2 }], time, lv);
+    } catch (e) { console.warn("visor flotante", e); }
+  }
+}
+/** Importa un modelo 3D a la biblioteca (lo usan el «Modelo 3D (archivo)» SOP y la pestaña 3D). */
+function importModel(done) {
+  const inp = h("input", { type: "file", accept: ".glb,.gltf,.obj,.fbx,.stl,.ply" });
+  inp.onchange = async () => {
+    const f = inp.files?.[0];
+    if (!f) return;
+    const ext = (f.name.split(".").pop() || "").toLowerCase();
+    if (!["glb", "gltf", "obj", "fbx", "stl", "ply"].includes(ext)) { toast("Formato no admitido: ." + ext, "warn"); return; }
+    try {
+      const Store = await import("./store.js");
+      const id = uid("media");
+      await Store.putMedia({ id, name: f.name, kind: "model", mime: f.type || "model/" + ext, blob: f, size: f.size });
+      app.edit(() => app.S.project.media.push({ id, name: f.name, kind: "model", size: f.size }));
+      toast(`Modelo «${f.name}» en la biblioteca`);
+      done?.(id);
+    } catch (e) { toast("No se pudo importar el modelo: " + e.message, "warn"); }
+  };
+  inp.click();
 }
 
 /* ======================================================================
@@ -1007,6 +1137,7 @@ function loop() {
     }
     if (list.length) eng.viewers(list, time, lv);
   }
+  if (ed.vwins.length && now - (ed.lastV || 0) > (MOBILE ? 50 : 16)) { ed.lastV = now; drawViewers(net, eng, time, lv); }
   if (now - ed.lastInfo > 400) { ed.lastInfo = now; updateInfo(); }
 }
 
@@ -1037,6 +1168,8 @@ export function handleNetKey(a, e) {
   if (ctrl && lk === "a") { ed.sel = new Set(curNet().nodes.map(n => n.id)); markSelection(); renderParams(); return eat(); }
   if (ctrl && lk === "s") return false;   // guardar: lo hace LumaMap
   if (ctrl) return eat();
+  if (ed.activeV?.view3d && !e.altKey && ed.activeV.view3d.key(k)) return eat();
+  if (lk === "v") { openViewerSel(); return eat(); }
   if (k === "Delete" || k === "Backspace") { deleteSel(); return eat(); }
   if (lk === "h") { frameAll(); return eat(); }
   if (lk === "f") { frameSel(); return eat(); }

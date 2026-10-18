@@ -114,6 +114,30 @@ export const EXAMPLES = [
     connect(net, src.id, dp.id, 0); connect(net, nz.id, dp.id, 1); wire(net, dp, out);
     return out;
   } },
+  { id: "sparks", name: "Chispas 3D que explotan con el golpe", desc: "Partículas que brillan, giran en remolinos y explotan en cada golpe de la música (Partículas + Render 3D).", build(net) {
+    const au = at(net, "CHOP", "audio", 0, 2);
+    const ps = at(net, "COMP", "particles", 1, 2, { emitter: 2, esize: 0.15, outward: 1, rate: 120, speed: 1.4, gravity: -0.4, turb: 1.2, life: 2.2, burstCount: 600, trig: { e: "audio1.beat" }, color1: "#fff3b0", color2: "#ff2d8a", psize: 0.07 });
+    at(net, "COMP", "camera", 2, 3, { tz: 5, ty: 0.6, orbit: 0.02 });
+    const rnd = at(net, "TOP", "render", 2, 1, { bg: "#020206" });
+    const glow = at(net, "TOP", "glow", 3, 1, { threshold: 0.2, amount: 1.5 });
+    const out = at(net, "TOP", "out", 4, 1);
+    wire(net, rnd, glow, out);
+    void au; void ps;
+    return out;
+  } },
+  { id: "model", name: "Tu modelo 3D girando con luces", desc: "Un modelo de tu biblioteca (.glb, .obj, .fbx…; si no hay, un icosaedro) que gira con dos luces de colores (Modelo 3D SOP).", build(net, project) {
+    const model = project?.media?.find(m => m.kind === "model");
+    const src = model ? at(net, "SOP", "file", 0, 1, { model: model.id, size: 2 }) : at(net, "SOP", "platonic", 0, 1, { kind: 3, radius: 0.9, detail: 1 });
+    const mat = at(net, "MAT", "pbr", 1, 2, { color: "#d8dde8", metal: 0.6, rough: 0.25 });
+    const geo = at(net, "COMP", "geo", 1, 1, { material: mat.name, ry: { e: "absTime.seconds * 25" } });
+    at(net, "COMP", "light", 2, 2, { kind: 0, color: "#00e5ff", intensity: 6, tx: -2.5, ty: 1.5, tz: 2 });
+    at(net, "COMP", "light", 3, 2, { kind: 0, color: "#ff2d8a", intensity: 6, tx: 2.5, ty: 1, tz: 2 });
+    at(net, "COMP", "camera", 2, 3, { tz: 4.2, ty: 0.8 });
+    const rnd = at(net, "TOP", "render", 2, 1, { bg: "#05060a", ambient: 0.15 });
+    const out = at(net, "TOP", "out", 3, 1);
+    wire(net, src, geo); wire(net, rnd, out);
+    return out;
+  } },
 ];
 
 /** Crea una red nueva a partir de un ejemplo. Devuelve { net, out }. */

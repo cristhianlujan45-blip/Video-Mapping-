@@ -4,6 +4,7 @@ import { test, report } from "./harness.js";
 import assert from "node:assert/strict";
 import { compileExpr, evalExpr, renameInExpr, noise3 } from "../web/js/td/expr.js";
 import { OP_LIST, opDef, FAMILIES, searchOps, acceptsInput } from "../web/js/td/ops.js";
+import { Particles } from "../web/js/td/particles.js";
 import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, Cooker, normalizeNetworks, nodeByName, uniqueName, dependsOn } from "../web/js/td/graph.js";
 
 const close = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -189,5 +190,36 @@ await test("bypass, expresiones que se nombran a sí mismas y redes guardadas co
   assert.equal(nets[0].display, null);
   assert.equal(nodeByName(nets[0], "level1")?.type, "level");
   assert.ok(opDef("TOP", "glsl").params.some(q => q.type === "code"));
+});
+await test("partículas: nacen al ritmo pedido, explotan con el botón o al pasar de 0,5, caen con la gravedad, rebotan y mueren al acabar su vida", () => {
+  const P = new Particles(1000), base = { rate: 100, life: 1, lifeVar: 0, speed: 1, speedVar: 0, spread: 0, dx: 0, dy: 1, dz: 0, gravity: 0, drag: 0, turb: 0, max: 1000, play: 1, burst: 0, burstCount: 50 };
+  for (let k = 0; k < 30; k++) P.step(base, 1 / 60);
+  assert.ok(Math.abs(P.n - 50) <= 2, "100/s durante 0,5 s ≈ 50: " + P.n);
+  let maxY = 0; for (let k = 0; k < P.n; k++) maxY = Math.max(maxY, P.pos[k * 3 + 1]);
+  assert.ok(maxY > 0.4 && maxY <= 0.51, "suben a 1 m/s: " + maxY);
+  P.step({ ...base, rate: 0, burst: 1 }, 1 / 60);
+  assert.ok(P.n >= 99, "💥 explosión de 50: " + P.n);
+  P.step({ ...base, rate: 0, burst: 1, trig: 1 }, 1 / 60);
+  assert.ok(P.n >= 148, "el golpe (trig > 0,5) explota una vez: " + P.n);
+  const n0 = P.n; P.step({ ...base, rate: 0, burst: 1, trig: 1 }, 1 / 60);
+  assert.ok(P.n <= n0, "mientras sigue arriba no vuelve a explotar");
+  for (let k = 0; k < 80; k++) P.step({ ...base, rate: 0, burst: 1 }, 1 / 60);
+  assert.equal(P.n, 0, "a los 1,3 s ya no queda ninguna (vida 1 s)");
+  // Gravedad y suelo con rebote.
+  const Q = new Particles(10);
+  Q.step({ ...base, rate: 0, burstCount: 5, burst: 0, gravity: -9.8, speed: 0, life: 5, floor: 1, floorY: -1, bounce: 0.5 }, 1 / 60);
+  Q.step({ ...base, rate: 0, burstCount: 5, burst: 1, gravity: -9.8, speed: 0, life: 5, floor: 1, floorY: -1, bounce: 0.5 }, 1 / 60);
+  for (let k = 0; k < 120; k++) Q.step({ ...base, rate: 0, burstCount: 5, burst: 1, gravity: -9.8, speed: 0, life: 5, floor: 1, floorY: -1, bounce: 0.5 }, 1 / 60);
+  for (let k = 0; k < Q.n; k++) assert.ok(Q.pos[k * 3 + 1] >= -1 - 1e-6, "no atraviesan el suelo");
+  assert.equal(Q.n, 5, "el máximo es 10 y salieron 5");
+  // Color y tamaño cambian con la edad; desde la geometría conectada nacen en sus vértices.
+  const C = new Particles(100);
+  C.step({ ...base, rate: 0, burstCount: 20, burst: 0, emitter: 4, speed: 0 }, 0.01, new Float32Array([5, 5, 5]), [1, 0, 0], [0, 0, 1]);
+  C.step({ ...base, rate: 0, burstCount: 20, burst: 1, emitter: 4, speed: 0 }, 0.01, new Float32Array([5, 5, 5]), [1, 0, 0], [0, 0, 1]);
+  assert.equal(C.n, 20);
+  assert.ok(C.pos[0] === 5 && C.pos[1] === 5 && C.pos[2] === 5, "en el vértice de la entrada");
+  for (let k = 0; k < 50; k++) C.step({ ...base, rate: 0, burstCount: 20, burst: 1, emitter: 4, speed: 0, psize: 1, sizeEnd: 0 }, 0.01, new Float32Array([5, 5, 5]), [1, 0, 0], [0, 0, 1]);
+  assert.ok(C.col[0] < 0.6 && C.col[2] > 0.4 && C.size[0] < 0.6, "a media vida: entre rojo y azul, más pequeña");
+  assert.ok(opDef("COMP", "particles") && acceptsInput("COMP", "particles", "SOP") && opDef("SOP", "file"), "Partículas y Modelo 3D en el catálogo");
 });
 report();

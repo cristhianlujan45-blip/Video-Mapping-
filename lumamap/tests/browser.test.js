@@ -695,7 +695,7 @@ await test("redes de nodos: todos los TOP dan imagen sin errores de shader; 3D c
     geo.p.material = mat.name; G.addNode(net, "COMP", "camera"); G.addNode(net, "COMP", "light");
     const rnd = G.addNode(net, "TOP", "render");
     const shots = {};
-    for (const sop of O.OP_LIST.filter(o => o.fam === "SOP" && o.inputs[0] === 0)) {
+    for (const sop of O.OP_LIST.filter(o => o.fam === "SOP" && o.inputs[0] === 0 && o.type !== "file")) {   // «file» necesita un archivo (prueba aparte)
       const g = G.addNode(net, "SOP", sop.type); G.connect(net, g.id, geo.id, 0);
       shots[sop.type] = lum(eng.output(net.id, rnd.id, { time: (t += 0.1), w: 80, h: 45 }));
       if (eng.info(net, rnd).error) bad.push("3D " + sop.type + ": " + eng.info(net, rnd).error);
@@ -726,6 +726,73 @@ await test("redes de nodos: todos los TOP dan imagen sin errores de shader; 3D c
   assert.ok(r.inst > r.single, `50 instancias dibujan más que 1 (${r.inst} > ${r.single})`);
   assert.ok(r.trail > r.alone * 1.5, `el feedback deja estela (${r.trail} vs ${r.alone})`);
   assert.match(r.glErr, /GLSL[\s\S]*nope/, "el error de GLSL dice qué falla");
+});
+await test("redes de nodos en 3D: visor flotante con gizmo (mover el objeto), cámara que gira, vista libre, partículas y modelo 3D de un archivo", async () => {
+  const ids = await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n; a.edit(() => { n = G.newNetwork("3D"); a.S.project.networks.push(n); });
+    let geo, rnd, ps, file;
+    a.edit(() => {
+      const b = G.addNode(n, "SOP", "box", { x: 0, y: 0 }); geo = G.addNode(n, "COMP", "geo", { x: 220, y: 0 }); G.connect(n, b.id, geo.id, 0);
+      G.addNode(n, "COMP", "camera", { x: 220, y: 200, p: { tx: 0, ty: 0, tz: 4 } });
+      ps = G.addNode(n, "COMP", "particles", { x: 220, y: 400, p: { rate: 600 } });
+      rnd = G.addNode(n, "TOP", "render", { x: 440, y: 0 }); n.display = rnd.id;
+    });
+    // Un cubo .obj en la biblioteca para el «Modelo 3D (archivo)».
+    const Store = await import("./js/store.js");
+    const v = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]].map(p => "v " + p.join(" ")).join("\n");
+    const f = [[1, 2, 3, 4], [5, 8, 7, 6], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 8, 4], [5, 1, 4, 8]].map(q => "f " + q.join(" ")).join("\n");
+    await Store.putMedia({ id: "mediaTestCubo", name: "cubo.obj", kind: "model", blob: new Blob([v + "\n" + f + "\n"], { type: "text/plain" }), size: 10 });
+    a.edit(() => { a.S.project.media.push({ id: "mediaTestCubo", name: "cubo.obj", kind: "model", size: 10 }); file = G.addNode(n, "SOP", "file", { x: 0, y: 600, p: { model: "mediaTestCubo", size: 3 } }); });
+    m.closeNetworkEditor(); await a.openNetwork({ netId: n.id });
+    m._edForTests.sel = new Set([geo.id]);
+    return { net: n.id, geo: geo.id, rnd: rnd.id, ps: ps.id, file: file.id };
+  });
+  const ws = page.locator("#tdws.show");
+  // Clic derecho en el Render → «Visor flotante 3D».
+  await ws.locator('.tdnode[data-type="render"] .tdnhead').click({ button: "right" });
+  await ws.locator(".tdmi", { hasText: "Visor flotante 3D" }).click();
+  const win = ws.locator(".tdvwin");
+  await win.waitFor();
+  await page.evaluate(async (ids) => { const m = await import("./js/panels-network.js"); m._edForTests.sel = new Set([ids.geo]); }, ids);
+  await page.waitForFunction(async () => { const m = await import("./js/panels-network.js"); const v = m._edForTests.vwins[0]; return !!v?.view3d?.attachedId; }, null, { timeout: 15000 });
+  // Arrastrar la flecha X del gizmo mueve el objeto a la derecha (cámara de frente: el origen está en el centro).
+  const box = await win.locator("canvas").boundingBox();
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  await page.mouse.move(cx + 30, cy - 1); await page.waitForTimeout(150);
+  await page.mouse.down(); await page.mouse.move(cx + 130, cy - 1, { steps: 8 }); await page.mouse.up();
+  const P = () => page.evaluate((ids) => { const n = window.__lumamap.S.project.networks.find(x => x.id === ids.net); const g = n.nodes.find(x => x.id === ids.geo), c = n.nodes.find(x => x.type === "camera"); return { tx: g.p.tx, ty: g.p.ty, cam: [c.p.tx, c.p.ty, c.p.tz] }; }, ids);
+  let p = await P();
+  assert.ok(p.tx > 0.4 && Math.abs(p.ty) < 0.05, "el gizmo movió el objeto en X: " + JSON.stringify(p));
+  // Arrastrar en el vacío gira la cámara de la red alrededor (cambia lo que se proyecta).
+  await page.mouse.move(box.x + 15, box.y + 15); await page.mouse.down(); await page.mouse.move(box.x + 115, box.y + 35, { steps: 6 }); await page.mouse.up();
+  const p2 = await P();
+  assert.ok(Math.abs(p2.cam[0]) > 0.5, "la cámara giró: " + JSON.stringify(p2.cam));
+  assert.ok(Math.abs(Math.hypot(...p2.cam) - 4) < 0.05, "a la misma distancia");
+  // Vista libre: mirar desde otro sitio no cambia la cámara de la red.
+  await win.getByRole("button", { name: /Vista libre/ }).click();
+  await page.mouse.move(box.x + 15, box.y + 15); await page.mouse.down(); await page.mouse.move(box.x + 115, box.y + 60, { steps: 6 }); await page.mouse.up();
+  assert.deepEqual((await P()).cam, p2.cam);
+  const lit = await page.evaluate(() => { const c = document.querySelector("#tdws .tdvwin canvas"); const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return s / (d.length / 4); });
+  assert.ok(lit > 5, "el visor libre dibuja: " + lit);
+  // Partículas vivas y modelo 3D leído del archivo (un cubo de 2 m ajustado a 3 m).
+  const r = await page.evaluate(async (ids) => {
+    const a = window.__lumamap, n = a.S.project.networks.find(x => x.id === ids.net), E = a.td;
+    const parts = E.extra.get(ids.ps + ":ps")?.sim.n || 0;
+    for (let k = 0; k < 60 && !E.models.get("mediaTestCubo")?.geo; k++) { E.sop(n, n.nodes.find(x => x.id === ids.file)); await new Promise(r => setTimeout(r, 100)); }
+    E.ensureFrame(performance.now() / 1000 + 100, {});
+    const g = E.sop(n, n.nodes.find(x => x.id === ids.file));
+    g?.computeBoundingBox();
+    const s = g ? g.boundingBox.getSize(new (g.boundingBox.min.constructor)()) : null;
+    return { parts, verts: g?.attributes.position.count || 0, size: s ? [s.x, s.y, s.z] : null, err: E.info(n, n.nodes.find(x => x.id === ids.file)).error };
+  }, ids);
+  assert.ok(r.parts > 20, "hay partículas: " + r.parts);
+  assert.equal(r.err, "");
+  assert.equal(r.verts, 36, "el cubo .obj (6 caras × 2 triángulos)");
+  assert.ok(r.size.every(v => Math.abs(v - 3) < 0.01), "ajustado a 3 m: " + r.size);
+  await win.getByRole("button", { name: "Cerrar el visor" }).click();
+  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });

@@ -15,6 +15,7 @@ import { Cooker, nodeById, nodeByName } from "./graph.js";
 import { cameraIfReady, getCamera } from "../sources.js";
 import { ShaderCache, spectrumFromLevels } from "../isf.js";
 import { getShader } from "../plugins.js";
+import { Particles } from "./particles.js";
 
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
 const MAX_SIDE = MOBILE ? 1280 : 2048;
@@ -109,6 +110,7 @@ export class NetEngine {
     this.shaders = null;
     this.topMs = new Map();
     this.history = new Map();     // CHOP → últimos valores (para los visores)
+    this.models = new Map();      // archivo de modelo 3D → { geo, ver, err }
     this.installTaps();
   }
 
@@ -427,7 +429,7 @@ export class NetEngine {
     let g = null;
     if (node.bypass) g = ins.find(Boolean) || null;
     else {
-      const sig = node.type + JSON.stringify(p) + ins.map(x => x?.userData.sig || "-").join(",");
+      const sig = node.type + JSON.stringify(p) + ins.map(x => x?.userData.sig || "-").join(",") + (node.type === "file" ? ":" + (this.models.get(p.model)?.ver || 0) : "");
       let x = this.extra.get(mk);
       if (x && x.sig === sig && node.type !== "noise") g = x.geo;
       else {
@@ -473,8 +475,46 @@ export class NetEngine {
         return list.length ? mergeGeometries(list) : null;
       }
       case "null": return ins[0] ? ins[0] : null;
+      case "file": {
+        const base = this.modelGeo(p.model);
+        if (!base) return null;
+        const g = base.clone();
+        g.computeBoundingBox();
+        const b = g.boundingBox, c = b.getCenter(new T.Vector3()), sz = b.getSize(new T.Vector3()), big = Math.max(sz.x, sz.y, sz.z) || 1;
+        if (p.center) g.translate(-c.x, -c.y, -c.z);
+        if (p.fit) g.scale(p.size / big, p.size / big, p.size / big);
+        return g;
+      }
     }
     return null;
+  }
+  /** Geometría de un modelo 3D de la biblioteca (se lee una vez; mientras tanto, nada). */
+  modelGeo(id) {
+    if (!id) return null;
+    let m = this.models.get(id);
+    if (!m) {
+      m = { ver: 0, geo: null, err: "" };
+      this.models.set(id, m);
+      this.loadModel(id).then(g => { m.geo = g; m.ver++; }).catch(e => { m.err = String(e?.message || e); m.ver++; });
+    }
+    if (m.err) throw new Error("No se pudo leer el modelo: " + m.err);
+    return m.geo;
+  }
+  async loadModel(id) {
+    const Store = await import("../store.js");
+    const rec = await Store.getMedia(id);
+    if (!rec?.blob) throw new Error("falta el archivo en la biblioteca");
+    const ext = (String(rec.name || "").split(".").pop() || "").toLowerCase();
+    const buf = await rec.blob.arrayBuffer();
+    const L = "../../vendor/three/addons/loaders/";
+    let obj;
+    if (ext === "obj") { const { OBJLoader } = await import(L + "OBJLoader.js"); obj = new OBJLoader().parse(new TextDecoder().decode(buf)); }
+    else if (ext === "gltf" || ext === "glb") { const { GLTFLoader } = await import(L + "GLTFLoader.js"); obj = (await new GLTFLoader().parseAsync(buf, "")).scene; }
+    else if (ext === "fbx") { const { FBXLoader } = await import(L + "FBXLoader.js"); obj = new FBXLoader().parse(buf, ""); }
+    else if (ext === "stl") { const { STLLoader } = await import(L + "STLLoader.js"); obj = new THREE.Mesh(new STLLoader().parse(buf)); }
+    else if (ext === "ply") { const { PLYLoader } = await import(L + "PLYLoader.js"); obj = new THREE.Mesh(new PLYLoader().parse(buf)); }
+    else throw new Error("formato no admitido (." + ext + ")");
+    return meshToGeometry(obj);
   }
   /** Material de un MAT (se actualiza cada fotograma con sus parámetros). */
   material(net, node) {
@@ -509,7 +549,7 @@ export class NetEngine {
     const ck = this.cooker(net), key = node.id + ":3d";
     let x = this.extra.get(key);
     if (!x) {
-      x = { scene: new THREE.Scene(), objs: new Map(), lights: new Map(), persp: new THREE.PerspectiveCamera(45, w / h, 0.01, 500), ortho: new THREE.OrthographicCamera(-2, 2, 2, -2, 0.01, 500), amb: new THREE.AmbientLight(0xffffff, 0.25), defLight: new THREE.DirectionalLight(0xffffff, 2.2), rt: null, msaa: -1 };
+      x = { scene: new THREE.Scene(), objs: new Map(), lights: new Map(), proxies: new Map(), cam: null, persp: new THREE.PerspectiveCamera(45, w / h, 0.01, 500), ortho: new THREE.OrthographicCamera(-2, 2, 2, -2, 0.01, 500), amb: new THREE.AmbientLight(0xffffff, 0.25), defLight: new THREE.DirectionalLight(0xffffff, 2.2), rt: null, msaa: -1 };
       x.defLight.position.set(2, 3, 4);
       x.scene.add(x.amb, x.defLight);
       this.extra.set(key, x);
@@ -531,8 +571,8 @@ export class NetEngine {
       const chop = gp.instancing && gp.instanceop ? ck.chopByName(gp.instanceop) : null;
       const count = gp.instancing ? Math.max(0, Math.min(5000, gp.instances > 0 ? gp.instances : chop?.len || 0)) : 0;
       let o = x.objs.get(g.id);
-      const wantInst = gp.instancing && count > 0;
-      if (!o || o.isInstancedMesh !== wantInst || (wantInst && o.instanceMatrix.count < count)) {
+      const wantInst = !!(gp.instancing && count > 0);
+      if (!o || !!o.isInstancedMesh !== wantInst || o.userData.kind || (wantInst && o.instanceMatrix.count < count)) {
         if (o) S.remove(o);
         o = wantInst ? new THREE.InstancedMesh(geo, mat, Math.max(count, 16)) : new THREE.Mesh(geo, mat);
         o.frustumCulled = false;
@@ -561,7 +601,48 @@ export class NetEngine {
       }
       seen.add(g.id);
     }
-    for (const [id, o] of x.objs) if (!seen.has(id)) { S.remove(o); x.objs.delete(id); }
+    // Partículas
+    for (const pn of net.nodes) {
+      if (pn.fam !== "COMP" || pn.type !== "particles" || pn.bypass) continue;
+      if (filter.length && !filter.includes(pn.name)) continue;
+      const pp = ck.params(pn), sim = this.particleSim(net, pn, pp);
+      const look = pp.look | 0, shape = look === 2 ? this.sop(net, nodeByName(net, pp.shape)) : null;
+      const kind = shape ? "inst" : "points";
+      let o = x.objs.get(pn.id);
+      if (!o || o.userData.kind !== kind || o.userData.max !== sim.max || (kind === "inst" && o.geometry !== shape)) {
+        if (o) { S.remove(o); if (o.userData.kind === "points") { o.geometry.dispose(); o.material.dispose(); } }
+        o = kind === "inst" ? new THREE.InstancedMesh(shape, this.material(net, nodeByName(net, pp.material)) || (x.defMat ||= new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.5, metalness: 0.1 })), sim.max) : pointsObject(sim);
+        o.userData.kind = kind; o.userData.max = sim.max; o.frustumCulled = false;
+        x.objs.set(pn.id, o); S.add(o);
+      }
+      if (kind === "points") {
+        const G = o.geometry;
+        for (const a of ["position", "pcol", "palpha", "psize"]) G.attributes[a].needsUpdate = true;
+        G.setDrawRange(0, sim.n);
+        const M = o.material;
+        M.uniforms.uScale.value = h / 2; M.uniforms.uSoft.value = look === 0 ? 1 : 0;
+        M.blending = pp.additive ? THREE.AdditiveBlending : THREE.NormalBlending;
+      } else {
+        o.material = this.material(net, nodeByName(net, pp.material)) || x.defMat;
+        const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
+        o.count = sim.n;
+        for (let k = 0; k < sim.n; k++) {
+          const z = sim.size[k];
+          mtx.compose(v.set(sim.pos[k * 3], sim.pos[k * 3 + 1], sim.pos[k * 3 + 2]), q, sc.set(z, z, z));
+          o.setMatrixAt(k, mtx);
+          o.setColorAt(k, col.setRGB(sim.col[k * 3], sim.col[k * 3 + 1], sim.col[k * 3 + 2]));
+        }
+        o.instanceMatrix.needsUpdate = true;
+        if (o.instanceColor) o.instanceColor.needsUpdate = true;
+      }
+      // Un punto invisible en el emisor: el gizmo del visor lo mueve.
+      let px = x.proxies.get(pn.id);
+      if (!px) { px = new THREE.Object3D(); x.proxies.set(pn.id, px); S.add(px); }
+      px.position.set(pp.ex, pp.ey, pp.ez);
+      seen.add(pn.id);
+    }
+    for (const [id, o] of x.objs) if (!seen.has(id)) { S.remove(o); if (o.userData.kind === "points") { o.geometry.dispose(); o.material.dispose(); } x.objs.delete(id); }
+    for (const [id, o] of x.proxies) if (!seen.has(id)) { S.remove(o); x.proxies.delete(id); }
     // Luces
     const lseen = new Set();
     for (const l of net.nodes) {
@@ -596,6 +677,7 @@ export class NetEngine {
       else { const d = Math.hypot(dx, cp.ty - cp.looky, dz) * Math.tan(cp.fov * Math.PI / 360); cam.left = -d * w / h; cam.right = d * w / h; cam.top = d; cam.bottom = -d; }
     } else { cam.position.set(0, 0.6, 4); cam.lookAt(0, 0, 0); cam.aspect = w / h; }
     cam.updateProjectionMatrix();
+    x.cam = cam; x.w = w; x.h = h; x.camNode = camNode?.id || null; x.bg = p.bg; x.bgAlpha = p.bgAlpha ?? 1; x.msaaWant = p.antialias ? 4 : 0;
     // Dibujar (con suavizado de bordes) y pasar a sRGB.
     const msaa = p.antialias ? 4 : 0;
     if (!x.rt || x.rt.width !== w || x.rt.height !== h || x.msaa !== msaa) {
@@ -615,6 +697,82 @@ export class NetEngine {
     const out = this.rtFor(node.id, w, h);
     this.pass(this.mat("encode", ENCODE), out, { s0: x.rt.texture });
     return { tex: out.texture, w, h };
+  }
+
+  /** Simula las partículas de un nodo una vez por fotograma. */
+  particleSim(net, node, pp) {
+    const key = node.id + ":ps";
+    let st = this.extra.get(key);
+    if (!st) { st = { sim: new Particles(pp.max), f: -1, t: this.time }; this.extra.set(key, st); }
+    if (st.f !== this.frameNo) {
+      const dt = st.f < 0 ? 1 / 60 : Math.max(0, Math.min(0.1, this.time - st.t));
+      st.f = this.frameNo; st.t = this.time;
+      let src = null;
+      if ((pp.emitter | 0) === 4) { const g = this.sop(net, nodeById(net, node.in[0])); src = g?.attributes.position?.array || null; }
+      const c1 = new THREE.Color(hex(pp.color1, "#ffffff")), c2 = new THREE.Color(hex(pp.color2, "#ffffff"));
+      st.sim.step({ ...pp, max: Math.min(pp.max | 0 || 5000, MOBILE ? 20000 : 100000) }, dt, src, [c1.r, c1.g, c1.b], [c2.r, c2.g, c2.b]);
+    }
+    return st.sim;
+  }
+
+  /* ---------------- Visor 3D del editor ---------------- */
+  /** La escena 3D de un Render TOP ya cocinada en este fotograma (para elegir objetos y el gizmo). */
+  scene3d(net, node) { if (!node || node.type !== "render") return null; this.top(net, node); return this.extra.get(node.id + ":3d") || null; }
+  /** El objeto 3D que mueve el gizmo para un nodo: el Objeto 3D, la luz o el emisor de partículas. */
+  object3d(net, renderNode, nodeId) {
+    const x = this.extra.get(renderNode.id + ":3d");
+    if (!x) return null;
+    const n = nodeById(net, nodeId);
+    if (!n) return null;
+    if (n.type === "particles") return x.proxies.get(n.id) || null;
+    if (n.type === "light") return x.lights.get(n.id) || null;
+    return x.objs.get(n.id) || null;
+  }
+  /** ¿Qué Objeto 3D hay bajo el puntero? ndc = [-1…1, -1…1]. */
+  pick3d(net, renderNode, ndc, cam = null) {
+    const x = this.extra.get(renderNode.id + ":3d");
+    if (!x || !(cam || x.cam)) return null;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(ndc[0], ndc[1]), cam || x.cam);
+    const list = [...x.objs.entries()].filter(([, o]) => o.isMesh && o.visible);
+    const hit = ray.intersectObjects(list.map(e => e[1]), false)[0];
+    return hit ? list.find(([, o]) => o === hit.object)?.[0] || null : null;
+  }
+  /**
+   * Dibuja un Render TOP en un lienzo 2D para el visor flotante: con la cámara de la red o con una
+   * cámara libre del editor (solo para mirar), más una capa encima (gizmo) y ayudas (rejilla, luces…).
+   */
+  drawView3d(net, node, ctx2d, w, h, { cam = null, helpers = null, overlay = null } = {}) {
+    const x = this.scene3d(net, node);
+    if (!x) return false;
+    this.ensureCanvas(w, h);
+    const vp = [0, 0, w, h];
+    if (cam || helpers) {
+      let v = this.extra.get(node.id + ":view");
+      if (!v || v.rt.width !== w || v.rt.height !== h) { v?.rt.dispose(); v = { rt: new THREE.WebGLRenderTarget(w, h, { depthBuffer: true, samples: 4, type: THREE.UnsignedByteType }) }; this.extra.set(node.id + ":view", v); }
+      const C = cam || x.cam;
+      if (cam) { if (cam.isPerspectiveCamera) cam.aspect = w / h; cam.updateProjectionMatrix(); }
+      if (helpers) x.scene.add(helpers);
+      this.r.setRenderTarget(v.rt); this.r.setViewport(0, 0, w, h);
+      this.r.setClearColor(new THREE.Color(hex(x.bg)), 1); this.r.clear(true, true, false);
+      this.r.render(x.scene, C);
+      this.r.setClearColor(0x000000, 1);
+      if (helpers) x.scene.remove(helpers);
+      this.pass(this.mat("encode", ENCODE), null, { s0: v.rt.texture }, vp);
+    } else {
+      const img = this.top(net, node);
+      if (!img) return false;
+      this.pass(this.mat("blit", BLIT), null, { s0: img.tex, srcSize: [img.w, img.h], fit: 1, flipX: 0 }, vp);
+    }
+    if (overlay) {
+      this.r.setRenderTarget(null);
+      this.r.setViewport(0, 0, w, h); this.r.setScissor(0, 0, w, h); this.r.setScissorTest(true);
+      this.r.clearDepth();
+      this.r.render(overlay, cam || x.cam);
+      this.r.setScissorTest(false);
+    }
+    ctx2d.drawImage(this.canvas, 0, this.canvas.height - h, w, h, 0, 0, w, h);
+    return true;
   }
 
   /* ---------------- Salidas ---------------- */
@@ -698,6 +856,47 @@ export class NetEngine {
   }
 }
 
+/** Todas las mallas de un modelo (con sus posiciones) en una sola geometría. */
+function meshToGeometry(obj) {
+  obj.updateMatrixWorld(true);
+  const list = [];
+  obj.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.position) return;
+    let g = c.geometry.clone();
+    g.morphAttributes = {};
+    g.applyMatrix4(c.matrixWorld);
+    if (g.index) g = g.toNonIndexed();
+    for (const a of Object.keys(g.attributes)) if (!["position", "normal", "uv"].includes(a)) g.deleteAttribute(a);
+    if (!g.attributes.normal) g.computeVertexNormals();
+    if (!g.attributes.uv) g.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    list.push(g);
+  });
+  if (!list.length) throw new Error("el archivo no tiene ninguna malla");
+  const g = list.length === 1 ? list[0] : mergeGeometries(list);
+  if (!g) throw new Error("no se pudieron juntar sus mallas");
+  return g;
+}
+/** Puntos de partículas (con color, opacidad y tamaño de cada una). */
+function pointsObject(sim) {
+  const G = new THREE.BufferGeometry();
+  G.setAttribute("position", new THREE.BufferAttribute(sim.pos, 3));
+  G.setAttribute("pcol", new THREE.BufferAttribute(sim.col, 3));
+  G.setAttribute("palpha", new THREE.BufferAttribute(sim.alpha, 1));
+  G.setAttribute("psize", new THREE.BufferAttribute(sim.size, 1));
+  for (const a of Object.values(G.attributes)) a.setUsage(THREE.DynamicDrawUsage);
+  const M = new THREE.ShaderMaterial({
+    uniforms: { uScale: { value: 360 }, uSoft: { value: 1 } },
+    vertexShader: `attribute vec3 pcol; attribute float palpha; attribute float psize; uniform float uScale; varying vec3 vC; varying float vA;
+      void main() { vC = pcol; vA = palpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+        float k = projectionMatrix[3][3] > 0.5 ? projectionMatrix[1][1] : projectionMatrix[1][1] / max(0.001, -mv.z);
+        gl_PointSize = clamp(psize * k * uScale, 1.0, 256.0); }`,
+    fragmentShader: `uniform float uSoft; varying vec3 vC; varying float vA;
+      void main() { vec2 q = gl_PointCoord * 2.0 - 1.0; float d = dot(q, q); if (d > 1.0) discard;
+        float a = uSoft > 0.5 ? exp(-d * 3.5) : 1.0 - smoothstep(0.8, 1.0, d); gl_FragColor = vec4(vC, a * vA); }`,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  return new THREE.Points(G, M);
+}
 function srgb(h) { const n = parseInt(h.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; }
 function hashStr(s) { let h = 2166136261; for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 function noise3s(x, y, z) {
@@ -717,4 +916,4 @@ export function netEngine(opts) {
   return shared;
 }
 export const engineIfAny = () => shared;
-export { opDef };
+export { opDef, THREE };
