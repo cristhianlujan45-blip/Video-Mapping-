@@ -311,11 +311,19 @@ La última versión se publica sola en la página **Releases** del repositorio
   igual que en Windows salvo los plugins FFGL (.dll, son programas de Windows) y la
   actualización automática (en el Mac se descarga el .dmg nuevo).
 
-**Actualizar sin reinstalar:** la app consulta `version.json` al abrirse; si hay
-una versión nueva aparece el aviso con el botón **Actualizar** (también en
-☰ → *Buscar actualizaciones*). En Windows se descarga y se reinstala sola; en
-Android se descarga y se abre la pantalla de instalación (la primera vez hay que
-permitir «Instalar apps desconocidas» para LumaMap).
+**Se actualiza sola (sin reinstalar a mano):** la app busca la versión nueva al abrirse y cada
+4 horas, y con **«Actualizar sola»** (☰ → Ayuda y sistema, activado de serie) la **descarga sola
+en segundo plano**:
+- **Windows:** comprueba su firma SHA-256 y la **instala al cerrar LumaMap**, en silencio y sin
+  volver a abrirla (nunca corta un show); la próxima vez que la abres ya es la nueva. Si la
+  quieres ya: ☰ → *Buscar actualizaciones* → **Instalar ahora** (cierra, instala y vuelve a
+  abrir). Con copia de seguridad y vuelta atrás si algo falla.
+- **Android:** la primera vez Android pide confirmar con «Actualizar» (y permitir «Instalar apps
+  desconocidas» para LumaMap); desde ahí, en Android 12 o más, **se instala sola al salir de
+  la app** (nunca mientras proyecta).
+- **Mac:** sin certificado de Apple no puede instalarse sola: avisa y abre la descarga.
+
+Con «Actualizar sola» apagado, avisa con el botón **Actualizar** como antes.
 
 ## Windows (PC)
 

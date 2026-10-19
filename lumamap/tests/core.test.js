@@ -247,6 +247,41 @@ await test("compara compilaciones para saber si hay versión nueva", async () =>
   assert.ok(!isNewer({ build: 57 }, { platform: "windows", build: 57 }));
   assert.ok(!isNewer({ build: 99 }, { platform: "web", build: 0 }), "en la web no se instala");
 });
+await test("actualizar sola: activado por defecto, Windows y Android sí (el Mac no), descarga en segundo plano y lo descargado se instala", async () => {
+  const U = await import("../web/js/updater.js");
+  const mem = new Map(), calls = [];
+  const had = { window: globalThis.window, localStorage: globalThis.localStorage };
+  globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
+  try {
+    // Windows
+    globalThis.window = { LumaDesktop: { version: "2.3.10", platform: "win32",
+      downloadUpdate: async (url, info) => { calls.push(["dl", url, info.version, info.sha256]); return { ready: true }; },
+      pendingUpdate: async () => ({ version: "2.3.11" }), installPendingUpdate: async () => calls.push(["install"]), setAutoUpdate: (on) => calls.push(["auto", on]) } };
+    assert.equal(U.autoUpdateOn(), true, "activado por defecto");
+    assert.equal(U.canAutoUpdate(), true);
+    const r = await U.downloadInBackground({ version: "2.3.11", build: 11, windows: { url: "https://x/Setup.exe", sha256: "ab", version: "2.3.11" } });
+    assert.equal(r.version, "2.3.11");
+    assert.deepEqual(calls.at(-1), ["dl", "https://x/Setup.exe", "2.3.11", "ab"]);
+    assert.deepEqual(await U.pendingUpdate(), { version: "2.3.11" });
+    await U.installPending(); assert.deepEqual(calls.at(-1), ["install"]);
+    U.setAutoUpdate(false);
+    assert.equal(U.autoUpdateOn(), false); assert.deepEqual(calls.at(-1), ["auto", false]);
+    U.setAutoUpdate(true);
+    // Mac: la app de escritorio, pero sin firma de Apple no se instala sola.
+    globalThis.window = { LumaDesktop: { version: "2.3.10", platform: "darwin", downloadUpdate: async () => ({}) } };
+    assert.equal(U.canAutoUpdate(), false, "el Mac no");
+    // Android: descarga nativa; la página sabe que está lista por el evento.
+    globalThis.window = { LumaNative: { appVersion: () => "2.3.10|1010", downloadUpdate: (url, build) => { calls.push(["adl", url, build]); setTimeout(() => window.__lumaUpdateDownloaded?.(build), 5); }, pendingUpdate: () => 11, installPendingUpdate: () => true, updateSilent: () => true } };
+    assert.equal(U.canAutoUpdate(), true);
+    const a = await U.downloadInBackground({ version: "2.3.11", build: 11, android: { url: "https://x/a.apk" } });
+    assert.equal(a.version, "2.3.11"); assert.deepEqual(calls.at(-1), ["adl", "https://x/a.apk", 11]);
+    assert.deepEqual(await U.pendingUpdate(), { version: "2.3.11", build: 11 });
+    assert.equal(U.silentOnAndroid(), true);
+    // Navegador: nada que instalar.
+    globalThis.window = {};
+    assert.equal(U.canAutoUpdate(), false);
+  } finally { globalThis.window = had.window; globalThis.localStorage = had.localStorage; }
+});
 
 console.log("== Optimizador de video ==");
 await test("analiza ffmpeg y decide conservar, re-empaquetar o convertir", async () => {

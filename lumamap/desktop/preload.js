@@ -7,9 +7,15 @@ ipcRenderer.on("dmx:port", (e) => window.postMessage("lumamap:dmx-port", "*", e.
 
 contextBridge.exposeInMainWorld("LumaDesktop", {
   isDesktop: true,
+  platform: process.platform,
   version: ipcRenderer.sendSync("app-version"),
   checkUpdate: (url) => ipcRenderer.invoke("update:check", url),
   installUpdate: (url, info) => ipcRenderer.invoke("update:install", url, info),
+  /** Actualizar sola: descargar en segundo plano, ¿hay algo descargado?, instalarlo ya, encender/apagar. */
+  downloadUpdate: (url, info) => ipcRenderer.invoke("update:download", url, info),
+  pendingUpdate: () => ipcRenderer.invoke("update:pending"),
+  installPendingUpdate: () => ipcRenderer.invoke("update:installPending"),
+  setAutoUpdate: (on) => ipcRenderer.invoke("update:setAuto", on),
   rollbackUpdate: () => ipcRenderer.invoke("update:rollback"),
   repairInstall: (url, info) => ipcRenderer.invoke("update:repair", url, info),
   updateStatus: () => ipcRenderer.invoke("update:status"),

@@ -59,6 +59,7 @@ export function newsItems(app) {
       ["Calibrar el proyector con la cámara", "El proyector muestra franjas, la cámara las ve y tocas cada esquina en la foto: la cruz va sola.", () => goToSection(app, "3d", "Alinear con el proyector real")],
     ]],
     ["🛡 Estabilidad", [
+      ["Se actualiza sola", "La versión nueva se descarga sola y se instala al cerrar LumaMap (Windows) o al salir de la app (Android 12 o más, sin preguntar después de la primera vez). Nunca durante un show. Se puede apagar en ☰ → Ayuda y sistema.", null],
       ["Mallas que no paran el show", "Una superficie con la malla mal formada (de un proyecto viejo o roto) se repara sola al abrirla o al dibujarla, en vez de fallar en cada fotograma.", null],
       ["Protección de la tarjeta gráfica", "Si Windows reinicia el controlador, baja la resolución de los shaders y no se recarga en bucle. En Proyectar → Calidad.", () => goToSection(app, "output", "Calidad y resolución")],
     ]],

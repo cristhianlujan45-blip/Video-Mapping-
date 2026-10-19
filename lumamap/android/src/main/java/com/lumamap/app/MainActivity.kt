@@ -225,6 +225,14 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
+    @Volatile var autoUpdate = true
+
+    override fun onStop() {
+        super.onStop()
+        // Actualizar sola: al dejar LumaMap (nunca mientras proyecta), si Android deja instalar sin preguntar.
+        if (autoUpdate && presentation == null && !isChangingConfigurations) runCatching { updater.installPending(silentOnly = true) }
+    }
+
     override fun onDestroy() {
         displayManager.unregisterDisplayListener(displayListener)
         presentation?.dismiss()
@@ -462,7 +470,27 @@ class MainActivity : ComponentActivity() {
         fun checkUpdate(url: String) = updater.check(url)
 
         @JavascriptInterface
-        fun installUpdate(url: String) = updater.install(url)
+        fun installUpdate(url: String, build: Int) = updater.install(url, build.toLong())
+
+        /** Descarga automática en segundo plano (sin avisos de progreso). */
+        @JavascriptInterface
+        fun downloadUpdate(url: String, build: Int) = updater.download(url, build.toLong(), quiet = true)
+
+        /** Instalar ya lo descargado (botón «Reiniciar e instalar»): Android puede pedir confirmar. */
+        @JavascriptInterface
+        fun installPendingUpdate(): Boolean = updater.installPending(silentOnly = false)
+
+        /** Compilación descargada y lista (0 = ninguna). */
+        @JavascriptInterface
+        fun pendingUpdate(): Int = updater.pendingBuild().toInt()
+
+        /** ¿Se instalará sin preguntar? (Android 12+ y LumaMap ya instaló la app una vez). */
+        @JavascriptInterface
+        fun updateSilent(): Boolean = updater.canInstallSilently()
+
+        /** «Actualizar sola»: instalar lo descargado al pasar a segundo plano. */
+        @JavascriptInterface
+        fun setAutoUpdate(on: Boolean) { autoUpdate = on }
 
         /* Luces: UDP para Art-Net / sACN / RDM (solo el editor). */
         @JavascriptInterface

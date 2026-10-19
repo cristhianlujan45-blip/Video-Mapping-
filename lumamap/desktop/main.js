@@ -296,12 +296,12 @@ const UPD_DIR = () => path.join(process.env.LOCALAPPDATA || app.getPath("temp"),
 const BACKUP_DIR = () => path.join(process.env.LOCALAPPDATA || app.getPath("temp"), "LumaMap-backup");
 const RESULT_FILE = () => path.join(app.getPath("userData"), "update-result.json");
 let quitting = false;
-async function download(e, url, { size, sha256 } = {}) {
+async function download(e, url, { size, sha256 } = {}, name = "LumaMap-Setup-download.exe", quiet = false) {
   const r = await net.fetch(url);
   if (!r.ok) throw new Error("HTTP " + r.status);
   const total = +r.headers.get("content-length") || size || 0;
   fs.mkdirSync(UPD_DIR(), { recursive: true });
-  const file = path.join(UPD_DIR(), "LumaMap-Setup-download.exe");
+  const file = path.join(UPD_DIR(), name);
   const out = fs.createWriteStream(file);
   const hash = require("node:crypto").createHash("sha256");
   const reader = r.body.getReader();
@@ -312,7 +312,7 @@ async function download(e, url, { size, sha256 } = {}) {
     const b = Buffer.from(value);
     out.write(b); hash.update(b);
     got += b.length;
-    if (total && Date.now() - lastSent > 250) { lastSent = Date.now(); e.sender.send("update:progress", got / total); }
+    if (!quiet && total && Date.now() - lastSent > 250 && !e.sender.isDestroyed()) { lastSent = Date.now(); e.sender.send("update:progress", got / total); }
   }
   await new Promise((res, rej) => out.end((err) => (err ? rej(err) : res())));
   if (total && got < total) throw new Error("Descarga incompleta");
@@ -327,7 +327,10 @@ function stopServicesForUpdate() {
   try { dmxProc?.kill(); } catch {}
   const rp = remote.proc; remote.proc = null; try { rp?.kill(); } catch {}
 }
-function runUpdater(args) {
+let updaterLaunched = false;
+function runUpdater(args, { quit = true } = {}) {
+  if (updaterLaunched) return;
+  updaterLaunched = true;
   const src = path.join(__dirname, "updater.ps1");
   const script = path.join(UPD_DIR(), "updater.ps1");
   fs.mkdirSync(UPD_DIR(), { recursive: true });
@@ -337,7 +340,7 @@ function runUpdater(args) {
     "-AppPid", String(process.pid), "-InstallDir", path.dirname(exe), "-Exe", path.basename(exe), "-ResultFile", RESULT_FILE(), "-BackupRoot", BACKUP_DIR(), ...args];
   log("update", "Actualizador: " + args.join(" "));
   spawn("powershell.exe", all, { detached: true, stdio: "ignore", windowsHide: true, cwd: UPD_DIR() }).unref();   // fuera de la carpeta de la app
-  setTimeout(() => app.quit(), 300);
+  if (quit) setTimeout(() => app.quit(), 300);
 }
 ipcMain.handle("update:install", async (e, url, info = {}) => {
   if (process.platform !== "win32") { shell.openExternal(url); return; }
@@ -345,6 +348,60 @@ ipcMain.handle("update:install", async (e, url, info = {}) => {
   stopServicesForUpdate();
   runUpdater(["-Installer", file, "-Version", String(info.version || ""), "-Mode", "update"]);
 });
+/*
+ * Actualizar sola: la versión nueva se descarga en segundo plano (verificada con su SHA-256) y
+ * se instala AL CERRAR LumaMap, sin volver a abrirla: nunca corta un show. «Reiniciar e instalar»
+ * la instala ya (y reabre la app). Lo descargado se recuerda entre sesiones (pending.json).
+ */
+const PENDING_FILE = () => path.join(UPD_DIR(), "pending.json");
+const PENDING_EXE = () => path.join(UPD_DIR(), "LumaMap-Setup-pending.exe");
+function readPending() {
+  try {
+    const p = JSON.parse(fs.readFileSync(PENDING_FILE(), "utf8"));
+    if (!p?.version || !fs.existsSync(PENDING_EXE())) return null;
+    // Ya instalada (o más vieja que la que hay): se borra.
+    const num = (v) => +(String(v).match(/(\d+)$/) || [0, 0])[1];
+    if (num(p.version) <= num(app.getVersion())) { fs.rmSync(PENDING_EXE(), { force: true }); fs.rmSync(PENDING_FILE(), { force: true }); return null; }
+    return p;
+  } catch { return null; }
+}
+let downloadingUpdate = null;
+ipcMain.handle("update:download", async (e, url, info = {}) => {
+  if (process.platform !== "win32") throw new Error("Solo en Windows");
+  const have = readPending();
+  if (have && have.version === String(info.version || "")) return { ready: true, version: have.version };
+  if (downloadingUpdate) return downloadingUpdate;
+  downloadingUpdate = (async () => {
+    const file = await download(e, url, info, "LumaMap-Setup-pending-tmp.exe", true);
+    fs.rmSync(PENDING_EXE(), { force: true });
+    fs.renameSync(file, PENDING_EXE());
+    fs.writeFileSync(PENDING_FILE(), JSON.stringify({ version: String(info.version || ""), sha256: info.sha256 || "", at: new Date().toISOString() }));
+    log("update", "Versión " + info.version + " descargada: se instalará al cerrar LumaMap");
+    return { ready: true, version: String(info.version || "") };
+  })().finally(() => { downloadingUpdate = null; });
+  return downloadingUpdate;
+});
+ipcMain.handle("update:pending", () => readPending());
+/** Instalar ya lo descargado (cierra, instala y vuelve a abrir). */
+ipcMain.handle("update:installPending", () => {
+  const p = readPending();
+  if (!p) throw new Error("No hay ninguna actualización descargada");
+  stopServicesForUpdate();
+  runUpdater(["-Installer", PENDING_EXE(), "-Version", p.version, "-Mode", "update"]);
+});
+// Al cerrar LumaMap con una versión descargada: se instala en silencio (sin volver a abrirla).
+app.on("will-quit", () => {
+  if (process.platform !== "win32" || updaterLaunched || !app.isPackaged) return;
+  if (autoUpdateOff()) return;
+  const p = readPending();
+  if (!p) return;
+  try { runUpdater(["-Installer", PENDING_EXE(), "-Version", p.version, "-Mode", "update", "-NoRelaunch"], { quit: false }); } catch (err) { log("update", "No se pudo lanzar la instalación al cerrar: " + err.message); }
+});
+// «Actualizar sola» apagado (lo decide la página): no se instala al cerrar.
+const AUTO_OFF_FILE = () => path.join(app.getPath("userData"), "auto-update-off");
+const autoUpdateOff = () => fs.existsSync(AUTO_OFF_FILE());
+ipcMain.handle("update:setAuto", (_e, on) => { try { if (on) fs.rmSync(AUTO_OFF_FILE(), { force: true }); else fs.writeFileSync(AUTO_OFF_FILE(), "1"); } catch {} return !autoUpdateOff(); });
+
 /** Volver a la versión anterior (la que guardó la última actualización). */
 ipcMain.handle("update:rollback", () => {
   if (process.platform !== "win32") throw new Error("Solo en Windows");

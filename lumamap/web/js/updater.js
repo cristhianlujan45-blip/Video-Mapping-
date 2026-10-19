@@ -56,9 +56,60 @@ export function install(remote, onProgress) {
   }
   if (N?.installUpdate) {
     window.__lumaUpdateProgress = (p) => onProgress(p);
-    N.installUpdate(remote.android.url);
+    N.installUpdate(remote.android.url, remote.build | 0);
     return Promise.resolve();
   }
   location.reload();
   return Promise.resolve();
 }
+
+/* ---------------- Actualizar sola ---------------- */
+// La versión nueva se descarga en segundo plano sin preguntar. Windows la instala al cerrar
+// LumaMap (o ya, con «Instalar ahora»); Android al salir de la app (desde Android 12, sin
+// preguntar después de la primera vez). Nunca durante un show. En el Mac y en el navegador no.
+const AUTO_KEY = "lumamap:autoUpdate";
+export function autoUpdateOn() { try { return localStorage.getItem(AUTO_KEY) !== "0"; } catch { return true; } }
+export function setAutoUpdate(on) {
+  try { localStorage.setItem(AUTO_KEY, on ? "1" : "0"); } catch {}
+  try { window.LumaDesktop?.setAutoUpdate?.(!!on); } catch {}
+  try { window.LumaNative?.setAutoUpdate?.(!!on); } catch {}
+}
+/** ¿Esta app puede descargar sola e instalar sin reinstalar a mano? */
+export function canAutoUpdate(cur = currentVersion()) {
+  if (cur.platform === "windows") return !!window.LumaDesktop?.downloadUpdate && window.LumaDesktop.platform === "win32";   // el Mac no (sin firma de Apple)
+  if (cur.platform === "android") return !!window.LumaNative?.downloadUpdate;
+  return false;
+}
+/** Descarga la versión nueva en segundo plano. Resuelve { version } cuando está lista. */
+export function downloadInBackground(remote) {
+  const D = window.LumaDesktop, N = window.LumaNative;
+  if (D?.downloadUpdate) {
+    const w = remote.windows || {};
+    return D.downloadUpdate(w.url, { version: w.version || remote.version, sha256: w.sha256 || "", size: w.size || 0 }).then(() => ({ version: remote.version }));
+  }
+  if (N?.downloadUpdate) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => { delete window.__lumaUpdateDownloaded; reject(new Error("La descarga tarda demasiado")); }, 30 * 60 * 1000);
+      window.__lumaUpdateDownloaded = () => { clearTimeout(t); delete window.__lumaUpdateDownloaded; resolve({ version: remote.version }); };
+      window.__lumaUpdateFailed = (msg) => { clearTimeout(t); delete window.__lumaUpdateDownloaded; reject(new Error(msg || "error")); };
+      N.downloadUpdate(remote.android.url, remote.build | 0);
+    });
+  }
+  return Promise.reject(new Error("Esta versión no se actualiza sola"));
+}
+/** ¿Hay una versión ya descargada esperando? → { version } o null. */
+export async function pendingUpdate() {
+  const D = window.LumaDesktop, N = window.LumaNative;
+  if (D?.pendingUpdate) return (await D.pendingUpdate().catch(() => null)) || null;
+  if (N?.pendingUpdate) { const b = +N.pendingUpdate() || 0; return b > 0 ? { version: "2.3." + b, build: b } : null; }
+  return null;
+}
+/** Instala ya lo descargado (Windows cierra, instala y vuelve a abrir; Android puede pedir confirmar). */
+export function installPending() {
+  const D = window.LumaDesktop, N = window.LumaNative;
+  if (D?.installPendingUpdate) return D.installPendingUpdate();
+  if (N?.installPendingUpdate) return Promise.resolve(N.installPendingUpdate());
+  return Promise.reject(new Error("No hay nada descargado"));
+}
+/** Android: ¿se instalará sin preguntar? (Android 12+ y LumaMap ya instaló la app alguna vez). */
+export const silentOnAndroid = () => { try { return !!window.LumaNative?.updateSilent?.(); } catch { return false; } };

@@ -1645,6 +1645,15 @@ A.checkUpdates = async (silent = false) => {
   try { remote = await Updater.fetchLatest(); }
   catch (e) { if (!silent) toast("No se pudo buscar: " + e.message, "err"); return; }
   if (!Updater.isNewer(remote, cur)) { if (!silent) toast(`Ya tienes la última versión (${cur.version})`); return; }
+  // Actualizar sola: se descarga sin preguntar y se instala al cerrar (Windows) o al salir (Android).
+  if (Updater.autoUpdateOn() && Updater.canAutoUpdate(cur)) {
+    let ready = await Updater.pendingUpdate();
+    if (!ready || ready.version !== remote.version) {
+      try { ready = await Updater.downloadInBackground(remote); }
+      catch (e) { window.LumaDesktop?.log?.("update", "Descarga automática: " + e.message); if (!silent) toast("No se pudo descargar: " + e.message, "err"); return; }
+    }
+    return A.offerPendingUpdate(remote.version, silent);
+  }
   const go = await dialog({
     title: "Nueva versión disponible",
     content: h("div", {}, h("p", {}, `Tienes la ${cur.version} y está disponible la ${remote.version}.`),
@@ -1659,6 +1668,35 @@ A.checkUpdates = async (silent = false) => {
   toast("Descargando actualización…");
   try { await Updater.install(remote, (p) => toast(`Descargando actualización… ${Math.round(p * 100)} %`)); }
   catch (e) { toast("No se pudo actualizar: " + e.message, "err"); }
+};
+/** Versión nueva ya descargada: se instala sola al cerrar/salir; «Instalar ahora» si se quiere ya. */
+A.offerPendingUpdate = async (version, silent = true) => {
+  const cur = Updater.currentVersion(), android = cur.platform === "android";
+  const busy = S.projecting || S.perfMode || S.rec || S.exporting;
+  // Android la primera vez pide confirmar: se ofrece (sin interrumpir un show).
+  const needsTap = android && !Updater.silentOnAndroid();
+  if (silent && !needsTap) {
+    toast(android ? `LumaMap ${version} descargada: se instalará sola cuando salgas de la app` : `LumaMap ${version} descargada: se instalará sola al cerrar LumaMap (☰ → Buscar actualizaciones para instalarla ya)`);
+    return;
+  }
+  if (busy) { toast(`LumaMap ${version} lista para instalar: ☰ → Buscar actualizaciones cuando acabes`); return; }
+  const go = await dialog({
+    title: "Actualización lista",
+    content: h("div", {}, h("p", {}, `LumaMap ${version} ya está descargada (tienes la ${cur.version}).`),
+      h("p", { class: "hint" }, android
+        ? (needsTap ? "Android te pedirá confirmar con «Actualizar» esta vez; después se actualizará sola al salir de la app (Android 12 o más)." : "Se instala y LumaMap se vuelve a abrir.")
+        : "Si no, se instalará sola la próxima vez que cierres LumaMap. Tus proyectos se conservan.")),
+    buttons: [{ label: "Más tarde", value: false }, { label: "Instalar ahora", kind: "primary", value: true }],
+  });
+  if (!go) return;
+  await A.prepareForUpdate();
+  try { await Updater.installPending(); } catch (e) { toast("No se pudo instalar: " + e.message, "err"); }
+};
+A.toggleAutoUpdate = () => {
+  const on = !Updater.autoUpdateOn();
+  Updater.setAutoUpdate(on);
+  toast(on ? "Actualizar sola: activado (se descarga sola y se instala al cerrar)" : "Actualizar sola: desactivado (te preguntará antes)");
+  if (on) A.checkUpdates(true);
 };
 app.version = () => Updater.currentVersion();
 
@@ -3335,6 +3373,8 @@ window.__lumaNativeEvent = (ev) => {
     updateChrome(); renderPanel();
   } else if (ev.type === "saved") toast(ev.ok ? "Archivo guardado" : "No se guardó el archivo", ev.ok ? "" : "err");
   else if (ev.type === "updateProgress") window.__lumaUpdateProgress?.(ev.pct);
+  else if (ev.type === "updateDownloaded") window.__lumaUpdateDownloaded?.(ev.build);
+  else if (ev.type === "updateError" && ev.quiet) { window.__lumaUpdateFailed?.(ev.msg); console.warn("actualización automática:", ev.msg); }
   else if (ev.type === "updateError") toast("No se pudo actualizar: " + ev.msg, "err");
   else if (ev.type === "updateReady") toast("Confirma «Actualizar» en la pantalla de Android");
   else if (ev.type === "optimize") {
@@ -3686,8 +3726,11 @@ async function init() {
   audio.bpm = S.project.settings.bpm || 120;
   requestAnimationFrame(rafLoop);
   connectRemote();
-  // Busca actualizaciones al abrir (en silencio: solo avisa si hay una nueva).
+  // Busca actualizaciones al abrir y cada 4 horas (en silencio: con «Actualizar sola», se
+  // descarga y se instala al cerrar; si no, avisa).
+  Updater.setAutoUpdate(Updater.autoUpdateOn());
   setTimeout(() => A.checkUpdates(true), 5000);
+  setInterval(() => A.checkUpdates(true), 4 * 3600 * 1000);
   if ("serviceWorker" in navigator && !native && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
   window.__lumamap = app; // depuración y pruebas
   // IA opcional: se mira en segundo plano si hay IA local (nunca bloquea ni se repite sola).

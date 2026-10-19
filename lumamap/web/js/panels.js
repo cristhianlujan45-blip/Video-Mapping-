@@ -1,6 +1,7 @@
 // web/js/panels.js
 // Contenido de los paneles del editor. Cada panel recibe la API `app`
 // (estado + acciones de editor.js) y devuelve un nodo DOM.
+import * as Updater from "./updater.js";
 import {
   GENERATORS, ANIM_LIBRARY, ANIM_CATEGORIES, FX_LIBRARY, FX_CATEGORIES, COLORMAPS, RECORD_QUALITIES, BLEND_MODES, BORDER_ANIMS, AUDIO_TARGETS, AUDIO_BANDS,
   DRAW_TOOLS, DRAW_ANIMS, SHAPES, DEFAULT_FX, lookOf, SCREEN_FX, SENSOR_ACTIONS, sensorThreshold,
@@ -1175,6 +1176,8 @@ const menu = {
         window.LumaDesktop?.repairInstall ? item("restart", "Reparar instalación", () => A.repairInstall(), "Reinstala esta versión sin tocar tus proyectos") : null,
         window.LumaDesktop?.openLogs ? item("folder", "Abrir registros", () => A.openLogs(), "Para diagnosticar problemas") : null,
         item("download", "Buscar actualizaciones", () => A.checkUpdates(false), `Versión instalada: ${app.version().version} · también se comprueba sola al abrir`),
+        Updater.canAutoUpdate() ? item("download", `Actualizar sola: ${Updater.autoUpdateOn() ? "activado" : "desactivado"}`, () => { A.toggleAutoUpdate(); app.renderPanel(); },
+          Updater.autoUpdateOn() ? "La versión nueva se descarga sola y se instala al cerrar LumaMap (nunca durante un show) · toca para desactivarlo" : "Te preguntará antes de cada versión · toca para activarlo") : null,
         item("info", "Acerca de LumaMap", () => dialog({ title: "LumaMap 2", content: h("div", {}, h("p", {}, h("b", {}, `Versión ${app.version().version}`)), h("p", {}, "Video mapping táctil para Windows, Mac, Android, tablet y navegador. Código abierto (MIT). Funciona sin internet.")) })))),
     );
   },

@@ -45,6 +45,9 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Respuesta del instalador del sistema a las actualizaciones (AppUpdater). -->
+        <receiver android:name=".UpdateReceiver" android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
