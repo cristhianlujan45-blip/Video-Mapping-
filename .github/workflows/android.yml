@@ -55,7 +55,7 @@ jobs:
   # (Electron) con red de verdad: Art-Net, sACN, búsqueda de nodos, entrada DMX.
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 65   # la batería del navegador ya pasa de 45 min (redes de nodos: GPU, GLSL MAT, salida por red)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -596,6 +596,11 @@ export function panelChop(node) {
 }
 /** Búsqueda para el diálogo «Crear operador» (Tab). */
 export function searchOps(q, fam = "") {
-  const w = String(q || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
-  return ops.filter(o => (!fam || o.fam === fam) && (!w || (o.type + " " + o.label + " " + o.desc + " " + o.fam).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").includes(w)));
+  const norm = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const w = norm(q);
+  const list = ops.filter(o => (!fam || o.fam === fam) && (!w || norm(o.type + " " + o.label + " " + o.desc + " " + o.fam).includes(w)));
+  if (!w) return list;
+  // Lo que más se parece primero: el nombre igual, luego que empiece así, luego que lo contenga.
+  const score = (o) => { const l = norm(o.label), t = norm(o.type); return l === w || t === w ? 0 : l.startsWith(w) || t.startsWith(w) ? 1 : l.includes(w) || t.includes(w) ? 2 : 3; };
+  return list.map((o, k) => [score(o), k, o]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(x => x[2]);
 }

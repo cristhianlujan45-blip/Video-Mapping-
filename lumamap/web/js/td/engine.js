@@ -897,8 +897,10 @@ export class NetEngine {
    * (lo ven OBS, vMix, TouchDesigner… en /stream.mjpg?ch=canal). Si va lento se salta fotogramas.
    */
   netSend(net, node, p, img) {
+    // Solo envía el motor del editor (las ventanas de salida también cocinan la red: no repiten).
+    if (!this.opts.app) return;
     const ck = this.cooker(net), key = node.id + "/red";
-    const ws = this.opts.app?.remote?.ws;
+    const ws = this.opts.app.remote?.ws;
     if (!ws || ws.readyState !== 1) { ck.errors.set(key, "sin servidor local: la salida por red es de la app de escritorio (o abriendo LumaMap desde su servidor)"); return; }
     ck.errors.delete(key);
     let N = this.nets ||= new Map(), R = N.get(node.id);
