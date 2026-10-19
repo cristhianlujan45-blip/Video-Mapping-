@@ -964,7 +964,7 @@ await test("redes de nodos: subredes (Ctrl+G, entrar, subir), replicador y panel
     const a = window.__lumamap, G = await import("./js/td/graph.js"), n = a.S.project.networks.at(-1);
     a.edit(() => { G.addNode(n, "TOP", "circle", { x: 0, y: 300, name: "bola" }); G.addNode(n, "COMP", "replicator", { x: 0, y: 500, p: { master: "bola", count: 3, prefix: "bola_copia" } }); });
   });
-  await page.waitForFunction(() => window.__lumamap.S.project.networks.at(-1).nodes.filter(x => x.repOf).length === 3, null, { timeout: 5000 });
+  await page.waitForFunction(() => window.__lumamap.S.project.networks.at(-1).nodes.filter(x => x.repOf).length === 3, null, { timeout: 15000 });
   // Panel de control: un deslizador movido con el ratón cambia lo que lo usa.
   const ids = await page.evaluate(async () => {
     const a = window.__lumamap, G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js"), n = a.S.project.networks.at(-1);

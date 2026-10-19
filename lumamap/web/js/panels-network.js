@@ -1713,6 +1713,8 @@ function loop() {
   if (ed.lastLoop) ed.fps = (ed.fps || 60) * 0.95 + (1000 / Math.max(1, now - ed.lastLoop)) * 0.05;
   ed.lastLoop = now;
   const time = now / 1000, lv = app.S.levels;
+  // Replicadores primero: que sus copias no esperen a que acabe el dibujo (ni dependan de él).
+  if (now - (ed.lastRep || 0) > 400) { ed.lastRep = now; runReplicators(net, eng); }
   // Imagen de fondo (display): a la mitad de resolución, ~30 fps (en pantalla completa, entera).
   const disp = nodeById(net, net.display);
   const bgOn = (ed.bg || ed.perform) && disp;
@@ -1742,7 +1744,6 @@ function loop() {
   }
   if (ed.vwins.length && now - (ed.lastV || 0) > (MOBILE ? 50 : 16)) { ed.lastV = now; drawViewers(net, eng, time, lv); }
   if (now - (ed.lastTime || 0) > 50) { ed.lastTime = now; updateTimebar(net); ed.animEd?.draw(); refreshWidgets(net); }
-  if (now - (ed.lastRep || 0) > 400) { ed.lastRep = now; runReplicators(net, eng); }
   if (now - ed.lastInfo > 400) { ed.lastInfo = now; updateInfo(); }
 }
 
