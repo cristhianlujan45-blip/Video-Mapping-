@@ -17,6 +17,8 @@ import { ShaderCache, spectrumFromLevels } from "../isf.js";
 import { getShader } from "../plugins.js";
 import { Particles } from "./particles.js";
 import { GpuParticles, gpuParticlesSupported, gpuSizeFor } from "./gpuparticles.js";
+import { pyFor } from "./pyapi.js";
+import { builtin as pyBuiltin, PyError, Tuple as PyTuple } from "./py.js";
 
 const MOBILE = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || "");
 const MAX_SIDE = MOBILE ? 1280 : 2048;
@@ -65,6 +67,7 @@ void main() { vec2 q = vUv; if (flipX > 0.5) q.x = 1.0 - q.x;
   else if (fit > 1.5 && srcSize.x > 0.0) { if (sa > ra) { q.y = 0.5 + (q.y - 0.5) * sa / ra; } else { q.x = 0.5 + (q.x - 0.5) * ra / sa; } if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) { fragColor = vec4(0, 0, 0, 1); return; } }
   fragColor = texture(s0, q); }`;
 const ENCODE = `${HEAD}void main() { vec4 c = texture(s0, vUv); vec3 l = c.rgb; vec3 s = mix(l * 12.92, 1.055 * pow(max(l, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, l)); fragColor = vec4(s, c.a); }`;
+const OVER = `${HEAD}void main() { vec4 a = texture(s0, vUv), b = texture(s1, vUv); fragColor = vec4(mix(a.rgb, b.rgb, b.a), max(a.a, b.a)); }`;
 const FAIL = `${HEAD}void main() { float k = mod(floor(vUv.x * 16.0) + floor(vUv.y * 9.0), 2.0); fragColor = vec4(mix(vec3(0.35, 0.0, 0.2), vec3(0.6, 0.0, 0.35), k), 1.0); }`;
 /** Código del usuario (GLSL TOP): una función cook() o un main() completo. */
 function userFrag(def, code) {
@@ -122,7 +125,7 @@ export class NetEngine {
 
   get project() { return this.opts.project?.() || null; }
   net(id) { return this.project?.networks?.find(n => n.id === id) || null; }
-  cooker(net) { let c = this.cookers.get(net.id); if (!c) this.cookers.set(net.id, c = new Cooker()); return c; }
+  cooker(net) { let c = this.cookers.get(net.id); if (!c) { this.cookers.set(net.id, c = new Cooker()); c.host = { app: this.opts.app || null, engine: this }; } return c; }
 
   /* ---------------- Entradas de fuera: teclado, MIDI/OSC/mando ---------------- */
   installTaps() {
@@ -239,6 +242,8 @@ export class NetEngine {
     this.ensureFrame(time, levels);
     const out = [];
     for (const net of this.project?.networks || []) {
+      // Los scripts «Ejecutar» (Python) corren solo en la ventana del editor (una vez por fotograma).
+      if (this.opts.app && net.nodes.some(n => n.type === "execute" && n.fam === "DAT")) this.cooker(net).runScripts();
       // Lo que tiene que funcionar aunque nadie use su salida: grabar video y que suene el audio.
       for (const n of net.nodes) {
         if (n.bypass) continue;
@@ -336,6 +341,7 @@ export class NetEngine {
       case "in": return this.top(net, subIn(net, node));
       case "movieout": if (first) this.record(net, node, p, first); return first || null;
       case "netout": if (first && p.active) this.netSend(net, node, p, first); return first || null;
+      case "script": return this.scriptTop(net, node, p, NW, NH, first);
       case "feedback": {
         const target = nodeByName(net, p.target);
         let f = this.fb.get(node.id);
@@ -794,6 +800,28 @@ export class NetEngine {
     return { tex: out.texture, w, h };
   }
 
+  /* ---------------- Dibujo con Python (Script TOP) ---------------- */
+  scriptTop(net, node, p, w, h, input) {
+    const key = node.id + ":py";
+    let x = this.extra.get(key);
+    if (!x) { const c = document.createElement("canvas"); x = { c, g: c.getContext("2d"), ver: 0 }; this.extra.set(key, x); }
+    if (input) { w = input.w; h = input.h; }
+    if (x.c.width !== w || x.c.height !== h) { x.c.width = w; x.c.height = h; }
+    const ck = this.cooker(net), g = x.g;
+    const { I } = pyFor(ck, node, String(p.code || ""));
+    g.save();
+    g.clearRect(0, 0, w, h);
+    I.callIfExists("onCook", [scriptCanvasOp(g, w, h, node)]);
+    g.restore();
+    x.ver++;
+    const tex = this.elTexture(node.id + ":pytex", x.c, x.ver);
+    if (!input) return this.fitInto(node.id, tex, w, h, w, h, 1);
+    // Con una imagen conectada, el dibujo va encima.
+    const rt = this.rtFor(node.id, w, h);
+    this.pass(this.mat("over", OVER), rt, { s0: input.tex, s1: tex, has1: 1 });
+    return { tex: rt.texture, w, h };
+  }
+
   /* ---------------- Audio de un archivo ---------------- */
   /**
    * Reproduce y analiza un audio de la biblioteca (Audio File In CHOP). Solo suena en la ventana
@@ -1111,6 +1139,41 @@ export class NetEngine {
   }
 }
 
+/** scriptOp del «Dibujo con Python»: dibujar con coordenadas de 0 a 1 (y hacia arriba). */
+function scriptCanvasOp(g, W, H, node) {
+  const B = pyBuiltin;
+  const num = (v, d = 0) => { const n = +(v?.__float__ ? v.__float__() : v); return Number.isFinite(n) ? n : d; };
+  const color = (c, def = "#ffffff") => {
+    if (c === undefined || c === null) return def;
+    if (typeof c === "string") return c;
+    const a = Array.isArray(c) ? c : c instanceof PyTuple ? c.a : null;
+    if (!a) throw new PyError("TypeError", "un color es '#rrggbb', un nombre ('red') o (r, g, b) de 0 a 1");
+    const [r, gg, b, al = 1] = a.map(v => num(v));
+    return `rgba(${Math.round(r * 255)},${Math.round(gg * 255)},${Math.round(b * 255)},${al})`;
+  };
+  const X = (x) => num(x) * W, Y = (y) => (1 - num(y)) * H, S = (s) => num(s) * H;
+  const paint = (fill, col, width) => { if (fill === false || fill === 0) { g.strokeStyle = col; g.lineWidth = Math.max(1, S(width ?? 0.005)); g.stroke(); } else { g.fillStyle = col; g.fill(); } };
+  const canvas = {
+    __typename: "el lienzo",
+    __getattr__: (n) => {
+      switch (n) {
+        case "width": return W;
+        case "height": return H;
+        case "clear": return B("clear", ([c]) => { if (c === undefined || c === null) g.clearRect(0, 0, W, H); else { g.fillStyle = color(c); g.fillRect(0, 0, W, H); } return null; });
+        case "rect": return B("rect", ([x, y, w, h, c], kw) => { g.beginPath(); g.rect(X(x), Y(num(y) + num(h)), num(w) * W, num(h) * H); paint(kw.fill ?? true, color(c ?? kw.color), kw.width); return null; });
+        case "circle": return B("circle", ([x, y, r, c], kw) => { g.beginPath(); g.arc(X(x), Y(y), Math.max(0.1, S(r)), 0, Math.PI * 2); paint(kw.fill ?? true, color(c ?? kw.color), kw.width); return null; });
+        case "line": return B("line", ([x1, y1, x2, y2, c, wd], kw) => { g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.strokeStyle = color(c ?? kw.color); g.lineWidth = Math.max(1, S(wd ?? kw.width ?? 0.005)); g.lineCap = "round"; g.stroke(); return null; });
+        case "poly": return B("poly", ([pts, c], kw) => { const list = [...(Array.isArray(pts) ? pts : pts?.a || [])].map(q => q instanceof PyTuple ? q.a : q); g.beginPath(); list.forEach(([x, y], k) => k ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))); if (kw.close !== false) g.closePath(); paint(kw.fill ?? true, color(c ?? kw.color), kw.width); return null; });
+        case "text": return B("text", ([t, x = 0.5, y = 0.5, size = 0.08, c], kw) => { g.font = `${kw.bold === false ? "" : "bold "}${Math.max(4, S(size))}px ${kw.font || "'Segoe UI', Roboto, Arial, sans-serif"}`; g.textAlign = kw.align || "center"; g.textBaseline = "middle"; g.fillStyle = color(c ?? kw.color); g.fillText(String(t?.__repr__ ? t.__repr__() : t), X(x), Y(y)); return null; });
+        case "alpha": return B("alpha", ([a = 1]) => { g.globalAlpha = Math.max(0, Math.min(1, num(a, 1))); return null; });
+        case "blend": return B("blend", ([m = "normal"]) => { g.globalCompositeOperation = m === "add" ? "lighter" : m === "multiply" ? "multiply" : m === "screen" ? "screen" : "source-over"; return null; });
+        case "glow": return B("glow", ([amt = 0, c]) => { g.shadowBlur = S(amt); g.shadowColor = color(c, "#ffffff"); return null; });
+      }
+      return undefined;
+    },
+  };
+  return { __typename: "scriptOp", __getattr__: (n) => n === "canvas" ? canvas : n === "width" ? W : n === "height" ? H : n === "name" ? node.name : undefined };
+}
 /** Todas las mallas de un modelo (con sus posiciones) en una sola geometría. */
 function meshToGeometry(obj) {
   obj.updateMatrixWorld(true);

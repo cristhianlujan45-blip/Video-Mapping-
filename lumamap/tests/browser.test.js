@@ -1020,7 +1020,8 @@ await test("redes de nodos: MIDI In y OSC In (todos los controles), audio de un 
     for (let k = 0; k < 100 && !(a.td.recInfo(mo.id)?.frames >= 15); k++) await new Promise(r => setTimeout(r, 100));
     const recOn = !!a.td.recInfo(mo.id);
     a.edit(() => { mo.p.record = 0; });
-    for (let k = 0; k < 50 && a.S.project.media.filter(x => x.kind === "video").length === before; k++) await new Promise(r => setTimeout(r, 200));
+    for (let k = 0; k < 150 && a.S.project.media.filter(x => x.kind === "video").length === before; k++) await new Promise(r => setTimeout(r, 200));
+    const recBytes = a.td.lastRecording?.blob.size || 0;
     const vids = a.S.project.media.filter(x => x.kind === "video");
     // Audio: suena (en silencio en la prueba) y se analiza.
     let A = null;
@@ -1029,10 +1030,14 @@ await test("redes de nodos: MIDI In y OSC In (todos los controles), audio de un 
     m._edForTests.openWindowComp(n, win);
     const surf = a.S.project.surfaces.find(x => x.winOf === win.id);
     const look = surf && a.S.project.scenes[0].looks[surf.id];
-    return { midi: midi.cc7?.[0], osc: osc.fader_1?.[0], recOn, newVideo: vids.length - before, lastName: vids.at(-1)?.name, audioLen: A?.length?.[0] || 0, audioPos: A?.position?.[0] || 0, err: a.td.info(n, af).error, surf: surf ? { screen: surf.screen, type: look?.source.type, netNode: look?.source.netNode === nz.id } : null };
+    // Fuera la superficie de la ventana (las pruebas siguientes no la esperan).
+    const M = await import("./js/model.js");
+    if (surf) a.edit(() => M.removeSurface(a.S.project, surf.id));
+    return { recBytes, midi: midi.cc7?.[0], osc: osc.fader_1?.[0], recOn, newVideo: vids.length - before, lastName: vids.at(-1)?.name, audioLen: A?.length?.[0] || 0, audioPos: A?.position?.[0] || 0, err: a.td.info(n, af).error, surf: surf ? { screen: surf.screen, type: look?.source.type, netNode: look?.source.netNode === nz.id } : null };
   });
   assert.equal(r.midi, 0.5); assert.equal(r.osc, 0.25);
   assert.ok(r.recOn, "estaba grabando");
+  assert.ok(r.recBytes > 0, "la grabación tiene video");
   assert.equal(r.newVideo, 1, "la grabación está en la biblioteca");
   assert.match(r.lastName, /^prueba-.*\.(mp4|webm)$/);
   assert.equal(r.err, "");

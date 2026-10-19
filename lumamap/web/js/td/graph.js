@@ -7,6 +7,8 @@
 // expresiones que lo nombran) y el «cocinero» de CHOPs y parámetros, que el motor usa cada fotograma.
 import { opDef, defOf, acceptsInput, baseName, panelChop } from "./ops.js";
 import { compileExpr, renameInExpr } from "./expr.js";
+import { PyError, formatError } from "./py.js";
+import { runScriptChop, runExecute, pyConsole } from "./pyapi.js";
 
 let seq = 0;
 const uid = (p) => p + Date.now().toString(36) + (seq++).toString(36) + Math.random().toString(36).slice(2, 5);
@@ -403,14 +405,29 @@ export class Cooker {
       else {
         let state = this.state.get(node.id);
         if (!state) this.state.set(node.id, state = {});
-        out = def.cook({ p: this.params(node), inputs, state, env: { ...this.env, chop: (nm) => this.chopByName(nm) }, node });
+        out = def.cook({ p: this.params(node), inputs, state, env: { ...this.env, chop: (nm) => this.chopByName(nm), pyChop: (n, code, ins) => runScriptChop(this, n, code, ins) }, node });
       }
       this.errors.delete(node.id);
-    } catch (e) { this.errors.set(node.id, String(e.message || e)); out = this.last.get(mk) || null; }
+    } catch (e) { this.setError(node, e); out = this.last.get(mk) || null; }
     finally { this.busy.delete(mk); }
     if (typeof performance !== "undefined") this.cookMs.set(node.id, performance.now() - t0);
     this.memo.set(mk, out); this.last.set(mk, out);
     return out;
+  }
+  /** Guarda el error de un nodo (los de Python, con su línea y una pista; a la consola una sola vez). */
+  setError(node, e) {
+    const msg = e instanceof PyError ? formatError(e) : String(e?.message || e);
+    if (e instanceof PyError && this.errors.get(node.id) !== msg) pyConsole.push(msg, "err", node.name);
+    this.errors.set(node.id, msg);
+  }
+  /** Los «Ejecutar» DAT activos: una vez por fotograma (los llama el motor). */
+  runScripts() {
+    for (const n of this.net.nodes) {
+      if (n.fam !== "DAT" || n.type !== "execute" || n.bypass) continue;
+      const p = this.params(n);
+      if (!p.active) continue;
+      try { runExecute(this, n, p); this.errors.delete(n.id); } catch (e) { this.setError(n, e); }
+    }
   }
   /** Un número de una tabla DAT: tab('tabla1', fila, columna). */
   tab(name, r, c) {
