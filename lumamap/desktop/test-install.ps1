@@ -198,7 +198,12 @@ for ($k = 0; $k -lt 120 -and -not $new; $k++) {
 }
 $tail = if (Test-Path $ulog) { (@(Get-Content $ulog) | Select-Object -Skip $logBefore) -join "`n" } else { "(sin registro)" }
 Write-Host "Registro del actualizador:`n$tail"
-if (-not $new) { Fail "tras actualizar, LumaMap NO se volvió a abrir" }
+if (-not $new) {
+  $alog = Join-Path $data "logs\lumamap.log"
+  if (Test-Path $alog) { Write-Host "Registro de la app (actualización):"; Get-Content $alog | Select-String "update" | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" } }
+  Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | ForEach-Object { Write-Host "  powershell $($_.ProcessId): $($_.CommandLine)" }
+  Fail "tras actualizar, LumaMap NO se volvió a abrir"
+}
 Start-Sleep -Seconds 10
 if ($new.HasExited -or -not (Get-Process -Id $new.Id -ErrorAction SilentlyContinue)) { Fail "LumaMap se volvió a abrir pero se cerró enseguida" }
 if ($tail -notmatch "abierto de nuevo") { Fail "el actualizador no confirmó que la app se abrió" }

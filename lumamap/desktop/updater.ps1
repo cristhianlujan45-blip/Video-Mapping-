@@ -20,8 +20,17 @@ param(
   [string]$ResultFile = "",
   [string]$BackupRoot = "",
   [ValidateSet("update", "rollback", "repair")][string]$Mode = "update",
+  [string]$EnvFile = "",
   [switch]$NoRelaunch
 )
+# Lanzado con WMI (fuera de la app), este proceso no tiene el entorno de la sesión: se recupera
+# el que guardó la app (TEMP, APPDATA, PATH…), así la app que se vuelve a abrir arranca bien.
+if ($EnvFile -and (Test-Path $EnvFile)) {
+  try {
+    $saved = Get-Content $EnvFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($prop in $saved.PSObject.Properties) { [Environment]::SetEnvironmentVariable($prop.Name, [string]$prop.Value, "Process") }
+  } catch {}
+}
 $ErrorActionPreference = "Stop"
 if (-not $BackupRoot) { $BackupRoot = Join-Path $env:LOCALAPPDATA "LumaMap-backup" }
 $LogFile = Join-Path $BackupRoot "updater.log"

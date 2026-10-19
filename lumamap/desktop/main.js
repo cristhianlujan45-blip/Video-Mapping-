@@ -3,7 +3,7 @@
 // los módulos ES, IndexedDB, micrófono y cámara, y abre la ventana de salida
 // directamente a pantalla completa en el proyector (segunda pantalla).
 const { app, BrowserWindow, protocol, screen, session, shell, Menu, ipcMain, net, utilityProcess, MessageChannelMain, powerSaveBlocker, dialog } = require("electron");
-const { spawn, execFile: execFileCb } = require("node:child_process");
+const { spawn, spawnSync, execFile: execFileCb } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -344,12 +344,38 @@ function runUpdater(args, { quit = true } = {}) {
   const script = path.join(UPD_DIR(), "updater.ps1");
   fs.mkdirSync(UPD_DIR(), { recursive: true });
   fs.writeFileSync(script, fs.readFileSync(src));   // fuera del asar y de la carpeta de la app
+  // El entorno de esta sesión (TEMP, APPDATA, PATH…): el actualizador lo recupera, así la app que
+  // vuelve a abrir arranca igual que si la abriera la persona.
+  const envFile = path.join(UPD_DIR(), "env.json");
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(ELECTRON_|NODE_|LUMAMAP_TEST_|ORIGINAL_XDG_)/i.test(k)));
+  fs.writeFileSync(envFile, JSON.stringify(env));
   const exe = app.getPath("exe");
   const all = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
-    "-AppPid", String(process.pid), "-InstallDir", path.dirname(exe), "-Exe", path.basename(exe), "-ResultFile", RESULT_FILE(), "-BackupRoot", BACKUP_DIR(), ...args];
+    "-AppPid", String(process.pid), "-InstallDir", path.dirname(exe), "-Exe", path.basename(exe), "-ResultFile", RESULT_FILE(), "-BackupRoot", BACKUP_DIR(), "-EnvFile", envFile, ...args];
   log("update", "Actualizador: " + args.join(" "));
-  spawn("powershell.exe", all, { detached: true, stdio: "ignore", windowsHide: true, cwd: UPD_DIR() }).unref();   // fuera de la carpeta de la app
+  // El actualizador tiene que SOBREVIVIR al cierre de la app. Un hijo de Electron (aunque vaya
+  // «detached») muere con ella en Windows: el actualizador moría antes de empezar y la app se
+  // cerraba sin instalar ni volver a abrirse. Se crea con WMI (Win32_Process.Create), fuera del
+  // árbol de procesos de la app; si WMI no está, como antes.
+  const pid = launchOutsideApp("powershell.exe", all, UPD_DIR());
+  if (pid) log("update", "Actualizador lanzado fuera de la app (pid " + pid + ")");
+  else spawn("powershell.exe", all, { detached: true, stdio: "ignore", windowsHide: true, cwd: UPD_DIR() }).unref();
   if (quit) setTimeout(() => app.quit(), 300);
+}
+/** Lanza un programa con WMI (independiente de esta app). Devuelve su pid o 0. */
+function launchOutsideApp(file, args, cwd) {
+  if (process.platform !== "win32") return 0;
+  const q = (a) => (/[\s"]/.test(a) || a === "" ? '"' + String(a).replace(/"/g, '\\"') + '"' : a);
+  const cmd = [file, ...args].map(q).join(" ");
+  const ps = "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:LUMA_CMD; CurrentDirectory = $env:LUMA_CWD }; Write-Output ([string]$r.ReturnValue + ' ' + [string]$r.ProcessId)";
+  try {
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps],
+      { env: { ...process.env, LUMA_CMD: cmd, LUMA_CWD: cwd }, windowsHide: true, timeout: 30000, encoding: "utf8" });
+    const m = /(\d+)\s+(\d+)/.exec(String(r.stdout || ""));
+    if (m && m[1] === "0" && +m[2] > 0) return +m[2];
+    log("update", "WMI no lanzó el actualizador: " + String(r.stdout || "").trim() + " " + String(r.stderr || "").trim().slice(0, 500) + (r.error ? " " + r.error.message : ""));
+  } catch (e) { log("update", "WMI: " + e.message); }
+  return 0;
 }
 ipcMain.handle("update:install", async (e, url, info = {}) => {
   if (process.platform !== "win32") { shell.openExternal(url); return; }
