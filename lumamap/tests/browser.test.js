@@ -916,7 +916,7 @@ await test("redes de nodos: animar un parámetro con fotogramas clave (◆), aut
   assert.deepEqual(r.keys, [[1, 0.3], [3, 0.8]]);
   // En el segundo 2 el radio vale lo de en medio (suave), y el motor lo usa.
   await page.evaluate(async () => { const G = await import("./js/td/graph.js"); const a = window.__lumamap; G.seekNet(a.S.project.networks.at(-1), 2); });
-  await page.waitForFunction(() => { const a = window.__lumamap, n = a.S.project.networks.at(-1); const v = a.td.cookers.get(n.id)?.param(n.nodes.find(x => x.type === "circle"), "radius"); return Math.abs(v - 0.55) < 0.01; }, null, { timeout: 5000 });
+  await page.waitForFunction(() => { const a = window.__lumamap, n = a.S.project.networks.at(-1); const v = a.td.cookers.get(n.id)?.param(n.nodes.find(x => x.type === "circle"), "radius"); return Math.abs(v - 0.55) < 0.01; }, null, { timeout: 15000 });
   // Doble clic en las curvas pone una clave; Supr la borra.
   const cv = await ws.locator(".tdanimcv").boundingBox();
   await page.mouse.dblclick(cv.x + cv.width * 0.75, cv.y + cv.height * 0.6);

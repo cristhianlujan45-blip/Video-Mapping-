@@ -95,6 +95,7 @@ function buildUI(root) {
   root.append(bar, body, dock, timebar);
   R = { root, bar, pane, bg, bgx: bg.getContext("2d"), world, svg, nodesEl, box, params, body, dock, timebar };
   ed.animEd = null;
+  root.classList.remove("animopen");   // el editor de curvas empieza cerrado (si no, quedaba una franja vacía que tapaba la red)
   buildBar();
   buildTimebar();
   bindPane();
