@@ -1011,6 +1011,37 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 .tdanimcv{display:block;touch-action:none;}
 .tdprow.animated .tdplab{color:#ffd23f;}
 .tdprow.animated .tdplab::before{content:"◆ ";font-size:10px;}
+/* Editor de código (Python y GLSL) y consola de Python */
+.tdprow.code{grid-template-columns:1fr !important;}
+.tdprow.code .tdpctl{display:block;}
+.tdce{display:flex;flex-direction:column;gap:4px;width:100%;}
+.tdce-box{position:relative;display:flex;background:#0a0d13;border:1px solid #2b3446;border-radius:8px;overflow:hidden;font:12.5px/18px ui-monospace,"Cascadia Code","Consolas",monospace;resize:vertical;min-height:120px;}
+.tdce-gut{flex:none;width:34px;padding:6px 4px 6px 0;text-align:right;color:#4b566b;background:#0d1119;border-right:1px solid #1d2432;user-select:none;}
+.tdce-gut div{height:18px;}
+.tdce-gut .err{color:#fff;background:#b4233f;border-radius:0 4px 4px 0;}
+.tdce-scroll{position:relative;flex:1;overflow:hidden;}
+.tdce-hl,.tdce-ta{position:absolute;inset:0;margin:0;padding:6px 8px;font:inherit;white-space:pre;tab-size:4;}
+.tdce-hl{pointer-events:none;color:#d6deeb;transform-origin:0 0;}
+.tdce-ta{background:transparent;color:transparent;caret-color:#fff;border:0;outline:none;resize:none;overflow:auto;width:100%;height:100%;}
+.tdce-ta::selection{background:#2a4c7a;color:transparent;}
+.tdce .ck{color:#c792ea;}
+.tdce .cb{color:#82aaff;}
+.tdce .ct{color:#ffcb6b;}
+.tdce .cs{color:#c3e88d;}
+.tdce .cn{color:#f78c6c;}
+.tdce .cc{color:#637777;font-style:italic;}
+.tdce-msg{display:none;white-space:pre-wrap;font:12px/1.4 ui-monospace,monospace;color:#ffb3c0;background:#3a1220;border-radius:6px;padding:6px 8px;}
+.tdce-msg.show{display:block;}
+.tdce-bar{flex-wrap:wrap;align-items:center;gap:6px;}
+.tdce-status{color:#ffd23f;}
+.tdce-hint{color:var(--mut);font-size:11.5px;}
+.tdconsole{min-height:180px;}
+.tdclog{flex:1;overflow:auto;padding:6px 10px;font:12.5px/1.45 ui-monospace,monospace;background:#07090d;white-space:pre-wrap;}
+.tdcl.in{color:#82aaff;}
+.tdcl.err{color:#ff8a9e;}
+.tdcl.info{color:var(--mut);}
+.tdcl b{color:#637777;font-weight:400;}
+.tdcin{flex:none;border:0;border-top:1px solid #2b3446;background:#0d1119;color:var(--tx);font:12.5px/1.45 ui-monospace,monospace;padding:6px 10px;resize:none;outline:none;}
 /* Visores flotantes del editor de redes */
 .tdvwin{position:absolute;z-index:30;display:flex;flex-direction:column;background:#0d1118;border:1px solid #33405a;border-radius:10px;box-shadow:0 12px 34px #000c;resize:both;overflow:hidden;min-width:220px;min-height:160px;}
 .tdvwin.active{border-color:var(--acc);}
@@ -1040,3 +1071,4 @@ h3.sub{font-size:12px;color:var(--dim);margin:10px 0 4px;text-transform:uppercas
 body.tdopen #modal{z-index:80;}
 body.tdopen #toast{z-index:85;}
 body.tdopen #notices{z-index:81;}
+.tdaisteps{display:flex;flex-direction:column;gap:4px;margin-top:8px;font-size:13.5px;}

@@ -9,6 +9,7 @@
 // Reglas: la IA nunca es obligatoria; todo es asíncrono (jamás dentro del bucle
 // de render); si algo falla se vuelve al modo sin IA con un mensaje claro; la IA
 // solo PROPONE acciones de la lista blanca (actions.js) y el usuario las aplica.
+import { codeSystem, codeUser, cleanCode, templateFor } from "./codegen.js";
 import { buildProjectContext, contextForPrompt } from "./context.js";
 import { analyzeProject, nextStep } from "./analyzer.js";
 import { validateAction, actionCatalogText } from "./actions.js";
@@ -146,6 +147,13 @@ export class AIProvider {
       return { text: out.reply, articles: arts };
     } catch { return { text: arts[0].text, articles: arts, fallback: true }; }
   }
+  /** Escribe (o arregla) código para un nodo: info = { kind, request, code, error, context } → { code, explanation }. */
+  async writeCode(info) {
+    const out = await this.ask({ system: codeSystem(info.kind), user: codeUser(info), schema: { type: "object", properties: { code: { type: "string" }, explanation: { type: "string" } }, required: ["code"] } });
+    const code = cleanCode(out.code, info.kind);
+    if (!code.trim()) throw new AIUnavailable("empty", "La IA no devolvió código");
+    return { code, explanation: String(out.explanation || "").trim(), source: this.label };
+  }
   /** ¿Qué le pasa a este nodo de la red? info = { name, op, fam, error, inputs, needs } */
   async explainNodeError(info) {
     const local = explainNodeErrorRules(info);
@@ -203,6 +211,7 @@ export class NoAIProvider extends AIProvider {
   }
   async generateShowPlan(text, ctx) { return planFromRules(text, ctx); }
   async explainNodeError(info) { return { text: explainNodeErrorRules(info), source: this.label }; }
+  async writeCode(info) { return { ...templateFor(info.kind, info.request), source: this.label, fallback: true }; }
 }
 
 /** Explicación sin IA de los errores más comunes de un nodo de la red. */
@@ -471,6 +480,7 @@ export class AIEngine {
   showPlan(text) { return this.run("generateShowPlan", text, this.context()); }
   explain(topic) { return this.run("explainFunction", topic); }
   explainNodeError(info) { return this.run("explainNodeError", info); }
+  writeCode(info) { return this.run("writeCode", info); }
   diagnose(q) { return this.run("diagnoseProblem", this.context(), q); }
   optimize() { return this.run("optimizeProject", this.context()); }
   vision(img) { return this.run("analyzeImage", img); }

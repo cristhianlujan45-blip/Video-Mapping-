@@ -325,6 +325,13 @@ export const ACTIONS = {
     text: (app, p) => p.example ? `Abrir el editor de redes con el ejemplo «${NET_EXAMPLES.find(e => e.id === p.example).name}»` : "Abrir el editor de redes de nodos",
     run: (app, p) => { app.openNetwork?.().then(async () => { if (p.example) (await import("../panels-network.js")).loadExample(p.example); }); return "Editor de redes abierto"; },
   },
+  write_code: {
+    label: "Escribir código en el editor de redes (Python o GLSL): crea el nodo y la IA lo escribe, lo prueba y lo arregla",
+    params: { what: "script (Ejecutar en Python: controla la red y el show) | chop (canales con Python) | dibujo (dibujar con Python) | shader (GLSL de una imagen)", request: "qué tiene que hacer el código, en español" },
+    check: (app, p) => ({ what: oneOf(p.what || "script", "what", ["script", "chop", "dibujo", "shader"]), request: str(p.request, "request", { max: 400 }) }),
+    text: (app, p) => `Escribir ${p.what === "shader" ? "un shader GLSL" : "un script de Python"}: «${p.request}»`,
+    run: (app, p) => { app.openNetwork?.().then(async () => (await import("../panels-network.js")).writeCodeFor(p.what, p.request)); return "Editor de redes abierto: la IA escribe el código"; },
+  },
   duplicate_surface: {
     label: "Duplicar una superficie", params: { surface: "id o nombre (por defecto la seleccionada)" },
     check: (app, p) => ({ surface: surfaceRef(app, p.surface) }),

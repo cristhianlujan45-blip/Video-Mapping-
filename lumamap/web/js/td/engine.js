@@ -77,6 +77,8 @@ function userFrag(def, code) {
   return `${pre}vec4 cook() {\n${c}\n}\nvoid main() { uv = vUv; fragColor = cook(); }`;
 }
 
+// Líneas que three.js pone delante de un RawShaderMaterial GLSL3 (#version y defines).
+const GLSL_PREFIX_LINES = 3;
 const FONTS = ["Impact, 'Arial Black', sans-serif", "'Segoe UI', Roboto, Arial, sans-serif", "'Courier New', monospace", "Georgia, 'Times New Roman', serif"];
 const hex = (v, d = "#000000") => /^#[0-9a-f]{6}$/i.test(String(v)) ? String(v) : d;
 
@@ -94,7 +96,7 @@ export class NetEngine {
     this.shaderErrors = new Map();
     this.compiling = null;
     this.r.debug.onShaderError = (gl, program, vs, fs) => {
-      const log = (gl.getShaderInfoLog(fs) || "") + (gl.getProgramInfoLog(program) || "");
+      const log = ((gl.getShaderInfoLog(fs) || "") + (gl.getProgramInfoLog(program) || "")).replace(/\u0000/g, "");
       if (this.compiling) this.shaderErrors.set(this.compiling, log.trim().split("\n").filter(Boolean).slice(0, 4).join("\n") || "no compila");
     };
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -798,6 +800,14 @@ export class NetEngine {
     const out = this.rtFor(node.id, w, h);
     this.pass(this.mat("encode", ENCODE), out, { s0: x.rt.texture });
     return { tex: out.texture, w, h };
+  }
+
+  /** Cuántas líneas hay antes del código del usuario en un GLSL TOP (para marcar la línea del error). */
+  glslOffset(node) {
+    const def = defOf(node);
+    if (!def) return 0;
+    const lines = userFrag(def, "").split("\n");
+    return lines.indexOf("vec4 cook() {") + 1 + GLSL_PREFIX_LINES;
   }
 
   /* ---------------- Dibujo con Python (Script TOP) ---------------- */

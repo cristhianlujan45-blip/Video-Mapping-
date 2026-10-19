@@ -1086,6 +1086,72 @@ await test("redes de nodos pro: «¿Qué pasa aquí?» explica un error, barra d
   assert.deepEqual(steps, [true, true, true, true, true, true, "info"]);
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
+await test("Python y la IA que escribe código: Dibujo con Python da imagen, consola (Alt+T), la IA escribe → prueba → arregla su error, y sin IA plantillas", async () => {
+  const http = await import("node:http");
+  const chats = [];
+  const answers = [
+    { code: "def onCook(scriptOp):\n    scriptOp.clear()\n    c = scriptOp.appendChan('azar')\n    c[0] = valor_que_no_existe", explanation: "Un valor al azar." },
+    { code: "import random\ndef onCook(scriptOp):\n    scriptOp.clear()\n    c = scriptOp.appendChan('azar')\n    c[0] = random.random()", explanation: "Un valor al azar en cada fotograma." },
+  ];
+  const fake = http.createServer((req, res) => {
+    res.setHeader("access-control-allow-origin", "*"); res.setHeader("access-control-allow-headers", "content-type"); res.setHeader("access-control-allow-methods", "GET,POST");
+    if (req.method === "OPTIONS") return res.end();
+    let body = ""; req.on("data", d => body += d); req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/api/version") return res.end(JSON.stringify({ version: "0.9.0" }));
+      if (req.url === "/api/tags") return res.end(JSON.stringify({ models: [{ name: "qwen3:8b", size: 5.2e9, details: { parameter_size: "8.2B", family: "qwen3" } }] }));
+      if (req.url === "/api/chat") { chats.push(JSON.parse(body)); const a = answers[Math.min(chats.length - 1, answers.length - 1)]; return res.end(JSON.stringify({ message: { role: "assistant", content: JSON.stringify(a) } })); }
+      res.statusCode = 404; res.end("{}");
+    });
+  });
+  await new Promise(r => fake.listen(0, "127.0.0.1", r));
+  const ids = await page.evaluate(async () => {
+    const a = window.__lumamap; await a.openNetwork();
+    const G = await import("./js/td/graph.js"), m = await import("./js/panels-network.js");
+    let n, st, sc, gl, lv; a.edit(() => { n = G.newNetwork("Python"); a.S.project.networks.push(n); st = G.addNode(n, "TOP", "script", { x: 0, y: 0 }); sc = G.addNode(n, "CHOP", "script", { x: 0, y: 200, p: { code: "def onCook(scriptOp):\n    pass\n" } }); gl = G.addNode(n, "TOP", "glsl", { x: 260, y: 200 }); lv = G.addNode(n, "TOP", "level", { x: 260, y: 0 }); n.display = st.id; });
+    m.closeNetworkEditor(); await a.openNetwork({ netId: n.id });
+    return { net: n.id, st: st.id, sc: sc.id, gl: gl.id };
+  });
+  // El dibujo con Python sale en la imagen.
+  const lit = await page.evaluate(async (ids) => { const a = window.__lumamap, n = a.S.project.networks.find(x => x.id === ids.net); await new Promise(r => setTimeout(r, 800)); const o = a.td.output(n.id, ids.st, { time: performance.now() / 1000, w: 64, h: 36 }); const d = o.el.getContext("2d").getImageData(0, 0, 64, 36).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k + 1] + d[k + 2]; return s; }, ids);
+  assert.ok(lit > 500, "los círculos se dibujan: " + lit);
+  // Consola: cambiar un parámetro con Python y ver el resultado de una expresión.
+  const ws = page.locator("#tdws.show");
+  await ws.locator(".tdpane").click({ position: { x: 600, y: 500 } });
+  await page.keyboard.press("Alt+t");
+  const cin = ws.locator(".tdconsole textarea");
+  await cin.fill("op('level1').par.brightness = 2.5"); await cin.press("Enter");
+  await cin.fill("len(ops('*'))"); await cin.press("Enter");
+  await ws.locator(".tdconsole .tdclog", { hasText: /^4$|\n4$/m }).waitFor({ timeout: 5000 }).catch(() => {});
+  assert.match(await ws.locator(".tdconsole .tdclog").innerText(), /\n4(\n|$)/);
+  assert.equal(await page.evaluate((ids) => window.__lumamap.S.project.networks.find(x => x.id === ids.net).nodes.find(x => x.type === "level").p.brightness, ids), 2.5);
+  await page.keyboard.press("Escape");
+  // La IA (Ollama simulado): escribe un Script CHOP con un error, LumaMap lo prueba, le pasa el error y la IA lo arregla.
+  await page.evaluate(async (ep) => { const a = window.__lumamap; const { aiOf } = await import("./js/panels-assistant.js"); const ai = aiOf(a); ai.setSettings({ endpoint: ep, enabled: true, allowLocal: true, provider: "auto", model: "qwen3:8b" }); await ai.refresh({ force: true }); }, `http://127.0.0.1:${fake.address().port}`);
+  await page.evaluate(async (ids) => { const m = await import("./js/panels-network.js"); m._edForTests.sel = new Set([ids.sc]); m._edForTests.params = true; }, ids);
+  await ws.locator('.tdnode[data-type="script"][data-fam="CHOP"] .tdname').click();
+  await ws.locator(".tdparams").getByRole("button", { name: "🤖 Escribir con IA" }).click();
+  const dlg = page.locator("#modal.show");
+  await dlg.locator("textarea").fill("un valor al azar");
+  await dlg.getByRole("button", { name: "✍ Escribir y probar" }).click();
+  await dlg.getByText(/Listo y funcionando/).waitFor({ timeout: 20000 });
+  assert.equal(chats.length, 2, "una para escribir y otra para arreglar");
+  assert.match(chats[1].messages.at(-1).content, /valor_que_no_existe[\s\S]*no existe/, "a la IA le llega el error con su línea");
+  const r = await page.evaluate((ids) => { const a = window.__lumamap, n = a.S.project.networks.find(x => x.id === ids.net), sc = n.nodes.find(x => x.id === ids.sc); return { code: sc.p.code, err: a.td.info(n, sc).error, v: a.td.cookers.get(n.id).chop(sc)?.data.azar?.[0] }; }, ids);
+  assert.match(r.code, /random\.random\(\)/); assert.equal(r.err, ""); assert.ok(r.v >= 0 && r.v < 1);
+  await page.evaluate(() => document.getElementById("modal")._close?.());
+  // Sin IA: el GLSL de «un túnel» pone la plantilla del túnel (y dice que es una plantilla).
+  await new Promise(r => fake.close(r));
+  await page.evaluate(async () => { const { aiOf } = await import("./js/panels-assistant.js"); const ai = aiOf(window.__lumamap); ai.setSettings({ endpoint: "http://127.0.0.1:9", model: "" }); await ai.refresh({ force: true }); });
+  await ws.locator('.tdnode[data-type="glsl"] .tdname').click();
+  await ws.locator(".tdparams").getByRole("button", { name: "🤖 Escribir con IA" }).click();
+  await dlg.locator("textarea").fill("un túnel de colores");
+  await dlg.getByRole("button", { name: "✍ Escribir y probar" }).click();
+  await dlg.getByText(/plantilla «Túnel»/).waitFor({ timeout: 15000 });
+  const g = await page.evaluate((ids) => { const a = window.__lumamap, n = a.S.project.networks.find(x => x.id === ids.net), gl = n.nodes.find(x => x.id === ids.gl); return { code: gl.p.code, err: a.td.info(n, gl).error }; }, ids);
+  assert.match(g.code, /atan\(p\.y, p\.x\)/); assert.equal(g.err, "");
+  await page.evaluate(async () => { document.getElementById("modal")._close?.(); const a = window.__lumamap; const { aiOf } = await import("./js/panels-assistant.js"); aiOf(a).setSettings({ endpoint: "http://localhost:11434", model: "" }); const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
+});
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const g = await pctx.newPage();
