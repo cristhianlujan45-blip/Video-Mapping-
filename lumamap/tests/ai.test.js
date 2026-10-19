@@ -137,6 +137,22 @@ await test("la IA enseña los nodos (como TouchDesigner) y los efectos de cámar
   assert.equal(lesson("enséñame a usar toda la herramienta"), 13);
   assert.equal(lesson("cómo proyecto sobre un cubo en 3d"), 17);
   assert.equal(lesson("cómo exporto el show"), 15);
+  const code = (t) => parseCommand(app, t).actions.find(a => a.action === "write_code")?.parameters;
+  assert.equal(code("escríbeme un script de python que cambie de escena con cada golpe").what, "script");
+  assert.equal(code("hazme un shader de un túnel").what, "shader");
+  assert.equal(code("crea un código que dibuje estrellas").what, "dibujo");
+  assert.equal(validateAction(app, { action: "write_code", parameters: { what: "chop", request: "un valor al azar" } }).ok, true);
+  assert.equal(validateAction(app, { action: "write_code", parameters: { what: "nope", request: "x" } }).ok, false);
+  const CG = await import("../web/js/ai/codegen.js");
+  assert.equal(CG.templateFor("glsl:top", "un túnel de colores").template, "Túnel");
+  assert.equal(CG.templateFor("py:execute", "cambia de escena con el golpe").template, "Siguiente escena en cada golpe");
+  assert.equal(CG.cleanCode("```python\nprint(1)\n```", "py:chop"), "print(1)\n");
+  assert.equal(CG.cleanCode("vec4 cook() {\n  return vec4(1.0);\n}", "glsl:top").trim(), "return vec4(1.0);");
+  assert.match(CG.codeSystem("py:execute"), /onFrameStart/);
+  assert.match(CG.codeUser({ code: "x", error: "Línea 1 · NameError" }), /Arréglalo[\s\S]*NameError/);
+  // Las plantillas de Python se pueden ejecutar de verdad (sin errores de escritura).
+  const { checkSyntax } = await import("../web/js/td/py.js");
+  for (const k of CG.TEMPLATE_KINDS.filter(k => k.startsWith("py"))) for (const name of CG.templatesOf(k)) assert.equal(checkSyntax(CG.templateFor(k, name.toLowerCase()).code), "", k + " · " + name);
   const { LEVELS } = await import("../web/js/ai/academy.js");
   assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
   const { searchKnowledge } = await import("../web/js/ai/knowledge.js");

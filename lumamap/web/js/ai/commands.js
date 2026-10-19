@@ -104,6 +104,11 @@ export function parseCommand(app, text) {
     return { reply: "Te abro el asistente de holograma: eliges qué aparece y cuántos proyectores, y lo monto solo (quito el fondo de la persona, uno los proyectores y te digo cómo colocarlo).",
       actions: [A("hologram_setup", { type: /pir[aá]mide/.test(t) ? "piramide" : /\b(tul|tela|gasa)\b/.test(t) ? "tul" : "escenario", n: pn ? num(pn[1]) : 1 })] };
   }
+  // Código: «escríbeme un script de Python que…», «hazme un shader de…» (la IA lo escribe en el editor de redes).
+  if (/(escr[ií]b[ea](me)?|haz(me)?|crea(me)?|progr[aá]ma(me)?|genera(me)?)\b/.test(t) && /(c[oó]digo|script|python|glsl|shader)/.test(t)) {
+    const what = /shader|glsl/.test(t) ? "shader" : /dibuj/.test(t) ? "dibujo" : /\b(canal(es)?|chop|se[ñn]al(es)?)\b/.test(t) ? "chop" : "script";
+    return { intent: "code", reply: "Te lo escribo en el editor de redes: creo el nodo, escribo el código, lo pruebo y, si falla, lo arreglo.", actions: [A("write_code", { what, request: raw.slice(0, 400) })] };
+  }
   // Redes de nodos (como TouchDesigner): «abre los nodos», «hazme un túnel de feedback con nodos»…
   if (/(abr[eia]|abrir|haz|hazme|crea|crear|monta|pon|ens[eé][ñn]a(me)? un ejemplo)/.test(t) && /(nodos|touch ?designer|editor de redes|\bred(es)?\b.*(nodos|feedback|glsl))/.test(t) && !/(c[oó]mo|expl[ií]ca)/.test(t)) {
     const ex = /t[uú]nel|feedback/.test(t) ? "tunnel" : /mano|cuerpo/.test(t) ? "hand" : /cubo/.test(t) ? "cube" : /movimiento/.test(t) ? "motion" : /barras|espectro/.test(t) ? "bars" : /caleidoscopio/.test(t) ? "camkaleido" : /texto/.test(t) ? "text" : /glsl|plasma|shader/.test(t) ? "glsl" : /deform|desplaz/.test(t) ? "displace" : "";

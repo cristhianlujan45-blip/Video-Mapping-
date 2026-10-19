@@ -166,6 +166,37 @@ export const EXAMPLES = [
     wire(net, nz, kal, tr, hsv, lv, out);
     return out;
   } },
+  { id: "python", name: "Python: dibujo que baila y un script que dirige", desc: "Un «Dibujo con Python» con anillos que laten con la música y un «Ejecutar» que cambia el color en cada golpe (abre la consola con Alt+T).", build(net) {
+    const au = at(net, "CHOP", "audio", 0, 2);
+    const st = at(net, "TOP", "script", 0, 0, { code: `import math
+
+def onCook(scriptOp):
+    c = scriptOp.canvas
+    c.clear('#04050a')
+    c.blend('add')
+    graves = op('audio1')['bass']
+    tono = op('table1')[0, 0]
+    for i in range(14):
+        a = absTime.seconds * 0.6 + i * math.tau / 14
+        r = 0.18 + 0.12 * graves + 0.05 * math.sin(absTime.seconds * 2 + i)
+        c.circle(0.5 + r * 0.5625 * math.cos(a), 0.5 + r * math.sin(a), 0.025 + 0.02 * graves, (0.2 + 0.8 * tono, 0.6, 1.0 - 0.7 * tono))
+    c.text('Python', 0.5, 0.5, 0.06 + 0.03 * graves, '#ffffff')
+` });
+    at(net, "DAT", "table", 1, 2, { text: "0" });
+    at(net, "DAT", "execute", 2, 2, { chop: au.name, code: `import random
+
+def onStart():
+    print('Script listo: el color cambia en cada golpe')
+
+def onValueChange(channel, val, prev):
+    if channel.name == 'beat' and val > 0.5 and prev <= 0.5:
+        op('table1')[0, 0] = round(random.random(), 2)
+` });
+    const glow = at(net, "TOP", "glow", 1, 0, { threshold: 0.2, amount: 1.2 });
+    const out = at(net, "TOP", "out", 2, 0);
+    wire(net, st, glow, out);
+    return out;
+  } },
 ];
 
 /** Crea una red nueva a partir de un ejemplo. Devuelve { net, out }. */

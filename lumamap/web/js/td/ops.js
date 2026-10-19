@@ -32,6 +32,45 @@ const opRef = (k, label, fam, o = {}) => ({ k, label, type: "op", fam, def: "", 
 const pulse = (k, label, o = {}) => ({ k, label, type: "pulse", def: 0, ...o });
 const XYZ = (pre, label, def = [0, 0, 0], min = -5, max = 5, page = "Transformar") => ["x", "y", "z"].map((a, n) => f(pre + a, `${label} ${a.toUpperCase()}`, def[n], min, max, { page }));
 
+/* Plantillas de los nodos de Python (lo que traen al crearlos). */
+export const PY_TEMPLATES = {
+  chop: `# Script CHOP: escribe aquí los canales que salen de este nodo.
+# scriptOp.inputs[0] es el CHOP conectado (si hay) · absTime.seconds es el tiempo
+import math
+
+def onCook(scriptOp):
+    scriptOp.clear()
+    onda = scriptOp.appendChan('onda')
+    onda[0] = 0.5 + 0.5 * math.sin(absTime.seconds * 2)
+`,
+  execute: `# Ejecutar (DAT): LumaMap llama solo a estas funciones, como el Execute DAT de TouchDesigner.
+import math
+
+def onStart():
+    print('¡Script en marcha!')
+
+def onFrameStart(frame):
+    # Cada fotograma. Por ejemplo:
+    # op('level1').par.brightness = 1 + 0.5 * math.sin(absTime.seconds)
+    pass
+
+def onOffToOn(channel):
+    # Con «CHOP que vigila»: cuando un canal pasa de 0 a 1 (el golpe, un botón…)
+    # lumamap.next_scene()
+    pass
+`,
+  top: `# Dibujo con Python (Script TOP): (0, 0) es abajo a la izquierda y (1, 1) arriba a la derecha.
+import math
+
+def onCook(scriptOp):
+    c = scriptOp.canvas
+    c.clear('#05060a')
+    for i in range(12):
+        a = absTime.seconds + i * math.tau / 12
+        c.circle(0.5 + 0.3 * math.cos(a), 0.5 + 0.3 * math.sin(a), 0.03, '#00e5ff')
+    c.text('LumaMap', 0.5, 0.12, 0.07, '#ffffff')
+`,
+};
 const ops = [];
 const add = (o) => { ops.push(o); return o; };
 const top = (type, label, desc, inputs, params, glsl, extra = {}) => add({ type, fam: "TOP", label, desc, inputs, params, glsl, ...extra });
@@ -114,6 +153,8 @@ top("movieout", "Grabar video", "Graba lo que le entra en un video (.mp4 o .webm
 top("netout", "Salida por red", "Manda lo que le entra por la red como video MJPEG, cada nodo en su canal: en OBS (Fuente multimedia), vMix, TouchDesigner (Web Render TOP) u otro equipo con http://IP:puerto/stream.mjpg?ch=canal. Solo en la app de escritorio (o abriendo LumaMap desde su servidor).", [1, 1],
   [t("active", "📡 Enviando", 1), s("channel", "Canal", ""), m("size", "Tamaño", [[540, "540p"], [720, "720p"], [1080, "1080p"]], 720),
     m("fps", "Fotogramas por segundo", [[10, "10"], [15, "15"], [25, "25"], [30, "30"]], 25), f("quality", "Calidad del JPEG", 0.8, 0.3, 0.95)], PASS, { special: "netout" });
+top("script", "Dibujo con Python (Script TOP)", "Dibuja con código Python: círculos, rectángulos, líneas, polígonos y texto que se mueven (Script TOP). La IA te lo puede escribir.", [0, 1],
+  [{ k: "code", label: "Código (Python)", type: "py", def: PY_TEMPLATES.top }], null, { special: "script" });
 top("resolution", "Resolución", "Cambia la resolución de la imagen (Resolution TOP).", [1, 1], [i("w", "Ancho", 1280, 16, 4096), i("h", "Alto", 720, 16, 4096)], PASS, { special: "resolution" });
 // Filtros
 top("level", "Nivel", "Brillo, contraste, gamma, opacidad y negativo (Level TOP).", [1, 1],
@@ -468,6 +509,9 @@ chop("export", "Exportar a LumaMap", "Manda un canal a cualquier parámetro de L
   [s("chan", "Canal (vacío = el primero)", ""), { k: "target", label: "Parámetro de LumaMap", type: "param", def: "" }, f("lo", "Valor 0 →", 0, -10, 10), f("hi", "Valor 1 →", 1, -10, 10), t("active", "Activo", 1)],
   ({ inputs }) => inputs[0] ? chopOut([...inputs[0].names], inputs[0].data, inputs[0].len) : chopOut([], {}, 1), { exporter: true });
 chop("null", "Null (CHOP)", "No cambia nada: para nombrar y referenciar señales (Null CHOP).", [1, 1], [], ({ inputs }) => inputs[0] || chopOut([], {}, 1));
+chop("script", "Script (Python)", "Canales calculados con código Python (Script CHOP): onCook(scriptOp) crea canales con appendChan y les pone valores; lee las entradas en scriptOp.inputs. La IA te lo puede escribir.", [0, 4],
+  [{ k: "code", label: "Código (Python)", type: "py", def: PY_TEMPLATES.chop }],
+  ({ p, inputs, env, node }) => env.pyChop ? env.pyChop(node, String(p.code || ""), inputs) : chopOut([], {}, 1), { python: true });
 chop("in", "Entrada de la subred (CHOP)", "Dentro de una subred: las señales que le llegan por esa entrada (In CHOP).", [0, 0], [i("index", "Entrada n.º", 1, 1, 4)], () => chopOut([], {}, 1), { subIn: true });
 chop("out", "Salida de la subred (CHOP)", "Dentro de una subred: las señales que salen de ella (Out CHOP).", [1, 1], [], ({ inputs }) => inputs[0] || chopOut([], {}, 1));
 
@@ -556,6 +600,8 @@ mat("wire", "Líneas (neón)", "Solo las aristas, de un color brillante (Wirefra
 
 /* ======================= DAT · Texto y tablas ======================= */
 add({ type: "text", fam: "DAT", label: "Texto (DAT)", desc: "Un texto para el Text TOP (Text DAT).", inputs: [0, 0], params: [{ k: "text", label: "Texto", type: "txt", def: "Hola" }] });
+add({ type: "execute", fam: "DAT", label: "Ejecutar (Python)", desc: "Un script que LumaMap ejecuta solo (Execute DAT): onStart() al empezar, onFrameStart(frame) en cada fotograma y, si vigila un CHOP, onValueChange / onOffToOn / onOnToOff. Puede cambiar cualquier nodo (op('x').par.y = …) y el show (lumamap.next_scene()…).", inputs: [0, 0], python: true,
+  params: [{ k: "code", label: "Código (Python)", type: "py", def: PY_TEMPLATES.execute }, { k: "active", label: "Activo", type: "t", def: 1 }, { k: "chop", label: "CHOP que vigila (opcional)", type: "op", fam: "CHOP", def: "" }, { k: "restart", label: "Volver a empezar (onStart)", type: "pulse", def: 0 }] });
 add({ type: "table", fam: "DAT", label: "Tabla", desc: "Una tabla de números (filas y columnas separadas por comas) para usar con tab('tabla1', fila, columna) (Table DAT).", inputs: [0, 0],
   params: [{ k: "text", label: "Filas (una por línea, columnas con comas)", type: "txt", def: "0, 0.5, 1\n1, 0.2, 0.8" }] });
 

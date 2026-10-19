@@ -14,6 +14,8 @@ import { h, btn, dialog, closeDialog, toast, hint, prompt, confirmDlg } from "./
 import { FAMILIES, OP_LIST, opDef, defOf, searchOps, acceptsInput } from "./td/ops.js";
 import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, nodeById, nodeByName, freeInput, isExpr, outputsOf, netTime, playNet, pauseNet, seekNet, setNetRate, outFam, childrenOf, descendants, groupIntoBase, ungroupBase, syncReplicators } from "./td/graph.js";
 import { AnimEditor } from "./td/animeditor.js";
+import { codeEditor } from "./td/codeedit.js";
+import { pyConsole, replRun } from "./td/pyapi.js";
 import { setKey, evalChan, uniqueChan } from "./td/anim.js";
 import { compileExpr, EXPR_FUNCS } from "./td/expr.js";
 import { EXAMPLES, buildExample } from "./td/examples.js";
@@ -173,6 +175,7 @@ function buildBar() {
       { label: "Rejilla (imán)", on: ed.grid, run: () => { ed.grid = !ed.grid; R.pane.classList.toggle("nogrid", !ed.grid); } },
       { label: "Panel de parámetros", keys: "P", on: ed.params, run: () => toggleParams() },
       { label: "Visor flotante de lo elegido (3D: mover objetos y cámara)", keys: "V", run: () => openViewerSel(), disabled: ed.sel.size !== 1 },
+      { label: "🐍 Consola de Python", keys: "Alt+T", run: () => toggleConsole() },
       { label: "Curvas (fotogramas clave)", keys: "K", on: !!ed.animEd, run: () => ed.animEd ? closeAnim() : openAnim() },
       { label: "Visor flotante del Render 3D", run: () => { const r = curNet().nodes.find(n => n.type === "render"); r ? openViewer(r.id) : toast("Esta red no tiene un Render 3D", "warn"); } },
       "-",
@@ -195,6 +198,7 @@ function buildBar() {
     menu("Ayuda", () => [
       { label: "Atajos de teclado", run: () => helpKeys() },
       { label: "Expresiones (ƒx)", run: () => helpExpr() },
+      { label: "🐍 Python en LumaMap", run: () => helpPython() },
       { label: "Qué es cada familia (TOP, CHOP…)", run: () => helpFamilies() },
       { label: "🎓 Aprender con Luma (capítulo de redes)", run: () => { closeNetworkEditor(); app.academy ? app.academy.start(19) : app.startTutorial?.(); } },
     ]),
@@ -272,7 +276,8 @@ function summary(n) {
       if (n.type === "replicator") { const k = curNet().nodes.filter(x => x.repOf === n.id).length; return `${k} copia${k === 1 ? "" : "s"} de ${p.master || "?"}`; }
       return n.type === "geo" ? (p.instancing ? `Instancias de ${p.instanceop || "?"}` : `Material: ${p.material || "—"}`) : n.type === "camera" ? `Fov ${val("fov")}°` : "Luz " + ["puntual", "sol", "foco", "ambiente"][p.kind | 0];
     case "MAT": { const sw = h("i", { class: "tdswatch" }); sw.style.background = p.color || "#888"; return h("span", {}, sw, " ", p.map ? "Textura: " + p.map : def.label); }
-    case "DAT": return String(p.text || "").split("\n")[0].slice(0, 30) || "(vacío)";
+    case "DAT": if (n.type === "execute") return `🐍 ${String(p.code || "").split("\n").length} líneas · ${p.active ? "activo" : "apagado"}${p.chop ? " · vigila " + p.chop : ""}`;
+      return String(p.text || "").split("\n")[0].slice(0, 30) || "(vacío)";
   }
   return def.label;
 }
@@ -897,12 +902,17 @@ function paramRow(net, n, q) {
     case "c": { const c = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff", "aria-label": q.label }); c.oninput = () => set(c.value, { live: true }); c.onchange = () => set(c.value); ctl = c; break; }
     case "s": { const s = h("input", { class: "text-in small", value: v ?? "", "aria-label": q.label }); s.addEventListener("change", () => set(s.value)); s.addEventListener("keydown", (e) => e.stopPropagation()); ctl = s; break; }
     case "txt": { const t = h("textarea", { class: "text-in small tdtxt", rows: 4, "aria-label": q.label }); t.value = v ?? ""; t.addEventListener("input", () => set(t.value, { live: true })); t.addEventListener("keydown", (e) => e.stopPropagation()); ctl = t; break; }
-    case "code": {
-      const t = h("textarea", { class: "text-in tdcode", rows: 10, spellcheck: "false", "aria-label": q.label });
-      t.value = v ?? "";
-      const apply = () => { set(t.value); setTimeout(() => updateInfo(true), 120); };
-      t.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apply(); } if (e.key === "Tab") { e.preventDefault(); const p = t.selectionStart; t.value = t.value.slice(0, p) + "  " + t.value.slice(t.selectionEnd); t.selectionStart = t.selectionEnd = p + 2; } });
-      ctl = h("div", {}, t, h("div", { class: "row" }, btn({ label: "Aplicar (Ctrl+Enter)", kind: "small primary", onClick: apply }), h("small", {}, "Tienes uv, time, res, tex0(uv), tex1(uv), u1…u4. Devuelve un vec4.")));
+    case "code": case "py": {
+      const py = q.type === "py";
+      const hint = py ? (n.type === "execute" ? "onStart(), onFrameStart(frame), onValueChange(channel, val, prev), onOffToOn(channel). op('x').par.y = …, lumamap.next_scene()…" : n.type === "script" && n.fam === "TOP" ? "onCook(scriptOp): c = scriptOp.canvas → c.clear(), c.circle(x, y, r, color), c.rect(), c.line(), c.poly(), c.text(); de 0 a 1." : "onCook(scriptOp): scriptOp.clear(), c = scriptOp.appendChan('x'), c[0] = valor; scriptOp.inputs[0]['canal'].")
+        : q.k === "vcode" ? "position, normal, uv, time, u1…u4 → devuelve la posición nueva (vec3)." : n.type === "glslmat" ? "vUv, vNormal, vPos, time, u1…u4, tex(vUv), light() → devuelve un vec4." : "Tienes uv, time, res, tex0(uv), tex1(uv), u1…u4. Devuelve un vec4.";
+      const ce = codeEditor({ value: v ?? "", lang: py ? "py" : "glsl", label: q.label, rows: py ? 16 : 12, hint,
+        glslOffset: !py && n.type === "glsl" && n.fam === "TOP" ? () => app.td?.glslOffset?.(n) || 0 : null,
+        onApply: (code) => { set(code); setTimeout(() => updateInfo(true), 150); },
+        tools: codeTools(net, n, q, py) });
+      rowEl.classList.add("code");
+      rowEl._ce = ce;
+      ctl = ce;
       break;
     }
     case "op": {
@@ -1139,6 +1149,196 @@ function togglePanelView(show = null) {
         btn({ label: "＋ Deslizador", kind: "small primary", onClick: () => { box.remove(); let n; app.edit(() => { const pos = centerWorld(); n = addHere(net, "COMP", "slider", { x: pos[0], y: pos[1] }); }); ed.sel = new Set([n.id]); renderAll(); togglePanelView(true); } })));
   R.pane.append(box);
   refreshWidgets(net, true);
+}
+
+/* ======================================================================
+   Python: consola (como el Textport de TouchDesigner) y ayudas del editor de código
+   ====================================================================== */
+/** Botones extra del editor de código (la IA que escribe código se añade aquí). */
+function codeTools(net, n, q, py) {
+  const out = [];
+  if (py) out.push(btn({ label: "🐍 Consola", kind: "small", title: "Ver lo que imprime (print) y probar líneas (Alt+T)", onClick: () => toggleConsole(true) }));
+  out.push(btn({ label: "🤖 Escribir con IA", kind: "small", title: "Dile en español qué quieres: la IA escribe el código, lo prueba en el nodo y lo arregla si falla", onClick: () => codeAIDialog(net, n, q) }));
+  out.push(btn({ label: "🛠 Arreglar con IA", kind: "small", title: "Si el código da un error, la IA lo arregla", onClick: () => fixWithAI(net, n, q) }));
+  return out;
+}
+/** Prueba el código de un nodo y devuelve su error ("" si va bien). */
+async function testNode(net, n, q) {
+  const eng = app.td;
+  if (!eng) return "";
+  if (q.type === "py") { const { checkSyntax } = await import("./td/py.js"); const e = checkSyntax(String(n.p[q.k] || "")); if (e) return e; }
+  for (let k = 0; k < 6; k++) {
+    eng.follow(performance.now() / 1000 + k * 0.02, app.S.levels);
+    try {
+      if (n.fam === "TOP") eng.top(net, n);
+      else if (n.fam === "CHOP") eng.cooker(net).chop(n);
+      else if (n.type === "execute") eng.cooker(net).runScripts();
+    } catch {}
+    await new Promise(r => setTimeout(r, 80));
+  }
+  return eng.info(net, n).error || "";
+}
+const setCode = (n, q, code) => { app.edit(() => { n.p[q.k] = code; }); };
+/** Escribir → probar → arreglar (hasta 2 veces). Devuelve { ok, code, error, explanation, source, fallback }. */
+async function writeAndTest(net, n, q, request, onStep = () => {}) {
+  const { aiOf } = await import("./panels-assistant.js");
+  const { codeKind } = await import("./ai/codegen.js");
+  const ai = aiOf(app), kind = codeKind(n, q.k), old = n.p[q.k];
+  const context = net.nodes.filter(x => x !== n).slice(0, 40).map(x => `${x.name} (${defOf(x).label})`).join(", ");
+  onStep("✍ Escribiendo el código…");
+  let r = await ai.writeCode({ kind, request, code: String(old || ""), context });
+  setCode(n, q, r.code);
+  onStep("🧪 Probándolo en el nodo…");
+  let err = await testNode(net, n, q);
+  for (let k = 0; err && !r.fallback && k < 2; k++) {
+    onStep(`🛠 Dio un error; la IA lo arregla (intento ${k + 1})…`);
+    const fix = await ai.writeCode({ kind, request, code: r.code, error: err });
+    if (fix.fallback) break;
+    r = { ...fix, explanation: r.explanation || fix.explanation };
+    setCode(n, q, r.code);
+    err = await testNode(net, n, q);
+  }
+  if (err) { setCode(n, q, old); await testNode(net, n, q); }   // si no salió, el código de antes sigue funcionando
+  return { ok: !err, code: r.code, error: err, explanation: r.explanation, source: r.source, fallback: !!r.fallback };
+}
+/** Desde el asistente: crea el nodo que toca y la IA escribe su código («escríbeme un script que…»). */
+export function writeCodeFor(what, request) {
+  const net = curNet();
+  const [fam, type] = { chop: ["CHOP", "script"], dibujo: ["TOP", "script"], shader: ["TOP", "glsl"] }[what] || ["DAT", "execute"];
+  let n;
+  app.edit(() => { const pos = centerWorld(); n = addHere(net, fam, type, { x: pos[0], y: pos[1] }); if (fam === "TOP" && !net.display) net.display = n.id; });
+  ed.sel = new Set([n.id]); ed.params = true;
+  renderAll();
+  const q = defOf(n).params.find(x => x.k === "code");
+  codeAIDialog(net, n, q, { request, auto: true });
+  return n;
+}
+function codeAIDialog(net, n, q, { request = "", auto = false } = {}) {
+  const py = q.type === "py";
+  const ideas = py ? (n.fam === "TOP" ? ["Estrellas que parpadean", "Un reloj con segundero", "Barras que bailan con la música", "Texto que late"] : n.type === "execute" ? ["Cada 8 golpes, la siguiente escena", "Que el brillo de level1 suba y baje", "Parpadeo con apagón cada segundo"] : ["100 posiciones en círculo para instancias", "Un valor al azar que cambia suave", "Una rampa de 0 a 1 cada 2 segundos"])
+    : n.fam === "MAT" ? (q.k === "vcode" ? ["Olas que mueven la superficie", "Ruido que respira"] : ["Arcoíris según la altura", "Neón en los bordes"]) : ["Un túnel de colores", "Caleidoscopio de humo", "Ondas de agua azules", "Plasma psicodélico"];
+  const req = h("textarea", { class: "text-in", rows: 3, placeholder: `Por ejemplo: ${ideas[0].toLowerCase()}`, "aria-label": "Qué quieres que haga el código" });
+  req.value = request;
+  const steps = h("div", { class: "tdaisteps", role: "status" });
+  const goB = btn({ label: "✍ Escribir y probar", kind: "primary", onClick: () => go() });
+  req.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) go(); });
+  const go = async () => {
+    const text = req.value.trim();
+    if (!text) { req.focus(); toast("Escribe qué quieres que haga", "warn"); return; }
+    goB.disabled = true; steps.replaceChildren();
+    const step = (t) => steps.append(h("div", {}, t));
+    try {
+      const r = await writeAndTest(net, n, q, text, step);
+      if (r.ok) {
+        step(r.fallback ? "📄 " + r.explanation : `✅ Listo y funcionando${r.explanation ? ": " + r.explanation : ""}`);
+        if (r.source && !r.fallback) step(`(escrito por: ${r.source})`);
+        renderParams(); refreshNode(n);
+      } else {
+        step("⚠ La IA no consiguió que funcione; tu código de antes sigue puesto. Te dejo el suyo en el editor para que lo veas:");
+        step(r.error.split("\n")[0]);
+        renderParams();
+        const row = R.params.querySelector(`.tdprow[data-k="${q.k}"]`);
+        row?._ce?.setValue(r.code); row?._ce?.setError(r.error);
+      }
+    } catch (e) { step("⚠ " + (e.message || e)); }
+    goB.disabled = false;
+  };
+  dialog({ title: `🤖 Escribir ${py ? "Python" : "GLSL"} con IA · ${n.name}`, wide: true, content: h("div", { class: "tdhelptext" },
+    hint("Dile en español qué quieres. La IA escribe el código, lo prueba en este nodo y, si da un error, lo arregla sola (hasta 2 veces). Sin IA instalada te pone la plantilla más parecida."),
+    req, h("div", { class: "chips" }, ...ideas.map(t => h("button", { class: "chip", onclick: () => { req.value = t; req.focus(); } }, t))),
+    h("div", { class: "row" }, goB), steps) });
+  setTimeout(() => { req.focus(); if (auto && request) go(); }, 50);
+}
+async function fixWithAI(net, n, q) {
+  const err = app.td?.info(net, n).error || (q.type === "py" ? (await import("./td/py.js")).checkSyntax(String(n.p[q.k] || "")) : "");
+  if (!err) { toast("Este código no tiene errores ahora mismo ✓"); return; }
+  const { aiOf } = await import("./panels-assistant.js");
+  const { codeKind } = await import("./ai/codegen.js");
+  const ai = aiOf(app), kind = codeKind(n, q.k), old = String(n.p[q.k] || "");
+  toast("🛠 La IA está arreglando el código…");
+  let code = old, e = err;
+  for (let k = 0; k < 3 && e; k++) {
+    const r = await ai.writeCode({ kind, code, error: e });
+    if (r.fallback) { toast("Para arreglar código hace falta la IA (Asistente → IA local con Ollama). Mira «🤖 ¿Qué pasa aquí?» para entender el error.", "warn"); return; }
+    code = r.code; setCode(n, q, code);
+    e = await testNode(net, n, q);
+  }
+  if (e) { setCode(n, q, old); toast("La IA no consiguió arreglarlo; el código sigue como estaba", "warn"); }
+  else toast("✅ Arreglado: el nodo ya funciona");
+  renderParams(); refreshNode(n);
+}
+function toggleConsole(show = null) {
+  const old = R.root.querySelector(".tdconsole");
+  if (old && show !== true) { old.remove(); pyConsole.listeners.delete(old._listen); return; }
+  if (old) { old.querySelector("textarea")?.focus(); return; }
+  const log = h("div", { class: "tdclog", role: "log", "aria-live": "polite" });
+  const input = h("textarea", { class: "tdcin", rows: 1, spellcheck: "false", placeholder: "Escribe Python y Enter (p. ej. op('noise1').par.period = 4) · Mayús+Enter: otra línea", "aria-label": "Línea de Python" });
+  const hist = (() => { try { return JSON.parse(localStorage.getItem("lumamap:pyhist") || "[]"); } catch { return []; } })();
+  let hi = hist.length;
+  const line = (l) => { const d = h("div", { class: "tdcl " + l.kind }, l.from && l.kind !== "in" && l.from !== "consola" ? h("b", {}, l.from + " › ") : null, l.text); log.append(d); if (log.childElementCount > 400) log.firstElementChild.remove(); };
+  for (const l of pyConsole.lines.slice(-200)) line(l);
+  const listen = (l) => { if (!l) { log.replaceChildren(); return; } line(l); log.scrollTop = log.scrollHeight; };
+  pyConsole.listeners.add(listen);
+  const run = () => {
+    const src = input.value.replace(/\s+$/, "");
+    if (!src.trim()) return;
+    hist.push(src); if (hist.length > 100) hist.shift(); hi = hist.length;
+    try { localStorage.setItem("lumamap:pyhist", JSON.stringify(hist)); } catch {}
+    input.value = ""; input.rows = 1;
+    const net = curNet(), eng = app.td;
+    if (!eng) return;
+    eng.follow(performance.now() / 1000, app.S.levels);
+    replRun(eng.cooker(net), net, src);
+    app.changed(); app.commitSoon();
+    renderParams(); refreshWidgets(net, true);
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(); return; }
+    if (e.key === "Enter" && e.shiftKey) { input.rows = Math.min(8, input.value.split("\n").length + 1); return; }
+    if (e.key === "ArrowUp" && !input.value.includes("\n") && hi > 0) { e.preventDefault(); input.value = hist[--hi]; }
+    if (e.key === "ArrowDown" && !input.value.includes("\n")) { e.preventDefault(); hi = Math.min(hist.length, hi + 1); input.value = hist[hi] || ""; }
+    if (e.key === "Escape") toggleConsole(false);
+  });
+  const win = h("div", { class: "tdvwin tdconsole", role: "dialog", "aria-label": "Consola de Python" },
+    h("div", { class: "tdvhead" }, h("b", { class: "tdvtitle" }, "🐍 Consola de Python"),
+      h("span", { class: "tdvtools" }, h("button", { class: "tdvbtn", title: "Borrar la consola", "aria-label": "Borrar la consola", onclick: () => pyConsole.clear() }, "🧹"),
+        h("button", { class: "tdvbtn", title: "Ayuda de Python en LumaMap", "aria-label": "Ayuda de Python", onclick: () => helpPython() }, "?")),
+      h("button", { class: "tdx", "aria-label": "Cerrar la consola", onclick: () => toggleConsole(false) }, "✕")),
+    log, input);
+  win._listen = listen;
+  const W = R.pane.clientWidth || 800, H = R.pane.clientHeight || 500;
+  Object.assign(win.style, { left: "16px", top: Math.max(60, H - 300) + "px", width: Math.min(620, W - 40) + "px", height: "280px" });
+  // Moverla por la barra.
+  win.firstElementChild.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button")) return;
+    const r = win.getBoundingClientRect(), rr = R.root.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+    const mv = (ev) => { win.style.left = Math.max(0, ev.clientX - rr.left - ox) + "px"; win.style.top = Math.max(0, ev.clientY - rr.top - oy) + "px"; };
+    const up = () => { document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", up); };
+    document.addEventListener("pointermove", mv); document.addEventListener("pointerup", up);
+  });
+  R.root.append(win);
+  log.scrollTop = log.scrollHeight;
+  input.focus();
+  if (!pyConsole.lines.length) pyConsole.push("Python de LumaMap. Prueba: op('noise1').par.period = 4 · [n.name for n in ops('*')] · lumamap.scenes() · help con «?»", "info", "");
+}
+function helpPython() {
+  dialog({ title: "🐍 Python en LumaMap", wide: true, content: h("div", { class: "tdhelptext" },
+    h("p", {}, "Un Python propio de LumaMap, como los scripts de TouchDesigner pero seguro: no puede tocar tus archivos, la red ni el sistema. Si un script tarda demasiado se corta para que el show no se pare."),
+    h("pre", {}, `op('noise1').par.period = 3             # cambiar un parámetro
+v = op('lfo1')['chan1']                   # el valor de un canal (un número)
+op('lfo1')['chan1'][5]                    # la muestra 5
+op('tabla1')[1, 2]                        # una celda de una tabla
+op('level1').bypass = True                # apagar un nodo
+for n in ops('bola*'): n.par.radius = 0.1  # muchos nodos a la vez
+me.name, me.digits, absTime.seconds       # este nodo y el tiempo
+print('hola')                             # a la consola (Alt+T)
+lumamap.next_scene(); lumamap.scene('DROP')
+lumamap.blackout(True); lumamap.set_bpm(128)
+lumamap.set_param('global/master', 0.5)`),
+    h("p", {}, "Nodos con Python: «Script (Python)» CHOP (onCook(scriptOp) crea canales), «Ejecutar (Python)» DAT (onStart, onFrameStart, onValueChange, onOffToOn, onOnToOff) y «Dibujo con Python» TOP (un lienzo: clear, circle, rect, line, poly, text, glow, blend)."),
+    h("p", {}, "Tiene: if/elif/else, for/while, def, lambda, listas, diccionarios, comprensiones, f-strings, try/except y los módulos math, random, time y colorsys. No tiene clases propias ni otras librerías (numpy…)."),
+    h("p", {}, "🤖 La IA te lo escribe: en el editor de código, «Escribir con IA», y lo prueba y arregla sola si falla.")) });
 }
 
 /* ======================================================================
@@ -1443,8 +1643,8 @@ function updateInfo(force = false) {
     total += i.ms || 0; if (i.error) errs++;
     el.classList.toggle("err", !!i.error);
     // Tiempos en colores (como el «perform» de TouchDesigner): naranja > 1 ms, rojo > 4 ms.
-    el.classList.toggle("hot1", ed.heat && i.ms > 1 && i.ms <= 4);
-    el.classList.toggle("hot2", ed.heat && i.ms > 4);
+    el.classList.toggle("hot1", !!(ed.heat && i.ms > 1 && i.ms <= 4));
+    el.classList.toggle("hot2", !!(ed.heat && i.ms > 4));
     const f = el.querySelector(".tdinfo");
     const rec = n.type === "movieout" ? eng.recInfo?.(n.id) : null;
     el.classList.toggle("rec", !!rec);
@@ -1463,6 +1663,8 @@ function updateInfo(force = false) {
       pp._info.textContent = (n.fam === "TOP" && i.w ? `Imagen ${i.w}×${i.h} · ` : "") + `cálculo ${i.ms.toFixed(2)} ms` + (i.error ? `\n⚠ ${i.error}` : "");
       pp._info.classList.toggle("err", !!i.error);
       if (pp._why) pp._why.style.display = i.error ? "" : "none";
+      // El error, dentro del editor de código (con su línea marcada).
+      for (const r of pp.querySelectorAll(".tdprow.code")) { if (r._ce && r._lastErr !== i.error && !r._ce.isDirty()) { r._lastErr = i.error; r._ce.setError(i.error || null); } }
       const ch = pp.querySelector(".tdchans");
       if (ch) { const c = eng.cookers.get(net.id)?.chop(n); ch.replaceChildren(...(c?.names || []).slice(0, 16).map(nm => h("div", { class: "tdchan" }, h("b", {}, nm), h("span", {}, c.len > 1 ? `${c.len} muestras · [0] ${(+c.data[nm][0]).toFixed(3)}` : (+c.data[nm][0]).toFixed(3))))); }
     }
@@ -1574,6 +1776,7 @@ export function handleNetKey(a, e) {
   if (ctrl) return eat();
   if (document.activeElement?.closest?.(".tdanim")) { if (k === "Delete" || k === "Backspace") return false; }
   else if (ed.activeV?.view3d && !e.altKey && ed.activeV.view3d.key(k)) return eat();
+  if (e.altKey && (lk === "t" || e.code === "KeyT")) { toggleConsole(); return eat(); }
   if (lk === "k") { ed.animEd ? closeAnim() : openAnim(); return eat(); }
   if (lk === "i") { const n = nodeById(curNet(), [...ed.sel][0]); if (n?.type === "base") enterBase(n.id); return eat(); }
   if (lk === "u") { goUp(); return eat(); }
@@ -1595,6 +1798,7 @@ export function handleNetKey(a, e) {
   return k.length === 1 && !e.altKey ? eat() : false;
 }
 ed.togglePanel = (v) => togglePanelView(v);
+ed.toggleConsole = (v) => toggleConsole(v);
 ed.openWindowComp = (net, n) => openWindowComp(net, n);
 ed.copyNetUrl = (n) => copyNetUrl(n);
 export { loop as _loopForTests, ed as _edForTests };
