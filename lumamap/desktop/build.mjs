@@ -1,0 +1,162 @@
+// Empaqueta LumaMap para escritorio.
+//   node build.mjs --stage        prepara .stage/ (para `npm start`)
+//   node build.mjs win32 x64      genera dist/LumaMap-Windows-x64.zip (portable, sin instalar)
+//   node build.mjs installer      instalador de Windows (dist/LumaMap-Setup.exe)
+//   node build.mjs installer-mac arm64|x64   imagen de Mac (dist/LumaMap-Mac-<arch>.dmg), en un Mac
+// La app web (../web) se copia dentro: el escritorio usa exactamente el mismo código.
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const stage = path.join(here, ".stage");
+const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"));
+
+fs.rmSync(stage, { recursive: true, force: true });
+fs.mkdirSync(stage, { recursive: true });
+for (const f of ["main.js", "preload.js", "ai.js", "ollama-pull.js", "shortcuts.js", "phoneusb.js", "net.js", "optimize.js", "ffglhost.js", "dmx-service.mjs", "remote-service.mjs", "updater.ps1"]) fs.copyFileSync(path.join(here, f), path.join(stage, f));
+// ffmpeg para optimizar videos: se incluye su paquete (con el binario de esta plataforma).
+fs.cpSync(path.join(here, "node_modules", "ffmpeg-static"), path.join(stage, "node_modules", "ffmpeg-static"), { recursive: true });
+// SDK de Claude para el asistente (y lo que necesita al ejecutarse), sin tipos ni mapas de código.
+for (const m of ["@anthropic-ai/sdk", "standardwebhooks", "@stablelib/base64", "fast-sha256"])
+  fs.cpSync(path.join(here, "node_modules", m), path.join(stage, "node_modules", m), { recursive: true,
+    filter: (src) => !/\.(map|d\.ts|d\.mts|d\.cts)$/.test(src) && !/[\\/]src([\\/]|$)/.test(path.relative(path.join(here, "node_modules", m), src)) });
+// Compilando para Windows desde otro sistema: se descarga el ffmpeg.exe de Windows.
+const MAC = process.argv[2] === "installer-mac";
+const targetPlatform = process.argv[2] === "installer" ? "win32" : MAC ? "darwin" : (process.argv[2] || process.platform);
+const targetArch = MAC ? (process.argv[3] || process.arch) : "x64";
+// Para otra plataforma o, en el Mac, para el otro procesador (Intel / Apple Silicon): su ffmpeg.
+if (!process.argv.includes("--stage") && (targetPlatform !== process.platform || (MAC && targetArch !== process.arch))) {
+  const dir = path.join(stage, "node_modules", "ffmpeg-static");
+  for (const f of ["ffmpeg", "ffmpeg.exe"]) fs.rmSync(path.join(dir, f), { force: true });
+  execFileSync(process.execPath, [path.join(dir, "install.js")], { cwd: dir, stdio: "inherit",
+    env: { ...process.env, npm_config_platform: targetPlatform, npm_config_arch: targetArch } });
+}
+// Anfitrión de plugins FFGL de Resolume (ffgl/ffglhost.exe, fuera del .asar para poder ejecutarlo).
+// Se compila aquí si falta (y hay compilador); el instalador de Windows no se hace sin él.
+{
+  const exe = targetPlatform === "win32" ? "ffglhost.exe" : "ffglhost";
+  const built = path.join(here, "ffgl", "bin", exe);
+  if (targetPlatform === process.platform && (targetPlatform === "win32" || targetPlatform === "linux")) {
+    try { (await import("./ffgl/build.mjs")).buildFFGL({ target: targetPlatform, hostOnly: true }); }
+    catch (e) { console.warn("Plugins FFGL: no se pudo compilar el anfitrión:", e.message); }
+  }
+  if (fs.existsSync(built)) {
+    fs.mkdirSync(path.join(stage, "ffgl"), { recursive: true });
+    fs.copyFileSync(built, path.join(stage, "ffgl", exe));
+  } else if (targetPlatform === "win32" && !process.argv.includes("--stage")) {
+    throw new Error("Falta ffgl/bin/ffglhost.exe: compílalo con «node ffgl/build.mjs --host-only» (Visual Studio C++)");
+  } else console.warn("Plugins FFGL: sin anfitrión para " + targetPlatform + " (la app lo dirá en el panel Plugins)");
+}
+fs.cpSync(path.join(here, "..", "web"), path.join(stage, "web"), { recursive: true });
+// Los servicios (Node) importan módulos de web/js: son ES modules.
+fs.writeFileSync(path.join(stage, "web", "package.json"), JSON.stringify({ type: "module" }));
+// Servidor del mando remoto y OSC (mismo código que la versión web).
+fs.mkdirSync(path.join(stage, "server"), { recursive: true });
+for (const f of ["index.js", "osc.js", "tls.js", "stream.js"]) fs.copyFileSync(path.join(here, "..", "server", f), path.join(stage, "server", f));
+fs.writeFileSync(path.join(stage, "server", "package.json"), JSON.stringify({ type: "module" }));
+fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
+  name: pkg.name, productName: pkg.productName, version: pkg.version, description: pkg.description, main: "main.js", license: pkg.license, author: pkg.author,
+  dependencies: { "ffmpeg-static": pkg.dependencies["ffmpeg-static"], "@anthropic-ai/sdk": pkg.dependencies["@anthropic-ai/sdk"] },
+}, null, 2));
+if (process.argv.includes("--stage")) process.exit(0);
+
+// Mac (.dmg): arrastrar LumaMap a Aplicaciones. Firma «ad hoc» (sin certificado de Apple): la
+// primera vez se abre con clic derecho → Abrir. Cámara y micrófono piden permiso al usarse.
+if (MAC) {
+  const { build, Platform, Arch } = await import("electron-builder");
+  const files = await build({
+    targets: Platform.MAC.createTarget(["dmg"], targetArch === "arm64" ? Arch.arm64 : Arch.x64),
+    projectDir: here,
+    publish: "never",
+    config: {
+      appId: "com.lumamap.desktop",
+      productName: "LumaMap",
+      copyright: "MIT",
+      directories: { app: stage, output: path.join(here, "dist") },
+      electronVersion: pkg.devDependencies.electron.replace(/^[^\d]*/, ""),
+      asar: true,
+      asarUnpack: ["**/node_modules/ffmpeg-static/**"],
+      npmRebuild: false,
+      publish: null,
+      artifactName: `LumaMap-Mac-${targetArch}.\${ext}`,
+      mac: {
+        icon: path.join(here, "build", "icon-1024.png"),
+        category: "public.app-category.video",
+        target: ["dmg"],
+        identity: "-",   // firma ad hoc: Apple Silicon no abre apps sin ninguna firma
+        hardenedRuntime: false,
+        gatekeeperAssess: false,
+        extendInfo: {
+          NSCameraUsageDescription: "LumaMap usa la cámara para las proyecciones interactivas y el seguimiento de personas.",
+          NSMicrophoneUsageDescription: "LumaMap escucha la música para que las visuales sigan el ritmo.",
+          NSLocalNetworkUsageDescription: "LumaMap habla con luces (Art-Net, sACN), controladores OSC y el móvil por la red local.",
+        },
+      },
+      dmg: { title: "LumaMap" },
+    },
+  });
+  console.log("Listo:", files.filter(f => f.endsWith(".dmg")).join("\n"));
+  process.exit(0);
+}
+// Instalador de Windows (.exe): doble clic, instala y crea accesos directos.
+if (process.argv[2] === "installer") {
+  const { build, Platform, Arch } = await import("electron-builder");
+  const files = await build({
+    targets: Platform.WINDOWS.createTarget(["nsis"], Arch.x64),
+    projectDir: here,
+    publish: "never",
+    config: {
+      appId: "com.lumamap.desktop",
+      productName: "LumaMap",
+      copyright: "MIT",
+      directories: { app: stage, output: path.join(here, "dist") },
+      electronVersion: pkg.devDependencies.electron.replace(/^[^\d]*/, ""),
+      asar: true,
+      asarUnpack: ["**/node_modules/ffmpeg-static/**", "ffgl/**"],   // ffmpeg y el anfitrión FFGL deben poder ejecutarse
+      npmRebuild: false,
+      publish: null, // sin autoactualización: no se generan archivos de canal
+      artifactName: "LumaMap-Setup.${ext}",   // nombre fijo: el enlace de descarga y el actualizador no cambian
+      win: {
+        icon: path.join(stage, "web", "icon.png"),
+        // Sin certificado de firma: no se edita el .exe (evita depender de Wine al compilar en Linux).
+        signAndEditExecutable: process.platform === "win32",
+      },
+      nsis: {
+        oneClick: false,
+        perMachine: false,
+        allowToChangeInstallationDirectory: true,
+        createDesktopShortcut: false,   // lo crea installer.nsh según la casilla «Crear acceso directo en el escritorio»
+        createStartMenuShortcut: true,
+        shortcutName: "LumaMap",
+        runAfterFinish: true,
+        installerLanguages: ["es_ES"],
+        language: "3082",
+        include: path.join(here, "build", "installer.nsh"),   // desinstalar conservando los datos (salvo que se pida)
+        deleteAppDataOnUninstall: false,
+      },
+    },
+  });
+  console.log("Listo:", files.filter(f => f.endsWith(".exe")).join("\n"));
+  process.exit(0);
+}
+
+const [platform = "win32", arch = "x64"] = process.argv.slice(2);
+const { packager } = await import("@electron/packager");
+const electronVersion = pkg.devDependencies.electron.replace(/^[^\d]*/, "");
+const out = path.join(here, "dist");
+const [appDir] = await packager({
+  dir: stage, out, platform, arch, electronVersion, overwrite: true,
+  name: "LumaMap", executableName: "LumaMap", appVersion: pkg.version,
+  appCopyright: "MIT", prune: false, asar: { unpack: "**/node_modules/ffmpeg-static/**", unpackDir: "ffgl" },
+});
+const label = { win32: "Windows", darwin: "macOS", linux: "Linux" }[platform] || platform;
+const zipFile = path.join(out, `LumaMap-${pkg.version}-${label}-${arch}.zip`);
+fs.rmSync(zipFile, { force: true });
+if (process.platform === "win32") {
+  execFileSync("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path '${appDir}\\*' -DestinationPath '${zipFile}'`], { stdio: "inherit" });
+} else {
+  execFileSync("zip", ["-qry", zipFile, "."], { cwd: appDir, stdio: "inherit" });
+}
+console.log("Listo:", zipFile);
