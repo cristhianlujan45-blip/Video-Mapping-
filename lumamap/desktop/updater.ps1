@@ -49,10 +49,32 @@ function StopLeftovers {
     try { $_.Kill(); $_.WaitForExit(5000) | Out-Null } catch {}
   }
 }
+function AppWindowUp {
+  # ¿Hay un LumaMap de esta instalación con su ventana a la vista?
+  return [bool](Get-Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.Path -and $_.Path.StartsWith($InstallDir, [StringComparison]::OrdinalIgnoreCase) -and $_.MainWindowHandle -ne [IntPtr]::Zero })
+}
 function Relaunch {
+  # Volver a abrir LumaMap y COMPROBAR que su ventana aparece (antes no se comprobaba: si no
+  # arrancaba, la persona se quedaba sin app). Con --after-update, para que la app espere a que la
+  # versión anterior termine de cerrarse; si no aparece, se reintenta como desde el Explorador
+  # (sin heredar la ventana oculta ni nada de este proceso) y otra vez directamente.
   if ($NoRelaunch) { return }
-  $p = ExePath
-  if (Test-Path $p) { Start-Process -FilePath $p -WorkingDirectory $InstallDir | Out-Null; Log "LumaMap abierto de nuevo" }
+  try {
+    $p = ExePath
+    if (-not (Test-Path $p)) { Log "No se puede abrir: no existe $p"; return }
+    Start-Sleep -Seconds 2
+    for ($try = 1; $try -le 3; $try++) {
+      try {
+        if ($try -eq 2) { Start-Process -FilePath "$env:WINDIR\explorer.exe" -ArgumentList "`"$p`"" | Out-Null }
+        else { Start-Process -FilePath $p -ArgumentList "--after-update" -WorkingDirectory $InstallDir -WindowStyle Normal | Out-Null }
+      } catch { Log "Intento $try de abrir LumaMap: $($_.Exception.Message)" }
+      for ($k = 0; $k -lt 60; $k++) { Start-Sleep -Milliseconds 750; if (AppWindowUp) { Log "LumaMap abierto de nuevo (intento $try)"; return } }
+      Log "LumaMap no apareció en 45 s (intento $try)"
+      if ($try -lt 3) { StopLeftovers }
+    }
+    Log "ERROR: no se pudo volver a abrir LumaMap; ábrelo desde el escritorio o el menú Inicio"
+  } catch { Log "ERROR al volver a abrir LumaMap: $($_.Exception.Message)" }
 }
 
 try {

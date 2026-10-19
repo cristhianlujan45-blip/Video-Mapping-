@@ -181,6 +181,30 @@ if (-not $r.ok -or $r.state -ne "updated") { Fail "la actualización no terminó
 if (-not (Test-Path (Join-Path $env:LOCALAPPDATA "LumaMap-backup\previous\LumaMap.exe"))) { Fail "no hay copia de seguridad de la versión anterior" }
 $p = Launch; StopAll
 
+Step "3b. Actualizar DESDE la app (como el botón «Actualizar»): se cierra, instala y VUELVE A ABRIRSE"
+# El mismo camino que la persona: la app para sus servicios, lanza el actualizador (oculto, sin
+# -NoRelaunch) y se cierra; el actualizador instala y tiene que volver a abrirla con su ventana.
+$ulog = Join-Path $env:LOCALAPPDATA "LumaMap-backup\updater.log"
+$logBefore = if (Test-Path $ulog) { @(Get-Content $ulog).Count } else { 0 }
+$env:LUMAMAP_TEST_SELF_UPDATE = $Setup
+$old = Start-Process -FilePath $exe -PassThru
+Remove-Item Env:\LUMAMAP_TEST_SELF_UPDATE
+if (-not $old.WaitForExit(120000)) { Fail "la app no se cerró para actualizarse" }
+Write-Host "La app se cerró para actualizarse (código $($old.ExitCode))"
+$new = $null
+for ($k = 0; $k -lt 120 -and -not $new; $k++) {
+  Start-Sleep -Seconds 2
+  $new = Get-Process LumaMap -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $old.Id -and $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
+}
+$tail = if (Test-Path $ulog) { (@(Get-Content $ulog) | Select-Object -Skip $logBefore) -join "`n" } else { "(sin registro)" }
+Write-Host "Registro del actualizador:`n$tail"
+if (-not $new) { Fail "tras actualizar, LumaMap NO se volvió a abrir" }
+Start-Sleep -Seconds 10
+if ($new.HasExited -or -not (Get-Process -Id $new.Id -ErrorAction SilentlyContinue)) { Fail "LumaMap se volvió a abrir pero se cerró enseguida" }
+if ($tail -notmatch "abierto de nuevo") { Fail "el actualizador no confirmó que la app se abrió" }
+Write-Host "LumaMap se volvió a abrir sola (pid $($new.Id)) y sigue abierta"
+StopAll
+
 Step "4. Instalador defectuoso → ROLLBACK automático"
 $bad = Join-Path $env:TEMP "instalador-roto.exe"
 Copy-Item "$env:SystemRoot\System32\where.exe" $bad -Force     # termina con error

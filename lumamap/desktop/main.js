@@ -55,7 +55,16 @@ if (gpuMode) {
 }
 
 // Solo una instancia: si se abre otra vez, se enfoca la existente.
-if (!app.requestSingleInstanceLock()) app.quit();
+// Justo después de actualizar (el actualizador abre la app con --after-update), la versión
+// anterior puede estar terminando de cerrarse: se espera a que suelte el candado (hasta 20 s)
+// en vez de cerrarse en silencio, que dejaba a la persona sin app tras actualizar.
+const AFTER_UPDATE = process.argv.includes("--after-update");
+let gotLock = app.requestSingleInstanceLock();
+if (!gotLock && AFTER_UPDATE) {
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (let k = 0; k < 40 && !gotLock; k++) { Atomics.wait(wait, 0, 0, 500); gotLock = app.requestSingleInstanceLock(); }
+}
+if (!gotLock) app.quit();
 
 let editor = null;
 let output = null;
@@ -693,6 +702,12 @@ ipcMain.handle("video:release", (_e, url) => {
 });
 
 app.whenReady().then(() => {
+  // Prueba del CI (test-install.ps1): actualizar desde DENTRO de la app con un instalador local,
+  // por el mismo camino que el botón «Actualizar» (servicios parados → actualizador → cerrar).
+  const selfUpdate = process.env.LUMAMAP_TEST_SELF_UPDATE;
+  if (selfUpdate && !AFTER_UPDATE && app.isPackaged && process.platform === "win32" && fs.existsSync(selfUpdate)) {
+    setTimeout(() => { log("update", "Prueba: actualización desde la app con " + selfUpdate); stopServicesForUpdate(); runUpdater(["-Installer", selfUpdate, "-Version", app.getVersion(), "-Mode", "update"]); }, 10000);
+  }
   buildMenu();
   // Windows: accesos directos (escritorio y menú Inicio) garantizados aunque falten.
   if (process.platform === "win32" && app.isPackaged) setTimeout(async () => {
