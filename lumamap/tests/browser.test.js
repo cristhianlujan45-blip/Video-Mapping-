@@ -1135,7 +1135,7 @@ await test("Python y la IA que escribe código: Dibujo con Python da imagen, con
   const dlg = page.locator("#modal.show");
   await dlg.locator("textarea").fill("un valor al azar");
   await dlg.getByRole("button", { name: "✍ Escribir y probar" }).click();
-  await dlg.getByText(/Listo y funcionando/).waitFor({ timeout: 20000 });
+  await dlg.getByText(/Listo y funcionando/).waitFor({ timeout: 20000 }).catch(async (e) => { console.log("DLG:", (await dlg.innerText().catch(() => "?")).slice(0, 1500), "\nCHATS:", chats.length); throw e; });
   assert.equal(chats.length, 2, "una para escribir y otra para arreglar");
   assert.match(chats[1].messages.at(-1).content, /valor_que_no_existe[\s\S]*no existe/, "a la IA le llega el error con su línea");
   const r = await page.evaluate((ids) => { const a = window.__lumamap, n = a.S.project.networks.find(x => x.id === ids.net), sc = n.nodes.find(x => x.id === ids.sc); return { code: sc.p.code, err: a.td.info(n, sc).error, v: a.td.cookers.get(n.id).chop(sc)?.data.azar?.[0] }; }, ids);
