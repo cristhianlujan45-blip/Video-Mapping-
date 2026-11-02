@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Videos optimizados que se entregan al editor (WebView) como content:// -->
+<paths>
+    <cache-path name="optimized" path="optimized/" />
+    <cache-path name="updates" path="updates/" />
+</paths>

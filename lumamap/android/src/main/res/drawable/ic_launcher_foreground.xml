@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cuadrilátero deformado con sus 4 puntos de ajuste: el símbolo del mapping. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#00E5FF" android:strokeWidth="4" android:strokeLineJoin="round"
+        android:pathData="M34,38 L74,32 L77,74 L32,70 Z" />
+    <path android:strokeColor="#FF2D8A" android:strokeWidth="2"
+        android:pathData="M34,38 L77,74 M74,32 L32,70" />
+    <path android:fillColor="#FFD60A" android:pathData="M34,38 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path android:fillColor="#FFD60A" android:pathData="M74,32 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path android:fillColor="#FFD60A" android:pathData="M77,74 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path android:fillColor="#FFD60A" android:pathData="M32,70 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+</vector>
