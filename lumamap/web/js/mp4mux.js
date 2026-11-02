@@ -1,7 +1,7 @@
 // web/js/mp4mux.js
 // Empaquetador MP4 propio (sin dependencias) para «Exportar el show a video».
 // Recibe lo que ya sale codificado de WebCodecs y lo guarda en un .mp4 normal:
-//   · video H.264 (avc1 + avcC) o VP9 (vp09 + vpcC);
+//   · video H.264 (avc1 + avcC), H.265 (hvc1 + hvcC), VP9 (vp09 + vpcC) o HAP (Hap1, en .mov);
 //   · audio AAC (mp4a + esds) u Opus (Opus + dOps), opcional.
 // Se escribe por partes: cabecera (ftyp + mdat de 64 bits), las muestras según llegan y el índice
 // (moov) al final; al terminar se corrige el tamaño de mdat. Así un show largo en 4K puede ir
@@ -63,7 +63,9 @@ export class Mp4Muxer {
     this.v = { ...video, timescale: Math.round(video.fps * 1000), sizes: [], offs: [], durs: [], keys: [] };
     this.a = audio ? { ...audio, timescale: audio.sampleRate, sizes: [], offs: [], durs: [] } : null;
     this.sink = sink;
-    this.ftyp = box("ftyp", str("isom"), u32(0x200), str("isom"), str("iso2"), str(video.codec === "avc" ? "avc1" : "vp09"), str("mp41"));
+    // HAP va en QuickTime (.mov), como lo esperan Resolume, TouchDesigner, MadMapper…
+    this.ftyp = video.codec === "hap" ? box("ftyp", str("qt  "), u32(0x200), str("qt  "))
+      : box("ftyp", str("isom"), u32(0x200), str("isom"), str("iso2"), str({ avc: "avc1", hevc: "hvc1", vp9: "vp09" }[video.codec] || "isom"), str("mp41"));
     this.pos = this.ftyp.length + 16;   // tras ftyp y la cabecera de mdat (64 bits)
     this.mdatStart = this.ftyp.length;
     this.lastVts = null;
@@ -120,9 +122,11 @@ export class Mp4Muxer {
   }
   trakVideo(id, ms) {
     const v = this.v;
-    const cfg = v.codec === "avc" ? box("avcC", v.description || zeros(0)) : vpcC(v.codecString);
-    const entry = box(v.codec === "avc" ? "avc1" : "vp09", zeros(6), u16(1), zeros(16), u16(v.width), u16(v.height),
-      u32(0x480000), u32(0x480000), u32(0), u16(1), zeros(32), u16(0x18), u16(0xffff), cfg);
+    const cfg = v.codec === "avc" ? box("avcC", v.description || zeros(0)) : v.codec === "hevc" ? box("hvcC", v.description || zeros(0)) : v.codec === "hap" ? null : vpcC(v.codecString);
+    // Nombre del compresor (32 bytes, el primero es la longitud): lo enseñan los reproductores.
+    const cname = v.codec === "hap" ? "Hap" : "", comp = new Uint8Array(32); comp[0] = cname.length; for (let k = 0; k < cname.length; k++) comp[k + 1] = cname.charCodeAt(k);
+    const entry = box({ avc: "avc1", hevc: "hvc1", hap: "Hap1" }[v.codec] || "vp09", zeros(6), u16(1), zeros(16), u16(v.width), u16(v.height),
+      u32(0x480000), u32(0x480000), u32(0), u16(1), comp, u16(0x18), u16(0xffff), ...(cfg ? [cfg] : []));
     const stsd = full("stsd", 0, 0, u32(1), entry);
     const tail = u8(u16(0), u16(0), u16(0), u16(0), MATRIX, u32(v.width * 65536), u32(v.height * 65536));
     return this.trak(id, ms, v, "vide", "LumaMap video", full("vmhd", 0, 1, zeros(8)), stsd, tail);

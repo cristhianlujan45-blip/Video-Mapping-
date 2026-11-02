@@ -1114,6 +1114,22 @@ const output = {
       segmented({ options: [[24, "24 fps"], [30, "30 fps"], [60, "60 fps"]], value: R.fps, small: true, onChange: (v) => app.edit(() => { R.fps = v; }) }),
       h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Calidad")),
       segmented({ options: RECORD_QUALITIES.map(q => [q.mbps, q.label]), value: R.mbps, cols: 2, small: true, onChange: (v) => app.edit(() => { R.mbps = v; }) }),
+      h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Formato")),
+      segmented({ options: [["auto", "Automático"], ["mp4", "MP4 H.264"], ["h265", "MP4 H.265"], ["webm", "WebM"]], value: R.format || "auto", cols: 4, small: true, onChange: (v) => app.edit(() => { R.format = v; }) }),
+      hint("Para HAP (Resolume, TouchDesigner…) usa «Exportar el show a video»: se dibuja fotograma a fotograma."),
+      toggle({ label: "Con el sonido que escucha LumaMap", hint: "El micrófono o tu canción", value: R.heard !== false, onChange: (v) => app.edit(() => { R.heard = v; }) }),
+      (S.project.settings.tracks?.list || []).some(t => t.kind !== "master") ? h("div", {}, h("div", { class: "sl-head" }, h("span", { class: "lab" }, "Pistas que suenan en el video")),
+        h("div", { class: "chips" }, ...S.project.settings.tracks.list.filter(t => t.kind !== "master").map(t => {
+          const on = R.tracks === "all" || (Array.isArray(R.tracks) && R.tracks.includes(t.id));
+          return h("button", { class: `chip ${on ? "on" : ""}`, onclick: () => app.edit(() => {
+            const ids = S.project.settings.tracks.list.filter(x => x.kind !== "master").map(x => x.id);
+            const cur = R.tracks === "all" ? ids : (Array.isArray(R.tracks) ? R.tracks : []);
+            R.tracks = on ? cur.filter(id => id !== t.id) : [...cur, t.id];
+            if (ids.every(id => R.tracks.includes(id))) R.tracks = "all";
+            app.renderPanel();
+          }) }, "🎚 " + t.name);
+        }))) : null,
+      toggle({ label: "Audio también aparte (.wav)", hint: "Un .wav con el mismo nombre, para editar el sonido aparte", value: !!R.wav, onChange: (v) => app.edit(() => { R.wav = v; }) }),
       btn({ label: S.rec ? "Detener grabación" : "Grabar video de la salida", ic: "camera", kind: `block ${S.rec ? "danger" : "primary"}`, onClick: () => { A.record(); setTimeout(() => app.renderPanel(), 300); } })));
     wrap.append(netOutSection(app));
     return wrap;

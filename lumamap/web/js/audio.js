@@ -124,7 +124,7 @@ export class AudioEngine {
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
     if (this.ctx.state === "suspended") await this.ctx.resume().catch(() => {});
-    const src = this.ctx.createMediaStreamSource(this.stream);
+    const src = this.src = this.ctx.createMediaStreamSource(this.stream);   // (también lo usa Grabar)
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 1024;
     this.analyser.smoothingTimeConstant = 0.35;
@@ -142,7 +142,7 @@ export class AudioEngine {
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
     if (this.ctx.state === "suspended") await this.ctx.resume().catch(() => {});
-    const src = this.ctx.createMediaElementSource(el);
+    const src = this.src = this.ctx.createMediaElementSource(el);
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 1024;
     this.analyser.smoothingTimeConstant = 0.35;
@@ -156,7 +156,7 @@ export class AudioEngine {
   stop() {
     this.stream?.getTracks().forEach(t => t.stop());
     this.ctx?.close().catch(() => {});
-    this.ctx = this.analyser = this.stream = null; this.element = null;
+    this.ctx = this.analyser = this.stream = this.src = null; this.element = null;
     this.detected = null;
   }
 

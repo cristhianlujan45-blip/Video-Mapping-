@@ -144,17 +144,22 @@ export function bitrateFor(width, height, fps, quality = "high") {
   return Math.round(base * (fps > 30 ? 1.6 : 1) * (quality === "max" ? 1.6 : 1));
 }
 /** Primer códec de video que el equipo sabe codificar a ese tamaño: H.264 (MP4 universal) o VP9. */
-export async function pickVideoCodec(width, height, fps, bitrate) {
+/** Códec de video que este equipo sabe codificar. prefer: "auto" (H.264, si no VP9) o "hevc" (solo H.265). */
+export async function pickVideoCodec(width, height, fps, bitrate, prefer = "auto") {
   if (typeof VideoEncoder === "undefined") return null;
   const big = width * height > 1920 * 1088;
-  const tries = [
+  const tries = prefer === "hevc" ? [
+    // H.265 Main (perfil 1), nivel 5.1 (4K) o 4.1: casi siempre por la tarjeta gráfica.
+    { kind: "hevc", codec: big ? "hvc1.1.6.L153.B0" : "hvc1.1.6.L123.B0", hevc: { format: "hevc" } },
+    { kind: "hevc", codec: big ? "hev1.1.6.L153.B0" : "hev1.1.6.L123.B0", hevc: { format: "hevc" } },
+  ] : [
     { kind: "avc", codec: big ? "avc1.640033" : "avc1.64002A", avc: { format: "avc" } },
     { kind: "avc", codec: big ? "avc1.4D0033" : "avc1.4D002A", avc: { format: "avc" } },
     { kind: "vp9", codec: big ? "vp09.00.51.08" : "vp09.00.41.08" },
   ];
   for (const t of tries) for (const hw of ["prefer-hardware", "no-preference"]) {
-    const config = { codec: t.codec, width, height, bitrate, framerate: fps, hardwareAcceleration: hw, latencyMode: "quality", ...(t.avc ? { avc: t.avc } : {}) };
-    try { const s = await VideoEncoder.isConfigSupported(config); if (s.supported) return { kind: t.kind, config: { ...config, ...(s.config || {}), avc: t.avc } }; } catch {}
+    const config = { codec: t.codec, width, height, bitrate, framerate: fps, hardwareAcceleration: hw, latencyMode: "quality", ...(t.avc ? { avc: t.avc } : {}), ...(t.hevc ? { hevc: t.hevc } : {}) };
+    try { const s = await VideoEncoder.isConfigSupported(config); if (s.supported) return { kind: t.kind, config: { ...config, ...(s.config || {}), avc: t.avc, hevc: t.hevc } }; } catch {}
   }
   return null;
 }

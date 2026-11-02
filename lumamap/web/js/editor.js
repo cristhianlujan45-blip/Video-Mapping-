@@ -5,6 +5,7 @@ import * as M from "./model.js";
 import * as Store from "./store.js";
 import { TrackEngine } from "./tracks.js";
 import * as Vis from "./visuals.js";
+import { encodeHapFrame, hapSize, encodeWav } from "./hap.js";
 import { History } from "./history.js";
 import { Renderer, webgl2Supported } from "./renderer.js";
 import { Compositor, sceneLayers, deckB } from "./compose.js";
@@ -1974,10 +1975,18 @@ A.record = () => {
   const rec = S.project.settings.record;
   const o = offscreenRenderer(false, rec.height);
   const stream = o.canvas.captureStream(rec.fps || 30);
-  // Con el micrófono activo, el video incluye la música que se oye.
-  if (audio.stream) for (const t of audio.stream.getAudioTracks()) stream.addTrack(t);
-  const types = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
-  const mime = types.find(t => MediaRecorder.isTypeSupported?.(t)) || "";
+  // El sonido: lo que escucha LumaMap (micrófono o canción) y las pistas elegidas, mezclados.
+  const mix = recAudioMix(rec);
+  if (mix?.track) stream.addTrack(mix.track);
+  const AUTO = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+  const WANT = {
+    mp4: ["video/mp4;codecs=avc1.640028,mp4a.40.2", "video/mp4;codecs=avc1,mp4a.40.2", "video/mp4;codecs=avc1", "video/mp4"],
+    h265: ["video/mp4;codecs=hvc1.1.6.L123.B0,mp4a.40.2", "video/mp4;codecs=hev1.1.6.L123.B0,mp4a.40.2", "video/mp4;codecs=hvc1", "video/mp4;codecs=hev1"],
+    webm: ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"],
+  }[rec.format] || [];
+  let mime = WANT.find(t => MediaRecorder.isTypeSupported?.(t)) || "";
+  if (WANT.length && !mime) toast(`Este equipo no graba ${{ mp4: "MP4 H.264", h265: "H.265", webm: "WebM" }[rec.format]}: se graba en el formato que sí puede`, "warn");
+  mime ||= AUTO.find(t => MediaRecorder.isTypeSupported?.(t)) || "";
   let mr;
   try { mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: (rec.mbps || 12) * 1e6 }); }
   catch (e) { return toast("No se pudo grabar: " + e.message, "err"); }
@@ -1985,19 +1994,65 @@ A.record = () => {
   mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   mr.onstop = () => {
     const blob = new Blob(chunks, { type: mime.split(";")[0] || "video/webm" });
+    const base = `lumamap-${stamp()}`;
+    const pcm = mix?.stop();
+    if (pcm && rec.wav && pcm.n) saveBlob(base + ".wav", new Blob([encodeWav(pcm.ch, pcm.rate)], { type: "audio/wav" }));
     S.rec = null;
     o.comp.dispose();
     o.r.gl.getExtension("WEBGL_lose_context")?.loseContext();
     updateChrome();
-    saveBlob(`lumamap-${stamp()}.${blob.type.includes("mp4") ? "mp4" : "webm"}`, blob);
+    if (!blob.size) return toast("La grabación salió vacía: el equipo no llegó a codificar el video. Prueba a grabar algo más largo o con menos resolución", "err");
+    saveBlob(`${base}.${blob.type.includes("mp4") ? "mp4" : "webm"}`, blob);
     toast(`Video guardado (${(blob.size / 1048576).toFixed(1)} MB)`);
   };
   mr.start(1000);
-  S.rec = { mr, o, start: performance.now() };
+  S.rec = { mr, o, chunks, start: performance.now() };
   updateChrome();
   toast(`Grabando ${o.canvas.width}×${o.canvas.height} a ${rec.fps} fps… vuelve a pulsar Grabar para terminar`);
 };
 
+
+/**
+ * El sonido de Grabar: lo que escucha LumaMap (micrófono o canción) y las pistas elegidas (stems y
+ * entradas, como suenan), mezclados en una pista de audio para el video y, si se pide, en PCM para
+ * el .wav aparte. Devuelve { track, stop() → { ch, rate, n } } o null si no hay nada que grabar.
+ */
+function recAudioMix(rec) {
+  const T = app.tracks, ctx = T?.ensureCtx?.();
+  if (!ctx) return audio.stream ? { track: audio.stream.getAudioTracks()[0], stop: () => null } : null;
+  const dest = ctx.createMediaStreamDestination(), bus = ctx.createGain(), links = [];
+  bus.connect(dest);
+  let n = 0;
+  // Lo que escucha LumaMap vive en otro AudioContext: llega por un MediaStream.
+  if (rec.heard !== false && audio.src && audio.ctx) {
+    try { const d = audio.ctx.createMediaStreamDestination(); audio.src.connect(d); const s = ctx.createMediaStreamSource(d.stream); s.connect(bus); links.push(() => { try { audio.src?.disconnect(d); } catch {} s.disconnect(); }); n++; } catch (e) { console.warn("grabar: sonido", e); }
+  }
+  for (const t of S.project.settings.tracks?.list || []) {
+    if (t.kind === "master" || !(rec.tracks === "all" || (Array.isArray(rec.tracks) && rec.tracks.includes(t.id)))) continue;
+    const x = T.nodes.get(t.id), node = x?.gain || x?.src;
+    if (!node) continue;
+    node.connect(bus); links.push(() => { try { node.disconnect(bus); } catch {} }); n++;
+  }
+  if (!n) { bus.disconnect(); return null; }
+  // PCM para el .wav aparte.
+  let sp = null, mute = null; const L = [], R = [];
+  if (rec.wav && ctx.createScriptProcessor) {
+    sp = ctx.createScriptProcessor(4096, 2, 2); mute = ctx.createGain(); mute.gain.value = 0;
+    sp.onaudioprocess = (e) => { L.push(new Float32Array(e.inputBuffer.getChannelData(0))); R.push(new Float32Array(e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : e.inputBuffer.getChannelData(0))); };
+    bus.connect(sp); sp.connect(mute); mute.connect(ctx.destination);
+  }
+  return {
+    track: dest.stream.getAudioTracks()[0],
+    stop() {
+      for (const f of links) f();
+      try { bus.disconnect(); sp?.disconnect(); mute?.disconnect(); } catch {}
+      if (!sp) return null;
+      const cat = (parts) => { const out = new Float32Array(parts.reduce((s, p) => s + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; };
+      const ch = [cat(L), cat(R)];
+      return { ch, rate: ctx.sampleRate, n: ch[0].length };
+    },
+  };
+}
 
 /* ---- Exportar el show a video (exportshow.js + mp4mux.js) ----
    No es una grabación de la pantalla: cada fotograma se dibuja en su instante exacto (escena,
@@ -2012,10 +2067,11 @@ A.exportInfo = () => {
 /** Archivo donde ir escribiendo (escritorio y navegador de PC): así un show largo en 4K no llena la memoria. */
 A.exportPickFile = async (name) => {
   if (!window.showSaveFilePicker || window.LumaAndroid) return null;
-  const handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: "Video MP4", accept: { "video/mp4": [".mp4"] } }] });
+  const mov = /\.mov$/i.test(name);
+  const handle = await window.showSaveFilePicker({ suggestedName: name, types: [mov ? { description: "Video HAP (QuickTime)", accept: { "video/quicktime": [".mov"] } } : { description: "Video MP4", accept: { "video/mp4": [".mp4"] } }] });
   return handle;
 };
-A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = true, file = null, onProgress = () => {}, signal = null } = {}) => {
+A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = true, file = null, onProgress = () => {}, signal = null, codec = "auto", wav = false } = {}) => {
   if (S.exporting) throw new Error("Ya hay una exportación en marcha");
   if (S.rec) A.record();
   const P = S.project, info = A.exportInfo(), plan = info.plan;
@@ -2025,8 +2081,12 @@ A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = tr
   await Promise.all([...M.usedMediaIds(P)].map(id => pool.ensure(id)));
   const o = offscreenRenderer(true, Math.min(height, info.maxH));
   const W = o.canvas.width, H = o.canvas.height;
-  const vc = await pickVideoCodec(W, H, fps, bitrateFor(W, H, fps, quality));
-  if (!vc) { o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); throw new Error(`Este equipo no puede codificar video a ${W}×${H}. Prueba con menos resolución.`); }
+  // HAP (.mov, para Resolume/TouchDesigner/MadMapper): DXT1 aquí mismo, sin VideoEncoder. H.265: si el equipo sabe.
+  const hap = codec === "hap";
+  const vc = hap ? { kind: "hap", config: { codec: "Hap1" } } : await pickVideoCodec(W, H, fps, bitrateFor(W, H, fps, quality), codec === "h265" ? "hevc" : "auto");
+  if (!vc) { o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); throw new Error(codec === "h265" ? `Este equipo no puede codificar H.265 a ${W}×${H} (depende de la tarjeta gráfica). Usa H.264 o HAP.` : `Este equipo no puede codificar video a ${W}×${H}. Prueba con menos resolución.`); }
+  const [HW, HH] = hap ? hapSize(W, H) : [W, H];
+  const read2d = hap ? (() => { const c = document.createElement("canvas"); c.width = W; c.height = H; return c.getContext("2d", { willReadFrequently: true }); })() : null;
   // La canción: decodificada entera (a 48 kHz) para el sonido del video y para que lo que reacciona al ritmo reaccione igual.
   let pcm = null, ac = null;
   if (song && withSong) {
@@ -2034,7 +2094,7 @@ A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = tr
       const buf = await (await fetch(song.url)).arrayBuffer();
       const ab = await new OfflineAudioContext(2, 1, 48000).decodeAudioData(buf);
       pcm = [ab.getChannelData(0), ab.numberOfChannels > 1 ? ab.getChannelData(1) : ab.getChannelData(0)];
-      ac = await pickAudioCodec(48000, 2);
+      ac = hap ? null : await pickAudioCodec(48000, 2);   // HAP: el sonido va aparte (.wav), como en los programas de VJ
     } catch (e) { console.warn(e); pcm = null; }
   }
   // Dónde se guarda: en el archivo elegido (por partes) o en memoria (móvil).
@@ -2043,7 +2103,7 @@ A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = tr
     writable = await file.createWritable();
     sink = { bytes: 0, write(d) { this.bytes += d.length; wq = wq.then(() => writable.write(d)).catch((e) => { wErr = e; }); } };
   } else sink = new MemorySink();
-  const mux = new Mp4Muxer({ video: { codec: vc.kind, codecString: vc.config.codec, width: W, height: H, fps }, audio: ac && pcm ? { codec: ac.kind, sampleRate: 48000, channels: 2 } : null, sink });
+  const mux = new Mp4Muxer({ video: { codec: vc.kind, codecString: vc.config.codec, width: HW, height: HH, fps }, audio: ac && pcm ? { codec: ac.kind, sampleRate: 48000, channels: 2 } : null, sink });
   if (writable) wq = wq.then(() => writable.write(mux.head()));
   let encErr = null;
   const copy = (chunk) => { const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d); return d; };
@@ -2068,8 +2128,8 @@ A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = tr
       await aenc.flush(); aenc.close();
     }
     // 2) Video, fotograma a fotograma.
-    const venc = new VideoEncoder({ output: (chunk, meta) => { if (meta?.decoderConfig?.description) mux.setVideoDescription(meta.decoderConfig.description); mux.addVideo(copy(chunk), { key: chunk.type === "key", timestamp: chunk.timestamp, duration: chunk.duration }); }, error: (e) => { encErr = e; } });
-    venc.configure(vc.config);
+    const venc = hap ? null : new VideoEncoder({ output: (chunk, meta) => { if (meta?.decoderConfig?.description) mux.setVideoDescription(meta.decoderConfig.description); mux.addVideo(copy(chunk), { key: chunk.type === "key", timestamp: chunk.timestamp, duration: chunk.duration }); }, error: (e) => { encErr = e; } });
+    venc?.configure(vc.config);
     const ae = new AudioEngine(), bpm = P.settings.bpm || 120;
     ae.setBpm(bpm, 10000);
     if (pcm) { ae.analyser = new OfflineAnalyser(pcm, 48000); ae.ctx = { state: "running", sampleRate: 48000, resume: () => Promise.resolve() }; ae.bins = new Uint8Array(512); }
@@ -2115,19 +2175,30 @@ A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = tr
       if (waits.length) await Promise.all(waits);
       if (app.stage3d) { try { app.stage3d.tick({ project: RP.project, layers, time: T, levels: S.levels, master: RP.master }); } catch (e) { console.error("3D", e); } }
       o.comp.frame(RP.project, { layers, time: T, levels: S.levels, view: o.view, master: RP.master, blackout: false, clear: [0, 0, 0, 1], live: null });
-      const vf = new VideoFrame(o.canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
-      venc.encode(vf, { keyFrame: i % (fps * 2) === 0 });
-      vf.close();
-      while (venc.encodeQueueSize > 2 && !encErr) await new Promise(r => setTimeout(r, 1));
+      if (hap) {
+        read2d.drawImage(o.canvas, 0, 0);
+        mux.addVideo(encodeHapFrame(read2d.getImageData(0, 0, W, H).data, W, H), { key: true, timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
+      } else {
+        const vf = new VideoFrame(o.canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
+        venc.encode(vf, { keyFrame: i % (fps * 2) === 0 });
+        vf.close();
+        while (venc.encodeQueueSize > 2 && !encErr) await new Promise(r => setTimeout(r, 1));
+      }
       S.exporting.i = i + 1;
       const el = (performance.now() - t0) / 1000;
       onProgress({ i: i + 1, n: N, t: T, total: plan.total, eta: el / (i + 1) * (N - i - 1), w: W, h: H, codec: vc.kind, audio: !!(ac && pcm) });
       await new Promise(r => setTimeout(r, 0));   // que la interfaz respire (progreso, Cancelar)
     }
-    await venc.flush(); venc.close();
+    if (venc) { await venc.flush(); venc.close(); }
     if (encErr) throw encErr;
     const { head, moov } = mux.finish();
-    const name = `${(P.name || "show").replace(/[^\w\- áéíóúñÁÉÍÓÚÑ]+/g, "").trim() || "show"}-${H}p.mp4`;
+    const base = `${(P.name || "show").replace(/[^\w\- áéíóúñÁÉÍÓÚÑ]+/g, "").trim() || "show"}-${H}p${hap ? "-hap" : vc.kind === "hevc" ? "-h265" : ""}`;
+    const name = base + (hap ? ".mov" : ".mp4");
+    // El sonido aparte (.wav): siempre con HAP (como lo usan los programas de VJ) o si se pide.
+    if (pcm && (wav || hap)) {
+      const n = Math.min(pcm[0].length, Math.ceil(plan.total * 48000));
+      saveBlob(base + ".wav", new Blob([encodeWav([pcm[0].subarray(0, n), pcm[1].subarray(0, n)], 48000)], { type: "audio/wav" }));
+    }
     let size;
     if (writable) {
       wq = wq.then(() => writable.write(moov)).then(() => writable.write({ type: "write", position: 0, data: head }));
@@ -2135,10 +2206,10 @@ A.exportShow = async ({ height = 2160, fps = 30, quality = "high", withSong = tr
       await writable.close(); writable = null;
       size = sink.bytes + head.length + moov.length;
     } else {
-      const blob = sink.blob(head, moov); size = blob.size;
+      const blob = new Blob([head, ...sink.parts, moov], { type: hap ? "video/quicktime" : "video/mp4" }); size = blob.size;
       await saveBlob(name, blob);
     }
-    return { width: W, height: H, fps, frames: N, seconds: plan.total, codec: vc.kind === "avc" ? "H.264" : "VP9", audio: ac && pcm ? (ac.kind === "aac" ? "AAC" : "Opus") : null, size, name: file?.name || name };
+    return { width: W, height: H, fps, frames: N, seconds: plan.total, codec: { avc: "H.264", hevc: "H.265", hap: "HAP", vp9: "VP9" }[vc.kind] || vc.kind, audio: ac && pcm ? (ac.kind === "aac" ? "AAC" : "Opus") : (pcm && (wav || hap) ? "WAV aparte" : null), wav: !!(pcm && (wav || hap)), size, name: file?.name || name };
   } finally {
     if (writable) { try { await writable.abort?.(); } catch {} }
     P.sceneId = saved.sceneId; S.clock = saved.clock; S.sceneStart = saved.sceneStart; S.tr = saved.tr; S.levels = saved.levels; S.mods = saved.mods;

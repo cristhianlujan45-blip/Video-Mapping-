@@ -810,7 +810,9 @@ export function defaultSettings() {
       softEdge: { left: 0, right: 0, top: 0, bottom: 0, curve: 2.2 },
     },
     // Grabación / transmisión
-    record: { height: 1080, fps: 30, mbps: 12 },
+    // Grabar: formato (auto | mp4 | h265 | webm), qué suena (lo que escucha LumaMap y las pistas:
+    // "all" o [ids]) y el audio también aparte en .wav.
+    record: { height: 1080, fps: 30, mbps: 12, format: "auto", heard: true, tracks: "all", wav: false },
     // Pantallas de salida 1-4: encendida, brillo y efecto propio de cada una.
     screens: Object.fromEntries([1, 2, 3, 4].map(n => [n, defaultScreen()])),
     // Sensores de cámara (interacción): [{ id, camId, zone, sens, action, target, cooldown }]

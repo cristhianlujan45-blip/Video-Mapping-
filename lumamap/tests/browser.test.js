@@ -1302,6 +1302,49 @@ await test("mis visuales (presets): guardar una superficie con miniatura, cambia
   assert.equal(steps.exported, 2);
   await page.evaluate(() => { localStorage.removeItem("lumamap:visuals"); window.__lumamap.openTab(null); });
 });
+await test("grabar en directo: el video lleva el sonido de las pistas elegidas y el audio también aparte en .wav", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const got = [];
+  const onDl = (d) => got.push(d);
+  page.on("download", onDl);
+  try {
+    await page.evaluate(async () => {
+      const a = window.__lumamap, { newTrack } = await import("./js/tracks.js");
+      if (!a.S.project.media.some(m => m.id === "mediaKickStem")) throw new Error("falta el stem de la prueba de pistas");
+      a.edit(() => { a.S.project.settings.tracks.list = [newTrack("file", { name: "Bombo", media: "mediaKickStem" })]; Object.assign(a.S.project.settings.record, { height: 360, fps: 24, format: "auto", heard: true, tracks: "all", wav: true }); });
+      a.tracks.update(performance.now());
+      for (let k = 0; k < 30 && !a.tracks.masterEl(); k++) await new Promise(r => setTimeout(r, 100));
+      a.tracks.play(0);
+      a.actions.record();
+      if (!a.S.rec) throw new Error("no empezó a grabar");
+      // El codificador tarda en arrancar en la máquina de pruebas (va a pocos fps): se espera a que
+      // entregue el primer trozo de video y luego se graba un poco más.
+      const t0 = performance.now();
+      while (!a.S.rec.chunks.length && performance.now() - t0 < 30000) await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 1500));
+      a.actions.record();
+      a.tracks.stop();
+    });
+    for (let k = 0; k < 100 && got.length < 2; k++) await page.waitForTimeout(100);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-rec-")), files = {};
+    for (const d of got) { const f = path.join(dir, d.suggestedFilename()); await d.saveAs(f); files[path.extname(f)] = f; }
+    const vid = files[".webm"] || files[".mp4"];
+    assert.ok(vid && files[".wav"], "video y .wav: " + Object.keys(files));
+    let ok = false; try { execFileSync("ffprobe", ["-version"], { stdio: "ignore" }); ok = true; } catch {}
+    if (ok) {
+      const p = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-print_format", "json", "-show_streams", vid]).toString());
+      assert.ok(p.streams.some(s => s.codec_type === "audio"), "el video lleva sonido");
+      const w = fs.readFileSync(files[".wav"]); let peak = 0;
+      for (let i = 44; i + 1 < w.length; i += 2) peak = Math.max(peak, Math.abs(w.readInt16LE(i)));
+      assert.ok(peak > 3000, "el .wav tiene el bombo (pico " + peak + ")");
+      const a = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-print_format", "json", "-show_format", files[".wav"]]).toString());
+      assert.ok(+a.format.duration > 1.2, "el .wav dura lo grabado: " + a.format.duration);
+    }
+  } finally {
+    page.off("download", onDl);
+    await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.S.project.settings.tracks.list = []; a.S.project.settings.record.wav = false; }); });
+  }
+});
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const g = await pctx.newPage();
@@ -2431,6 +2474,26 @@ await test("Escenas y show: exportar el show a video (MP4 fotograma a fotograma,
       assert.ok(r1 > 150 && b1 < 80, `0,5 s rojo: ${at(0.5)}`);
       assert.ok(b2 > 150 && r2 < 80, `1,7 s azul: ${at(1.7)}`);
     } else console.log("    (sin ffmpeg: solo se comprueba que es un MP4)");
+    // HAP (.mov, para Resolume/TouchDesigner) con el sonido aparte en .wav.
+    const got = [];
+    g.on("download", (d) => got.push(d));
+    await g.evaluate(() => document.getElementById("modal")?._close?.(null));
+    const hr = await g.evaluate(async () => { const r = await window.__lumamap.actions.exportShow({ height: 360, fps: 12, codec: "hap" }); return { codec: r.codec, wav: r.wav, name: r.name, w: r.width, h: r.height }; });
+    assert.equal(hr.codec, "HAP"); assert.ok(hr.wav); assert.match(hr.name, /-hap\.mov$/);
+    for (let k = 0; k < 50 && got.length < 2; k++) await g.waitForTimeout(100);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-hap-")), files = {};
+    for (const d of got) { const f = path.join(dir, d.suggestedFilename()); await d.saveAs(f); files[path.extname(f)] = f; }
+    assert.ok(files[".mov"] && files[".wav"], "descargó el .mov y el .wav: " + Object.keys(files));
+    if (ok) {
+      const p = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-print_format", "json", "-show_streams", "-count_frames", files[".mov"]]).toString());
+      const vs = p.streams.find(s => s.codec_type === "video");
+      assert.equal(vs.codec_name, "hap"); assert.equal(+vs.nb_read_frames, 24, "2 s a 12 fps"); assert.equal(p.streams.length, 1, "el sonido va aparte");
+      const at = (t) => [...execFileSync("ffmpeg", ["-v", "error", "-ss", String(t), "-i", files[".mov"], "-frames:v", "1", "-vf", "crop=iw/4:ih/4,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])];
+      const [r1, , b1] = at(0.5), [r2, , b2] = at(1.7);
+      assert.ok(r1 > 150 && b1 < 80, `HAP 0,5 s rojo: ${at(0.5)}`); assert.ok(b2 > 150 && r2 < 80, `HAP 1,7 s azul: ${at(1.7)}`);
+      const a = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-print_format", "json", "-show_streams", "-show_format", files[".wav"]]).toString());
+      assert.equal(a.streams[0].codec_name, "pcm_s16le"); assert.ok(Math.abs(+a.format.duration - 2) < 0.05, "el .wav dura el show: " + a.format.duration);
+    }
     assert.deepEqual(errs, []);
   } finally { await ectx.close(); }
 });
