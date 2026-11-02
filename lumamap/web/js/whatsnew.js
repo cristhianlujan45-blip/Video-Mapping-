@@ -7,7 +7,7 @@ import { h, btn, dialog, closeDialog, hint, toast } from "./ui.js";
 import { openExport } from "./panels-export.js";
 
 /** Cambia cuando hay novedades nuevas que enseñar. */
-export const NEWS_REV = "2026-11-02-b";
+export const NEWS_REV = "2026-11-02-c";
 const SEEN_KEY = "lumamap:newsSeen";
 const store = () => { try { return globalThis.localStorage || null; } catch { return null; } };
 // ¿Ya se había usado LumaMap en este equipo? Se mira al cargar, antes de que la app guarde nada.
@@ -33,6 +33,8 @@ export function newsItems(app) {
   const live = (sub) => () => { app.S.liveSub = sub; app.openTab("live"); app.renderPanel(); };
   return [
     ["📼 Nuevo", [
+      ["✨ Escribe y se construye", "En los nodos, describe lo que quieres («colores que bailan con la música en caleidoscopio») y la red se arma sola, nodo a nodo. Con IA, cualquier cosa; sin IA, frases sencillas. Ctrl+Espacio.", () => app.openNetwork?.().then(() => import("./panels-network.js")).then(m => m.openBuildPanel?.())],
+      ["🤖 Agentes de IA por MCP", "Claude Code, Cursor o Claude Desktop manejan LumaMap: construyen redes, ponen efectos, proyectan y miran el resultado.", () => import("./agent-connect.js").then(m => m.openAgentConnect(app))],
       ["Analógico y película", "Cine con 7 caracteres de película, grano, halación, polvo y quemaduras; VHS y «circuito doblado»; pantallas de tubo, arcade, LCD y LED, y la pantalla fotografiada; datamosh, slit-scan, ecos y congelados. 28 efectos listos en la biblioteca.", () => goToSection(app, "fx", "Analógico y película")],
       ["Pistas de audio con ADSR", "Stems, partes de tu música o una entrada de audio: cada pista late con su envolvente y mueve lo que quieras.", () => goToSection(app, "audio", "Pistas de audio")],
       ["Mis visuales", "Guarda lo de una superficie con miniatura y cámbialo con un toque, ◀ ▶ o MIDI.", () => goToSection(app, "content", "Mis visuales")],

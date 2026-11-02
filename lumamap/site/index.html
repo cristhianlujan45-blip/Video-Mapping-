@@ -1,0 +1,680 @@
+<title>LumaMap</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="LumaMap: video mapping gratis para Windows, Mac, Android y el navegador. Efectos de cine, VHS y tubo, redes de nodos que se construyen con una frase y agentes de IA por MCP.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Concepto: una cabina de proyección. El escenario está a oscuras y lo único iluminado es lo
+   que toca el haz del proyector; las fichas técnicas van en mono, como en una hoja de rider. */
+:root {
+  --stage: #0b0d12;      /* fondo: negro de sala con un punto de azul */
+  --stage-2: #121620;    /* superficies elevadas */
+  --line: #252b3a;       /* hilos y bordes */
+  --ink: #e8ecf3;        /* texto */
+  --dim: #98a1b4;        /* texto secundario */
+  --beam: #3fe0ff;       /* el haz del proyector (el color de la app) */
+  --beam-ink: #001a21;   /* texto sobre el haz */
+  --tungsten: #ffb44d;   /* luz de película (lo analógico) */
+  --display: "Big Shoulders Display", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+  --body: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --gut: max(16px, env(safe-area-inset-left, 0px));
+  --gut-r: max(16px, env(safe-area-inset-right, 0px));
+  --maxw: 1180px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { background: var(--stage); color: var(--ink); font: 400 17px/1.6 var(--body); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--stage); }
+a { color: var(--beam); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid var(--beam); outline-offset: 3px; border-radius: 4px; }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding-left: var(--gut); padding-right: var(--gut-r); }
+section { padding-block: clamp(56px, 9vw, 112px); border-top: 1px solid var(--line); }
+h1, h2, h3 { font-family: var(--display); font-weight: 800; line-height: .95; letter-spacing: .005em; text-wrap: balance; margin: 0; text-transform: uppercase; }
+h2 { font-size: clamp(40px, 6.4vw, 76px); }
+h3 { font-size: 28px; font-weight: 700; }
+p { margin: 0; max-width: 64ch; }
+.eyebrow { font: 500 12px/1.2 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--beam); }
+.lede { color: var(--dim); font-size: 19px; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.dim { color: var(--dim); }
+.btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 20px; border-radius: 999px; font: 600 16px/1 var(--body); text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: transparent; cursor: pointer; transition: background .2s, border-color .2s, transform .2s; }
+.btn:hover { border-color: var(--beam); }
+.btn.primary { background: var(--beam); color: var(--beam-ink); border-color: var(--beam); }
+.btn.primary:hover { transform: translateY(-1px); }
+.btn small { font: 400 12px var(--mono); opacity: .75; }
+
+/* ---------- cabecera ---------- */
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--stage) 86%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+header.top .wrap { display: flex; align-items: center; gap: 22px; padding-block: 12px; }
+.logo { display: flex; align-items: center; gap: 10px; font: 900 24px/1 var(--display); letter-spacing: .04em; color: var(--ink); text-decoration: none; text-transform: uppercase; }
+.logo svg { width: 26px; height: 26px; }
+nav.links { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; }
+nav.links a { color: var(--dim); text-decoration: none; font-size: 15px; }
+nav.links a:hover { color: var(--ink); }
+header.top .btn { padding: 9px 16px; font-size: 14px; }
+@media (max-width: 760px) { nav.links { display: none; } header.top .btn { margin-left: auto; } }
+
+/* ---------- portada ---------- */
+.hero { padding-block: clamp(36px, 6vw, 72px) clamp(48px, 8vw, 96px); border-top: 0; }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
+.hero h1 { font-size: clamp(56px, 10vw, 132px); font-weight: 900; line-height: .86; }
+.hero h1 em { font-style: normal; color: var(--beam); text-shadow: 0 0 34px color-mix(in srgb, var(--beam) 45%, transparent); }
+.hero .copy { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.hero .ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+.hero .facts { display: flex; gap: 8px 22px; flex-wrap: wrap; font: 400 13px var(--mono); color: var(--dim); }
+.hero .facts b { color: var(--ink); font-weight: 500; }
+.stagebox { position: relative; aspect-ratio: 1 / 1; max-width: 100%; border-radius: 18px; overflow: hidden; background: radial-gradient(120% 90% at 50% 10%, #141a26 0%, var(--stage) 70%); border: 1px solid var(--line); }
+.stagebox canvas { width: 100%; height: 100%; display: block; }
+.stagebox .cap { position: absolute; left: 14px; bottom: 12px; right: 14px; display: flex; justify-content: space-between; gap: 10px; font: 400 11px var(--mono); color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
+@media (max-width: 860px) { .hero .wrap { grid-template-columns: 1fr; } .stagebox { max-width: 520px; } }
+
+/* ---------- comparador ---------- */
+.cmp-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; flex-wrap: wrap; margin-bottom: 28px; }
+.cmp-head .t { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.cmp { position: relative; aspect-ratio: 16 / 9; max-width: 100%; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: #000; touch-action: pan-y; cursor: ew-resize; user-select: none; }
+.cmp canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cmp .split { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); box-shadow: 0 0 12px #000a; pointer-events: none; }
+.cmp .knob { position: absolute; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: var(--ink); color: var(--stage); display: grid; place-items: center; font: 700 15px var(--mono); pointer-events: none; box-shadow: 0 4px 18px #0009; }
+.cmp .tag { position: absolute; top: 12px; padding: 5px 9px; border-radius: 6px; font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; background: #000a; color: #fff; pointer-events: none; }
+.cmp .tag.l { left: 12px; } .cmp .tag.r { right: 12px; }
+.looks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.look { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--stage-2); color: var(--ink); font: 500 14px var(--body); cursor: pointer; }
+.look[aria-pressed="true"] { background: var(--tungsten); border-color: var(--tungsten); color: #1d1100; }
+.cmp-foot { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+.cmp-foot label { display: flex; align-items: center; gap: 10px; font: 400 13px var(--mono); color: var(--dim); }
+.cmp-foot input[type=range] { width: min(320px, 60vw); accent-color: var(--tungsten); }
+
+/* ---------- familias de lo analógico ---------- */
+.fams { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-top: 40px; }
+.fam { background: var(--stage); padding: 22px 20px 24px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fam .k { font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--tungsten); }
+.fam ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; color: var(--dim); font-size: 15px; }
+.fam li::before { content: "▸ "; color: var(--line); }
+@media (max-width: 900px) { .fams { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .fams { grid-template-columns: 1fr; } }
+
+/* ---------- escribe y se construye ---------- */
+.build { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
+.build .t { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.term { border: 1px solid var(--line); border-radius: 16px; background: var(--stage-2); overflow: hidden; min-width: 0; }
+.term .bar { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); font: 400 11px var(--mono); color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
+.term .bar b { color: var(--beam); font-weight: 500; }
+.prompt { padding: 16px 16px 6px; font: 400 16px/1.5 var(--body); min-height: 3.4em; }
+.prompt .caret { display: inline-block; width: 2px; height: 1.1em; background: var(--beam); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.graph { position: relative; height: 230px; margin: 6px 16px 16px; }
+.graph svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.node { position: absolute; width: 132px; padding: 8px 10px; border-radius: 10px; background: var(--stage); border: 1px solid var(--line); font: 600 13px/1.2 var(--body); transform: translateY(6px); opacity: 0; transition: opacity .35s, transform .35s; }
+.node.on { opacity: 1; transform: none; }
+.node small { display: block; font: 400 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 3px; }
+.node.top small { color: #b892ff; } .node.chop small { color: #4ade80; } .node.out { border-color: var(--beam); } .node.out small { color: var(--beam); }
+.wire { fill: none; stroke: var(--dim); stroke-width: 1.6; stroke-dasharray: 220; stroke-dashoffset: 220; transition: stroke-dashoffset .5s ease-out; }
+.wire.chop { stroke: #4ade80; stroke-dasharray: 4 5; stroke-dashoffset: 0; opacity: 0; transition: opacity .4s; }
+.wire.on { stroke-dashoffset: 0; } .wire.chop.on { opacity: .9; }
+.term .say { padding: 0 16px 16px; font: 400 13px var(--mono); color: var(--dim); min-height: 2.6em; }
+@media (max-width: 860px) { .build { grid-template-columns: 1fr; } }
+
+/* ---------- agentes ---------- */
+.agents { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); }
+.agents .t { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; counter-reset: s; }
+.steps li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; align-items: start; counter-increment: s; }
+.steps li::before { content: counter(s); width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--beam); color: var(--beam); display: grid; place-items: center; font: 500 13px var(--mono); }
+.code { position: relative; border: 1px solid var(--line); border-radius: 12px; background: #07090d; }
+.code pre { margin: 0; padding: 16px 16px 16px; overflow-x: auto; font: 400 13px/1.6 var(--mono); color: var(--ink); white-space: pre; }
+.code .copy { position: absolute; top: 8px; right: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--stage-2); color: var(--ink); font: 500 12px var(--mono); cursor: pointer; }
+.tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; font: 400 13px/1.9 var(--mono); color: var(--dim); }
+.tools span::before { content: "› "; color: var(--beam); }
+@media (max-width: 860px) { .agents { grid-template-columns: 1fr; } }
+
+/* ---------- todo lo demás ---------- */
+.more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 40px; margin-top: 40px; }
+.more div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.more h3 { font-size: 24px; }
+.more p { color: var(--dim); font-size: 16px; }
+.more .n { font: 500 12px var(--mono); color: var(--beam); letter-spacing: .06em; }
+@media (max-width: 900px) { .more { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .more { grid-template-columns: 1fr; } }
+
+/* ---------- descargas ---------- */
+.dl-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; flex-wrap: wrap; }
+.price { font: 900 clamp(64px, 9vw, 112px)/.85 var(--display); color: var(--beam); }
+.price small { display: block; font: 500 13px var(--mono); color: var(--dim); letter-spacing: .08em; text-transform: uppercase; margin-top: 8px; }
+.dls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 36px; }
+.dl { display: flex; flex-direction: column; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--stage-2); min-width: 0; }
+.dl h3 { font-size: 30px; }
+.dl ul { margin: 0; padding: 0; list-style: none; font: 400 12.5px/1.7 var(--mono); color: var(--dim); }
+.dl .btn { margin-top: auto; justify-content: center; }
+.dl .file { font: 400 12px var(--mono); color: var(--dim); word-break: break-all; }
+@media (max-width: 960px) { .dls { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .dls { grid-template-columns: 1fr; } }
+
+/* ---------- preguntas ---------- */
+.faq { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: clamp(24px, 4vw, 56px); }
+.faq details { border-bottom: 1px solid var(--line); padding-block: 16px; }
+.faq summary { cursor: pointer; font: 600 18px/1.35 var(--body); list-style: none; display: flex; justify-content: space-between; gap: 14px; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font: 400 22px/1 var(--mono); color: var(--beam); transition: transform .2s; }
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq details p { margin-top: 10px; color: var(--dim); }
+@media (max-width: 860px) { .faq { grid-template-columns: 1fr; } }
+
+/* ---------- final ---------- */
+.final { text-align: left; }
+.final h2 { font-size: clamp(54px, 9vw, 120px); font-weight: 900; }
+.final .ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
+footer { border-top: 1px solid var(--line); padding-block: 28px 40px; }
+footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font: 400 13px var(--mono); color: var(--dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .prompt .caret { animation: none; }
+  .node, .wire { transition: none; }
+}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="#inicio" aria-label="LumaMap, inicio">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 10v12L16 29 4 22V10z" fill="none" stroke="#3fe0ff" stroke-width="2"/><path d="M16 16 28 10M16 16v13M16 16 4 10" stroke="#3fe0ff" stroke-width="2" opacity=".55"/></svg>
+      LumaMap
+    </a>
+    <nav class="links" aria-label="Secciones">
+      <a href="#analogico">Analógico</a>
+      <a href="#construye">Escribe y se construye</a>
+      <a href="#agentes">Agentes IA</a>
+      <a href="#descargar">Descargar</a>
+      <a href="#preguntas">Preguntas</a>
+    </nav>
+    <a class="btn primary" href="#descargar">Descargar gratis</a>
+  </div>
+</header>
+
+<main id="inicio">
+  <section class="hero">
+    <div class="wrap">
+      <div class="copy">
+        <span class="eyebrow">Video mapping · Windows · Mac · Android · Navegador</span>
+        <h1>Pon <em>luz</em> en cualquier cosa.</h1>
+        <p class="lede">Arrastra cuatro esquinas sobre una pared, un cubo o un escenario y proyecta video, animaciones y efectos que bailan con la música. Con un editor de nodos como TouchDesigner que se construye solo con una frase.</p>
+        <div class="ctas">
+          <a class="btn primary" href="#descargar">Descargar LumaMap <small>gratis</small></a>
+          <a class="btn" href="#analogico">Ver los efectos</a>
+        </div>
+        <div class="facts">
+          <span><b>167</b> efectos</span><span><b>117</b> operadores de nodos</span><span><b>92</b> animaciones</span><span><b>4K</b> fotograma a fotograma</span>
+        </div>
+      </div>
+      <div class="stagebox">
+        <canvas id="hero" aria-label="Un cubo con tres caras mapeadas: cada cara muestra una animación distinta y los bordes brillan como un borde neón"></canvas>
+        <div class="cap"><span>Cubo 3D · 3 superficies · borde neón</span><span id="heroFps">en vivo</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="analogico">
+    <div class="wrap">
+      <div class="cmp-head">
+        <div class="t">
+          <span class="eyebrow" style="color:var(--tungsten)">Nuevo · Analógico y película</span>
+          <h2>Cine, cinta y tubo.<br>Sobre cualquier cosa.</h2>
+          <p class="lede">Curva de copia de cine, grano, halación, VHS, circuito doblado, subpíxeles de tubo y de pared de LED. Funcionan en directo sobre video, cámara y animaciones, y se combinan con todos los demás efectos. Arrastra la línea.</p>
+        </div>
+      </div>
+      <div class="cmp" id="cmp" role="img" aria-label="Comparador: a la izquierda la imagen original, a la derecha con el efecto elegido">
+        <canvas id="cmpc"></canvas>
+        <div class="split" id="split"></div>
+        <div class="knob" id="knob" aria-hidden="true">⟷</div>
+        <span class="tag l">Original</span><span class="tag r" id="tagR">Cine de 35 mm</span>
+      </div>
+      <div class="looks" role="group" aria-label="Elige un efecto">
+        <button class="look" aria-pressed="true" data-look="1">Cine de 35 mm</button>
+        <button class="look" aria-pressed="false" data-look="2">Cinta VHS gastada</button>
+        <button class="look" aria-pressed="false" data-look="3">Monitor de tubo</button>
+        <button class="look" aria-pressed="false" data-look="4">Pared de LED</button>
+        <button class="look" aria-pressed="false" data-look="5">Circuito doblado</button>
+        <button class="look" aria-pressed="false" data-look="6">Blanco y negro de cine</button>
+      </div>
+      <div class="cmp-foot">
+        <label for="splitRange">Línea <input id="splitRange" type="range" min="0" max="100" value="50"></label>
+        <button class="btn" id="pause" type="button">Pausa</button>
+      </div>
+
+      <div class="fams">
+        <div class="fam"><span class="k">Película</span><h3>Copia de cine</h3><ul><li>7 caracteres: natural, cálida, naranja y verde azulado, blanqueo, B/N, proceso cruzado, desvaída</li><li>Grano y halación</li><li>Polvo, rayones y quemaduras</li></ul></div>
+        <div class="fam"><span class="k">Cinta y señal</span><h3>VHS y circuito</h3><ul><li>Color corrido y realce de bordes</li><li>Banda de tracking y cambio de cabezas</li><li>Pierde la sincronía, canales cambiados</li></ul></div>
+        <div class="fam"><span class="k">Pantalla</span><h3>Subpíxeles</h3><ul><li>Rejilla de tubo, puntos y ranuras de arcade</li><li>LCD y pared de LED, sin muaré</li><li>Pantalla fotografiada con lente</li></ul></div>
+        <div class="fam"><span class="k">Tiempo</span><h3>Datamosh y slit-scan</h3><ul><li>Bloques que siguen el movimiento</li><li>Slit-scan en 5 direcciones</li><li>Ecos y fotogramas congelados al golpe</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="construye">
+    <div class="wrap build">
+      <div class="t">
+        <span class="eyebrow">Nuevo · Editor de nodos</span>
+        <h2>Escríbelo.<br>Se construye solo.</h2>
+        <p class="lede">Describe lo que quieres ver y la red de nodos se arma delante de ti, pieza a pieza, hasta la salida. Con IA entiende cualquier cosa; sin IA, frases sencillas en español o inglés.</p>
+        <p class="dim">LumaMap revisa cada pieza antes de tocar tu red: operadores que existen, valores en su rango, cables sin bucles. Si algo no vale, lo quita y te lo dice. Y con un «Deshacer» vuelve todo atrás de una vez.</p>
+        <p class="mono dim">Ctrl+Espacio en el editor de nodos</p>
+      </div>
+      <div class="term" aria-live="polite">
+        <div class="bar"><span>✨ Escribe y se construye</span><b id="buildSrc">sin IA</b></div>
+        <div class="prompt"><span id="typed"></span><span class="caret" aria-hidden="true"></span></div>
+        <div class="graph" id="graph"><svg id="wires" aria-hidden="true"></svg></div>
+        <div class="say" id="say"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="agentes">
+    <div class="wrap agents">
+      <div class="t">
+        <span class="eyebrow">Nuevo · MCP</span>
+        <h2>Que tu agente de IA lo maneje.</h2>
+        <p class="lede">Claude Code, Cursor o Claude Desktop pueden usar LumaMap como lo haría una persona: ven el proyecto, construyen redes, ajustan parámetros, ponen efectos, proyectan y miran el resultado como imagen para corregirlo.</p>
+        <ol class="steps">
+          <li><span>Abre LumaMap en tu equipo.</span></li>
+          <li><span>En ☰ → Ayuda y sistema → «Conectar un agente de IA», copia el comando. Con la app instalada no hace falta Node.</span></li>
+          <li><span>Pídeselo con tus palabras: «hazme un túnel de neón que lata con el bombo y proyéctalo en la pared».</span></li>
+        </ol>
+        <p class="dim">Solo se conecta un programa de tu mismo equipo, con una clave secreta guardada en tu carpeta de usuario. Ni la red ni una página web pueden usarlo, y todo se puede deshacer.</p>
+      </div>
+      <div class="t">
+        <div class="code"><pre id="mcpCmd">claude mcp add lumamap -- node /ruta/a/lumamap/server/mcp.js</pre><button class="copy" type="button" data-copy="mcpCmd">Copiar</button></div>
+        <div class="code"><pre id="mcpJson">{
+  "mcpServers": {
+    "lumamap": {
+      "command": "node",
+      "args": ["/ruta/a/lumamap/server/mcp.js"]
+    }
+  }
+}</pre><button class="copy" type="button" data-copy="mcpJson">Copiar</button></div>
+        <div>
+          <p class="mono dim" style="margin-bottom:8px">17 herramientas</p>
+          <div class="tools">
+            <span>lumamap_status</span><span>build_from_text</span><span>apply_plan</span><span>list_operators</span>
+            <span>create_node</span><span>connect</span><span>set_params</span><span>move_with</span>
+            <span>get_network</span><span>delete_nodes</span><span>project_network</span><span>list_effects</span>
+            <span>set_effects</span><span>list_animations</span><span>set_animation</span><span>go_scene</span><span>get_image</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <span class="eyebrow">Todo lo demás</span>
+      <h2 style="margin-top:14px">Un programa entero para el show.</h2>
+      <div class="more">
+        <div><span class="n">Mapping</span><h3>Cuatro esquinas o malla</h3><p>Formas libres, máscaras, mallas que se doblan, varios proyectores con bordes suaves y calibración con la cámara del móvil.</p></div>
+        <div><span class="n">117 operadores</span><h3>Nodos como TouchDesigner</h3><p>Imagen, señales, geometría, 3D, materiales y texto. Expresiones, feedback, GLSL, Python y un modo fácil para empezar sin jerga.</p></div>
+        <div><span class="n">8 pistas · ADSR</span><h3>Audio por partes</h3><p>Stems o la música dividida en bombo, bajo, caja y voz. Cada parte mueve lo que quieras con su envolvente.</p></div>
+        <div><span class="n">Art-Net · sACN · RDM</span><h3>Luces DMX</h3><p>Detecta tus luces solo, pixel mapping del video a los LED y 75 efectos de luz al ritmo.</p></div>
+        <div><span class="n">H.264 · H.265 · HAP</span><h3>Grabar y exportar</h3><p>El show a video fotograma a fotograma hasta 4K, en HAP .mov para Resolume y con el audio aparte en WAV.</p></div>
+        <div><span class="n">Cámara · sensor 3D</span><h3>Interactivo</h3><p>Proyecciones que reaccionan a la gente: agua con ondas, burbujas que revientan, partículas, siluetas.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="descargar">
+    <div class="wrap">
+      <div class="dl-head">
+        <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+          <span class="eyebrow">Descargar</span>
+          <h2>Elige dónde trabajar.</h2>
+          <p class="lede">El mismo LumaMap en todos. Se actualiza solo y nunca durante un show.</p>
+        </div>
+        <div class="price">Gratis<small>Código abierto · licencia MIT</small></div>
+      </div>
+      <div class="dls">
+        <div class="dl"><span class="eyebrow">PC</span><h3>Windows</h3><ul><li>Windows 10 u 11 de 64 bits</li><li>Instalador con accesos directos</li><li>Plugins FFGL de Resolume</li></ul><span class="file">LumaMap-Setup.exe</span><a class="btn primary" href="https://github.com/cristhianlujan45-blip/Video-Mapping-/releases/download/lumamap-latest/LumaMap-Setup.exe">Descargar</a></div>
+        <div class="dl"><span class="eyebrow">Mac</span><h3>macOS</h3><ul><li>Apple Silicon (M1 o más)</li><li>o Intel</li><li>Mismo proyecto que en Windows</li></ul><span class="file">LumaMap-Mac-AppleSilicon.dmg</span><a class="btn primary" href="https://github.com/cristhianlujan45-blip/Video-Mapping-/releases/download/lumamap-latest/LumaMap-Mac-AppleSilicon.dmg">Apple Silicon</a><a class="btn" href="https://github.com/cristhianlujan45-blip/Video-Mapping-/releases/download/lumamap-latest/LumaMap-Mac-Intel.dmg">Intel</a></div>
+        <div class="dl"><span class="eyebrow">Móvil y tablet</span><h3>Android</h3><ul><li>Android 8.0 o más</li><li>WebView o Chrome al día</li><li>Se instala sola (Android 12+)</li></ul><span class="file">LumaMap-Android.apk</span><a class="btn primary" href="https://github.com/cristhianlujan45-blip/Video-Mapping-/releases/download/lumamap-latest/LumaMap-Android.apk">Descargar</a></div>
+        <div class="dl"><span class="eyebrow">Sin instalar</span><h3>Navegador</h3><ul><li>Chrome, Edge o Firefox con WebGL2</li><li>Node.js 18 o más</li><li>En la red local, con mando remoto</li></ul><span class="file">node lumamap/server/index.js</span><a class="btn" href="https://github.com/cristhianlujan45-blip/Video-Mapping-">Código fuente</a></div>
+      </div>
+      <p class="mono dim" style="margin-top:18px">Todas las versiones en <a href="https://github.com/cristhianlujan45-blip/Video-Mapping-/releases/tag/lumamap-latest">github.com/…/releases/tag/lumamap-latest</a></p>
+    </div>
+  </section>
+
+  <section id="preguntas">
+    <div class="wrap faq">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <span class="eyebrow">Preguntas</span>
+        <h2>Lo que más se pregunta.</h2>
+      </div>
+      <div>
+        <details><summary>¿Cuánto cuesta?</summary><p>Nada. LumaMap es gratis y de código abierto (licencia MIT), también para trabajos comerciales. Lo que proyectas y exportas es tuyo.</p></details>
+        <details><summary>¿Necesito una tarjeta gráfica potente?</summary><p>No. Todo se dibuja con WebGL2 y los efectos trabajan al tamaño real de cada superficie en la salida. Si el equipo va justo, la prueba de velocidad elige la calidad para que vaya fluido; para exportar en 4K se dibuja fotograma a fotograma, tarde lo que tarde.</p></details>
+        <details><summary>¿Funciona sin internet?</summary><p>Sí. El programa, los efectos y el planificador de «Escribe y se construye» funcionan sin conexión. La IA local (Ollama) también; solo la IA en la nube necesita internet.</p></details>
+        <details><summary>¿Necesito IA para usar los nodos?</summary><p>No. Sin IA tienes el modo fácil, los ejemplos y un planificador que entiende frases sencillas. Con IA, «Escribe y se construye» entiende cualquier petición y te ayuda a escribir Python y GLSL.</p></details>
+        <details><summary>¿Qué formatos exporta?</summary><p>MP4 H.264 (lo abre todo), MP4 H.265 (la mitad de peso, si el equipo lo codifica) y HAP .mov (el códec de los programas de VJ, como Resolume). El audio puede salir también aparte en WAV.</p></details>
+        <details><summary>¿Puedo usar mis plugins y shaders?</summary><p>Sí: shaders ISF (.fs, el formato de Resolume, VDMX y Millumin), plugins FFGL de Resolume en Windows y tu propio GLSL en los nodos.</p></details>
+        <details><summary>¿Es seguro conectar un agente de IA?</summary><p>Solo puede conectarse un programa de tu mismo equipo, con una clave que LumaMap guarda en tu carpeta de usuario. Cada cambio pasa por las mismas comprobaciones que la interfaz y se puede deshacer con Ctrl+Z.</p></details>
+        <details><summary>¿Cómo se actualiza?</summary><p>Solo. La versión nueva se descarga sola y se instala al cerrar LumaMap (Windows) o al salir de la app (Android 12 o más). Nunca durante un show. Se puede apagar.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <span class="eyebrow">Cine. VHS. Tubo. Nodos.</span>
+      <h2>Apaga la sala.<br>Enciende el proyector.</h2>
+      <div class="ctas"><a class="btn primary" href="#descargar">Descargar LumaMap <small>gratis</small></a><a class="btn" href="https://github.com/cristhianlujan45-blip/Video-Mapping-">Ver el código</a></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap"><span>LumaMap · video mapping · licencia MIT</span><span>Windows · macOS · Android · Navegador</span></div>
+</footer>
+
+<script>
+(() => {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let paused = reduce;
+
+  /* ---------------- WebGL: compilar un sombreador de pantalla completa ---------------- */
+  function glProgram(gl, fs) {
+    const vs = "attribute vec2 p; varying vec2 uv; void main(){ uv = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }";
+    const mk = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh)); return sh; };
+    const pr = gl.createProgram();
+    gl.attachShader(pr, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, mk(gl.FRAGMENT_SHADER, "precision highp float; varying vec2 uv;\n" + fs));
+    gl.linkProgram(pr); gl.useProgram(pr);
+    const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(pr, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    return (n) => gl.getUniformLocation(pr, n);
+  }
+  function fit(canvas, gl, scale = 1) {
+    const d = Math.min(devicePixelRatio || 1, 2) * scale, w = Math.round(canvas.clientWidth * d), h = Math.round(canvas.clientHeight * d);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
+  }
+  const visible = new Map();
+  const io = "IntersectionObserver" in window ? new IntersectionObserver((es) => es.forEach(e => visible.set(e.target, e.isIntersecting)), { rootMargin: "100px" }) : null;
+  const onScreen = (el) => !io || visible.get(el) !== false;
+
+  /* ---------------- Portada: un cubo con tres caras mapeadas ---------------- */
+  const hero = document.getElementById("hero");
+  const hgl = hero.getContext("webgl", { antialias: true, premultipliedAlpha: false });
+  if (hgl) {
+    io?.observe(hero);
+    const U = glProgram(hgl, `
+      uniform vec2 res; uniform float t;
+      float hash(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
+      vec3 pal(float x){ return 0.5 + 0.5*cos(6.2831*(x + vec3(0.0,0.33,0.67))); }
+      // Las tres caras: plasma de colores, rejilla que se mueve y anillos al ritmo.
+      vec3 face(int k, vec2 q){
+        if (k == 0) { float v = sin(q.x*7.0+t)+sin(q.y*6.0-t*1.3)+sin((q.x+q.y)*5.0+t*0.7); return pal(v*0.15 + t*0.05) * 0.95; }
+        if (k == 1) { vec2 g = abs(fract(q*6.0 + vec2(0.0, t*0.4)) - 0.5); float l = smoothstep(0.46, 0.5, max(g.x,g.y)); return mix(vec3(0.02,0.03,0.08), vec3(0.25,0.9,1.0), l) + vec3(0.6,0.1,0.9)*0.25*q.y; }
+        float r = length(q - 0.5); float beat = pow(fract(t*0.9), 3.0);
+        return vec3(1.0,0.55,0.15) * smoothstep(0.035, 0.0, abs(fract(r*5.0 - t*0.8) - 0.5) - 0.02) * (0.6 + 0.6*(1.0-beat)) + vec3(0.06,0.02,0.0);
+      }
+      float cross2(vec2 a, vec2 b){ return a.x*b.y - a.y*b.x; }
+      // ¿p está en el paralelogramo o + s*a + u*b (s,u en 0..1)? Devuelve (s,u) o (-1).
+      vec2 inPar(vec2 p, vec2 o, vec2 a, vec2 b){ vec2 d = p - o; float den = cross2(a,b); float s = cross2(d,b)/den, u = cross2(a,d)/den; return (s>=0.0&&s<=1.0&&u>=0.0&&u<=1.0) ? vec2(s,u) : vec2(-1.0); }
+      void main(){
+        vec2 p = (gl_FragCoord.xy - 0.5*res) / min(res.x, res.y);
+        p.y += 0.02*sin(t*0.6);
+        float S = 0.34;
+        vec2 c = vec2(0.0, -0.02);
+        vec3 col = vec3(0.0); float edge = 1e3;
+        // El vértice delantero en c: arriba, derecha e izquierda son paralelogramos desde ahí.
+        vec2 top = inPar(p, c, vec2(0.866*S, 0.5*S), vec2(-0.866*S, 0.5*S));
+        vec2 right = inPar(p, c, vec2(0.866*S, 0.5*S), vec2(0.0, -S));
+        vec2 left = inPar(p, c, vec2(-0.866*S, 0.5*S), vec2(0.0, -S));
+        vec2 uvf; int k = -1;
+        if (top.x >= 0.0) { uvf = top; k = 1; } else if (right.x >= 0.0) { uvf = right; k = 0; } else if (left.x >= 0.0) { uvf = left; k = 2; }
+        if (k >= 0) {
+          col = face(k, uvf) * (k == 1 ? 1.0 : k == 0 ? 0.92 : 0.8);
+          float e = min(min(uvf.x, 1.0-uvf.x), min(uvf.y, 1.0-uvf.y));
+          edge = e * S * 2.0;
+        }
+        // Borde neón alrededor de las caras.
+        float glow = exp(-edge * 140.0) * (k >= 0 ? 1.0 : 0.0);
+        col += vec3(0.25, 0.88, 1.0) * glow * (0.8 + 0.2*sin(t*3.0));
+        // Haz del proyector: un cono suave desde arriba y polvo en el aire.
+        float beam = smoothstep(0.55, 0.0, abs(p.x + (p.y - 0.75)*0.12)) * smoothstep(-0.2, 0.75, p.y) * 0.05;
+        col += vec3(0.6, 0.85, 1.0) * beam * (k < 0 ? 1.0 : 0.0);
+        float dust = step(0.9985, hash(floor(gl_FragCoord.xy/2.0) + floor(t*8.0))) * beam * 12.0;
+        col += dust;
+        gl_FragColor = vec4(col, 1.0);
+      }`);
+    const uRes = U("res"), uT = U("t");
+    let t0 = performance.now(), frames = 0, fpsAt = t0;
+    const fpsEl = document.getElementById("heroFps");
+    const draw = (now) => {
+      if (onScreen(hero) && (!paused || frames === 0)) {
+        fit(hero, hgl);
+        hgl.uniform2f(uRes, hero.width, hero.height); hgl.uniform1f(uT, (now - t0) / 1000);
+        hgl.drawArrays(hgl.TRIANGLE_STRIP, 0, 4); frames++;
+        if (now - fpsAt > 1000) { fpsEl.textContent = paused ? "en pausa" : "en vivo · " + Math.round(frames * 1000 / (now - fpsAt)) + " fps"; frames = 1; fpsAt = now; }
+      }
+      requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
+  }
+
+  /* ---------------- Comparador: una escena y los efectos analógicos ---------------- */
+  const src = document.createElement("canvas"); src.width = 960; src.height = 540;
+  const g = src.getContext("2d");
+  function paint(t) {
+    const sky = g.createLinearGradient(0, 0, 0, 540); sky.addColorStop(0, "#14205a"); sky.addColorStop(0.62, "#b8263a"); sky.addColorStop(1, "#ffbe3d");
+    g.fillStyle = sky; g.fillRect(0, 0, 960, 540);
+    g.fillStyle = "#fff6dc"; g.beginPath(); g.arc(705, 165, 62, 0, 7); g.fill();
+    for (let i = 0; i < 12; i++) {
+      const hgt = 330 - (i * 37 % 120);
+      g.fillStyle = `hsl(${i * 30},55%,${18 + (i % 3) * 9}%)`; g.fillRect(i * 80, hgt, 70, 540 - hgt);
+      g.fillStyle = "#ffe8a3";
+      for (let y = hgt + 20; y < 520; y += 30) if ((i * 7 + y) % 4) g.fillRect(i * 80 + 12, y, 12, 14);
+    }
+    g.fillStyle = "#3fe0ff"; g.beginPath(); g.arc(160 + ((t * 120) % 760), 210 + Math.sin(t * 2) * 30, 46, 0, 7); g.fill();
+    g.fillStyle = "#ffffff"; g.font = "800 72px 'Big Shoulders Display', Impact, sans-serif"; g.fillText("LUMAMAP", 40, 100);
+  }
+  const cmp = document.getElementById("cmp"), cv = document.getElementById("cmpc");
+  const cgl = cv.getContext("webgl", { premultipliedAlpha: false });
+  let split = 0.5, look = 1;
+  if (cgl) {
+    io?.observe(cmp);
+    const U = glProgram(cgl, `
+      uniform sampler2D tex; uniform float t, split; uniform int look; uniform vec2 res;
+      float hash(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
+      float lum(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
+      vec3 S(vec2 q){ return texture2D(tex, vec2(q.x, 1.0 - q.y)).rgb; }
+      vec3 aces(vec3 x){ return (x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14); }
+      vec3 yiq(vec3 c){ return vec3(lum(c), dot(c, vec3(0.596,-0.274,-0.322)), dot(c, vec3(0.211,-0.523,0.312))); }
+      vec3 rgbOf(vec3 y){ return vec3(y.x+0.956*y.y+0.621*y.z, y.x-0.272*y.y-0.647*y.z, y.x-1.106*y.y+1.703*y.z); }
+      vec3 film(vec2 q, bool bw){
+        float fr = floor(t*24.0);
+        q += (vec2(hash(vec2(fr,1.0)), hash(vec2(2.0,fr))) - 0.5) * 0.0025;
+        vec3 c = S(q);
+        vec3 b = vec3(0.0); for (int i = 0; i < 8; i++) { float a = float(i)*0.785; b += S(q + vec2(cos(a),sin(a))*0.012); }
+        float h = lum(max(b/8.0 - 0.55, 0.0)) * 2.6;
+        c += vec3(1.0,0.3,0.1) * h * 0.7;
+        vec3 f = clamp(aces(c)/0.8038, 0.0, 1.0);
+        float l = lum(f);
+        if (bw) f = vec3(clamp((l-0.5)*1.25+0.5, 0.0, 1.0)) * vec3(1.02,1.0,0.96);
+        else f += vec3(0.03,0.0,-0.035)*smoothstep(0.45,1.0,l) + vec3(-0.02,0.006,0.03)*(1.0-smoothstep(0.0,0.4,l));
+        f = f*0.95 + 0.03;
+        f *= 1.0 + (hash(vec2(fr,3.7)) - 0.5) * 0.07;
+        vec2 gq = floor(q*res/1.4); float n = hash(gq + fr*1.71) + hash(gq*1.3 + fr*2.33) - 1.0;
+        f += n * (bw ? 0.12 : 0.07) * (1.0 - abs(l-0.5)*1.3);
+        if (bw) { vec2 gg = q*vec2(48.0,27.0); if (hash(floor(gg)+fr) > 0.996) f = mix(f, vec3(0.04), smoothstep(0.12, 0.0, length(fract(gg)-0.5))); }
+        return f;
+      }
+      vec3 vhs(vec2 q){
+        float line = floor(q.y*240.0), fr = floor(t*24.0);
+        float band = 1.0 - fract(t*0.07); float trk = 1.0 - smoothstep(0.0, 0.04, abs(q.y - band));
+        q.x += (hash(vec2(line, floor(t*20.0))) - 0.5) * 0.002 + trk*(hash(vec2(line, fr))-0.5)*0.04 + smoothstep(0.965,1.0,q.y)*0.03;
+        float yc = lum(S(q)), yb = 0.0; for (int i = -2; i <= 2; i++) yb += lum(S(q + vec2(float(i)*1.5/res.x, 0.0))) * 0.2;
+        float Y = yb + (yc - yb) * 1.4;
+        vec2 iq = vec2(0.0); float ws = 0.0;
+        for (int i = 0; i < 10; i++) { float w = exp(-float(i)*0.3); iq += yiq(S(q - vec2(float(i)*2.5/res.x + 0.003, 0.0))).yz * w; ws += w; }
+        vec3 c = rgbOf(vec3(Y, iq/ws*0.78));
+        c += trk*0.3*hash(q*res + fract(t)*100.0) + (hash(q*res + fract(t*7.0)*100.0)-0.5)*0.07;
+        c *= 0.9 + 0.1*sin(q.y*res.y*3.1416);
+        return c;
+      }
+      vec3 tube(vec2 q){
+        vec2 c = q - 0.5; c *= 1.0 + dot(c,c)*0.22; q = c + 0.5;
+        if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0) return vec3(0.0);
+        vec3 col = S(q), glow = vec3(0.0);
+        for (int i = 0; i < 6; i++) { float a = float(i)*1.047; glow += S(q + vec2(cos(a),sin(a))*0.006); }
+        float px = gl_FragCoord.x / 1.4; float k = mod(floor(px), 3.0);
+        vec3 m = vec3(k==0.0, k==1.0, k==2.0) * (0.55 + 0.45*smoothstep(0.0,0.25,fract(px))*(1.0-smoothstep(0.75,1.0,fract(px))));
+        col = col * mix(vec3(1.0), m*3.0, 0.6) + glow/6.0*0.18;
+        col *= 0.85 + 0.15*sin(q.y*res.y*1.6);
+        col *= 1.0 - dot(c,c)*1.4;
+        return col;
+      }
+      vec3 led(vec2 q){
+        vec2 cells = vec2(96.0, 54.0); vec2 id = floor(q*cells); vec3 c = S((id+0.5)/cells);
+        float d = length(fract(q*cells) - 0.5);
+        return c * (1.0 - smoothstep(0.26, 0.42, d)) * 1.6 * (1.15 - 0.15*hash(id));
+      }
+      vec3 bend(vec2 q){
+        float ep = floor(t*0.6), fr = floor(t*24.0), seam = 1.0;
+        if (hash(vec2(ep,2.0)) < 0.7) { q.y = fract(q.y + fract(t*0.35)); seam = smoothstep(0.0,0.035,q.y)*smoothstep(1.0,0.985,q.y); }
+        float bid = floor(q.y*14.0 + hash(vec2(fr,1.0))*3.0);
+        if (hash(vec2(bid, floor(t*7.0))) > 0.68) q.x += (hash(vec2(bid,fr)) - 0.5)*0.18;
+        vec3 c = S(q);
+        float bb = hash(vec2(floor(q.y*6.0 + t*2.0), floor(t*4.0)));
+        if (bb > 0.75) c = bb > 0.93 ? 1.0 - c : c.brg;
+        c = clamp(mix(vec3(lum(c)), c, 1.6), 0.0, 1.0) + sin((q.x*3.0 + q.y*45.0 + t*9.0)*6.2831)*0.04;
+        return c * seam;
+      }
+      void main(){
+        vec2 q = uv;
+        vec3 c;
+        if (q.x < split) c = S(q);
+        else if (look == 1) c = film(q, false);
+        else if (look == 2) c = vhs(q);
+        else if (look == 3) c = tube(q);
+        else if (look == 4) c = led(q);
+        else if (look == 5) c = bend(q);
+        else c = film(q, true);
+        gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+      }`);
+    const tex = cgl.createTexture();
+    cgl.bindTexture(cgl.TEXTURE_2D, tex);
+    for (const [k, v] of [[cgl.TEXTURE_MIN_FILTER, cgl.LINEAR], [cgl.TEXTURE_MAG_FILTER, cgl.LINEAR], [cgl.TEXTURE_WRAP_S, cgl.CLAMP_TO_EDGE], [cgl.TEXTURE_WRAP_T, cgl.CLAMP_TO_EDGE]]) cgl.texParameteri(cgl.TEXTURE_2D, k, v);
+    const u = { t: U("t"), split: U("split"), look: U("look"), res: U("res"), tex: U("tex") };
+    cgl.uniform1i(u.tex, 0);
+    const t0 = performance.now();
+    let dirty = true, lastT = 0;
+    const draw = (now) => {
+      const t = paused ? lastT : (now - t0) / 1000;
+      if (onScreen(cmp) && (!paused || dirty)) {
+        lastT = t; dirty = false;
+        fit(cv, cgl);
+        paint(t);
+        cgl.texImage2D(cgl.TEXTURE_2D, 0, cgl.RGBA, cgl.RGBA, cgl.UNSIGNED_BYTE, src);
+        cgl.uniform1f(u.t, t); cgl.uniform1f(u.split, split); cgl.uniform1i(u.look, look); cgl.uniform2f(u.res, cv.width, cv.height);
+        cgl.drawArrays(cgl.TRIANGLE_STRIP, 0, 4);
+      }
+      requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
+    window.__redraw = () => { dirty = true; };
+  } else {
+    cmp.insertAdjacentHTML("beforeend", '<p style="position:absolute;inset:auto 16px 16px;color:#fff">Este navegador no tiene WebGL: abre la página en Chrome, Edge o Firefox para ver los efectos.</p>');
+  }
+  const splitEl = document.getElementById("split"), knob = document.getElementById("knob"), range = document.getElementById("splitRange");
+  function setSplit(x) {
+    split = Math.max(0, Math.min(1, x));
+    splitEl.style.left = knob.style.left = (split * 100) + "%";
+    range.value = Math.round(split * 100);
+    window.__redraw?.();
+  }
+  setSplit(0.5);
+  let dragging = false;
+  const fromEvent = (e) => { const r = cmp.getBoundingClientRect(); setSplit((e.clientX - r.left) / r.width); };
+  cmp.addEventListener("pointerdown", (e) => { dragging = true; cmp.setPointerCapture(e.pointerId); fromEvent(e); });
+  cmp.addEventListener("pointermove", (e) => { if (dragging || e.pointerType === "mouse") fromEvent(e); });
+  cmp.addEventListener("pointerup", () => { dragging = false; });
+  range.addEventListener("input", () => setSplit(range.value / 100));
+  const tagR = document.getElementById("tagR");
+  document.querySelectorAll(".look").forEach(b => b.addEventListener("click", () => {
+    look = +b.dataset.look;
+    document.querySelectorAll(".look").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    tagR.textContent = b.textContent;
+    window.__redraw?.();
+  }));
+  const pauseBtn = document.getElementById("pause");
+  const syncPause = () => { pauseBtn.textContent = paused ? "Reproducir" : "Pausa"; window.__redraw?.(); };
+  pauseBtn.addEventListener("click", () => { paused = !paused; syncPause(); });
+  syncPause();
+
+  /* ---------------- Escribe y se construye: la red se arma sola ---------------- */
+  const DEMOS = [
+    { text: "colores que bailan con la música en caleidoscopio", src: "sin IA",
+      nodes: [["Ruido", "TOP · imagen", "top", 0, 0], ["Caleidoscopio", "TOP · efecto", "top", 1, 0], ["Salida", "TOP · lo que se proyecta", "out", 2, 0], ["Audio", "CHOP · música", "chop", 1, 1]],
+      wires: [[0, 1], [1, 2]], chop: [3, 1], say: "Construí: colores que se mueven, caleidoscopio, con la música. 4 nodos." },
+    { text: "mi cámara con bordes de neón y estela", src: "sin IA",
+      nodes: [["Cámara", "TOP · en vivo", "top", 0, 0], ["Bordes", "TOP · efecto", "top", 1, 0], ["Resplandor", "TOP · neón", "top", 2, 0], ["Salida", "TOP · con estela", "out", 3, 0], ["Feedback", "TOP · estela", "top", 2, 1]],
+      wires: [[0, 1], [1, 2], [2, 3], [4, 3]], say: "Construí: tu cámara, bordes, resplandor neón, con estela. 8 nodos." },
+    { text: "un cubo 3D que gira con ruido de colores al golpe", src: "IA local",
+      nodes: [["Caja", "SOP · forma", "top", 0, 1], ["Ruido", "TOP · textura", "top", 0, 0], ["Objeto 3D", "COMP · gira", "top", 1, 1], ["Render 3D", "TOP · cámara y luz", "top", 2, 0], ["Salida", "TOP", "out", 3, 0], ["Ritmo", "CHOP · golpe", "chop", 2, 1]],
+      wires: [[0, 2], [1, 2], [2, 3], [3, 4]], chop: [5, 2], say: "Construí: un cubo con colores que se mueven, al golpe. 9 nodos." },
+  ];
+  const typed = document.getElementById("typed"), graph = document.getElementById("graph"), wiresSvg = document.getElementById("wires"), sayEl = document.getElementById("say"), srcEl = document.getElementById("buildSrc");
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  function layout(demo) {
+    graph.querySelectorAll(".node").forEach(n => n.remove()); wiresSvg.innerHTML = "";
+    const W = graph.clientWidth, cols = Math.max(...demo.nodes.map(n => n[3])) + 1;
+    const nw = Math.min(132, (W - 12 * (cols - 1)) / cols), gap = cols > 1 ? (W - nw * cols) / (cols - 1) : 0;
+    const els = demo.nodes.map(([name, kind, cls, c, r]) => {
+      const el = document.createElement("div"); el.className = "node " + cls; el.style.width = nw + "px";
+      el.style.left = (c * (nw + gap)) + "px"; el.style.top = (r === 0 ? 20 : 130) + "px";
+      el.innerHTML = `<small>${kind}</small>${name}`; graph.append(el); return el;
+    });
+    const pt = (el, side) => { const x = parseFloat(el.style.left) + (side ? el.offsetWidth : 0), y = parseFloat(el.style.top) + el.offsetHeight / 2; return [x, y]; };
+    const path = (a, b, cls) => { const [x1, y1] = pt(els[a], 1), [x2, y2] = pt(els[b], 0); const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); const mx = (x1 + x2) / 2; p.setAttribute("d", `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`); p.setAttribute("class", "wire " + cls); wiresSvg.append(p); return p; };
+    const ws = demo.wires.map(([a, b]) => ({ to: b, el: path(a, b, "") }));
+    let chop = null;
+    if (demo.chop) { const [a, b] = demo.chop; const [x1, y1] = [parseFloat(els[a].style.left) + els[a].offsetWidth / 2, parseFloat(els[a].style.top)]; const [x2, y2] = [parseFloat(els[b].style.left) + els[b].offsetWidth / 2, parseFloat(els[b].style.top) + els[b].offsetHeight]; const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); p.setAttribute("d", `M${x1},${y1} L${x2},${y2}`); p.setAttribute("class", "wire chop"); wiresSvg.append(p); chop = p; }
+    return { els, ws, chop };
+  }
+  async function play(demo, instant) {
+    srcEl.textContent = demo.src;
+    sayEl.textContent = "";
+    const g2 = layout(demo);
+    if (instant) { typed.textContent = demo.text; g2.els.forEach(e => e.classList.add("on")); g2.ws.forEach(w => w.el.classList.add("on")); g2.chop?.classList.add("on"); sayEl.textContent = "✅ " + demo.say; return; }
+    typed.textContent = "";
+    for (const ch of demo.text) { typed.textContent += ch; await wait(38 + Math.random() * 40); }
+    await wait(500);
+    sayEl.textContent = "🔧 Construyendo…";
+    for (let i = 0; i < g2.els.length; i++) {
+      g2.els[i].classList.add("on");
+      g2.ws.filter(w => w.to === i || g2.els.indexOf(g2.els[w.to]) <= i).forEach(w => { if (g2.els[w.to].classList.contains("on")) w.el.classList.add("on"); });
+      await wait(420);
+    }
+    g2.ws.forEach(w => w.el.classList.add("on")); g2.chop?.classList.add("on");
+    await wait(300);
+    sayEl.textContent = "✅ " + demo.say;
+  }
+  const term = document.querySelector(".term");
+  io?.observe(term);
+  (async () => {
+    if (reduce) { play(DEMOS[0], true); return; }
+    for (let k = 0; ; k = (k + 1) % DEMOS.length) {
+      while (!onScreen(term) || paused) await wait(400);
+      await play(DEMOS[k], false);
+      await wait(2600);
+    }
+  })();
+  addEventListener("resize", () => { if (reduce) play(DEMOS[0], true); });
+
+  /* ---------------- Copiar los comandos ---------------- */
+  document.querySelectorAll(".copy").forEach(b => b.addEventListener("click", async () => {
+    const el = document.getElementById(b.dataset.copy);
+    try { await navigator.clipboard.writeText(el.textContent); b.textContent = "Copiado"; }
+    catch { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = "Selecciónalo y copia"; }
+    setTimeout(() => { b.textContent = "Copiar"; }, 1800);
+  }));
+})();
+</script>

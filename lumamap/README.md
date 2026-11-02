@@ -51,6 +51,25 @@ muy potente pero difícil: casi todo se construye a mano. LumaMap va por los dos
 hecho y se maneja con botones, y para quien quiere programar como en TouchDesigner tiene un **editor de redes
 de nodos de verdad** (botón «Nodos» arriba).
 
+### ✨ Escribe y se construye · 🤖 agentes de IA por MCP
+
+- **Escribe y se construye** (en el editor de nodos: botón «✨», **Ctrl+Espacio** o escribiendo en la red
+  vacía): describes lo que quieres —«colores que bailan con la música en caleidoscopio», «mi cámara con
+  estela de neón», «un cubo 3D que gira al golpe», «texto «HOLA» rojo que late»— y la red se arma sola,
+  **nodo a nodo delante de ti**, y termina en la Salida. Con IA (local con Ollama o en la nube) entiende
+  cualquier cosa: el modelo propone un plan con los 117 operadores y LumaMap **lo valida entero** antes de
+  tocar la red (operadores, rangos, colores, cables sin bucles, expresiones seguras; lo que no existe se
+  quita y se dice). Sin IA, un planificador propio entiende frases sencillas en español e inglés (imágenes,
+  efectos en el orden en que se dicen, colores, texto entre comillas, 3D, partículas, estela y lo que se
+  mueve con la música, el golpe, la mano o el movimiento). «↶ Quitar lo construido» lo deshace de una vez.
+- **Agentes de IA por MCP** (☰ → Ayuda y sistema → «🤖 Conectar un agente de IA»): Claude Code, Cursor o
+  Claude Desktop manejan LumaMap con 17 herramientas: ver el proyecto, construir redes con una frase o con
+  su propio plan, crear y conectar nodos, cambiar parámetros (con expresiones), mover cosas con la música,
+  poner efectos y animaciones, cambiar de escena, proyectar y **mirar el resultado como imagen**.
+  `claude mcp add lumamap -- node /ruta/a/lumamap/server/mcp.js` (con la app de escritorio no hace falta
+  Node: el diálogo da el comando con el propio LumaMap). Solo desde este equipo y con una clave secreta
+  (`~/.lumamap/agent.json`); nada de la red ni de una página web puede usarlo. Todo se puede deshacer.
+
 ### 🔗 Editor de redes de nodos (como TouchDesigner)
 
 - **Modo fácil (de serie)**: sin jerga ni familias; **«＋ Añadir»** con tarjetas por lo que quieres hacer (1 · Empieza con una imagen, 2 · Cámbiala, 3 · Mézclala, 4 · Que se mueva sola, 5 · 3D, 6 · Mostrar); **todo se conecta solo** (lo nuevo entra en la cadena antes de la Salida; una segunda imagen se suma sola), un **＋ en cada nodo** para el paso siguiente, controles sencillos con **«〰»** para que cualquiera se mueva con la música, el golpe, una onda, al azar, la mano o el movimiento (sin fórmulas), y una red vacía que empieza con un toque («Colores que bailan», «Mi cámara con efecto», «Texto que late»). Tutorial interactivo **«Nodos fáciles»** (capítulo 21, 2 minutos). **«🔧 Modo pro»** = todo lo de abajo, como TouchDesigner.

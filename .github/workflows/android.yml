@@ -88,6 +88,10 @@ jobs:
         if: success() || failure()
         working-directory: lumamap
         run: node tests/effects.browser.test.js
+      - name: Agente de IA por MCP (servidor MCP → app abierta en el navegador)
+        if: success() || failure()
+        working-directory: lumamap
+        run: node tests/mcp.browser.test.js
       - name: Tracking real (cámara falsa con una persona → IA → regla)
         if: success() || failure()
         working-directory: lumamap

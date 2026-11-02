@@ -93,6 +93,35 @@ let oscOut = null;         // socket UDP para enviar OSC (feedback)
 let HTTPS_PORT = 0;        // puerto https (cámara del móvil), si está activo
 export const outHub = new FrameHub();   // «Salida por red»: la proyección en MJPEG (/stream.mjpg)
 export const netHubs = new ChannelHubs();   // y la de cada «Salida por red (TOP)» de las redes (/stream.mjpg?ch=…)
+/* ---------------- Agentes de IA (MCP: server/mcp.js) ----------------
+   Claude Code, Cursor… mandan herramientas a POST /api/agent; aquí se pasan a la app abierta
+   (el «display» de este mismo equipo) por su WebSocket y se espera su respuesta.
+   Solo desde este equipo y con un token secreto en la cabecera «x-lumamap-token» (una web
+   cualquiera no puede mandar esa cabecera sin permiso). El token y el puerto se guardan en
+   ~/.lumamap/agent.json (solo para el usuario), que es donde lo lee server/mcp.js. */
+const agentWaits = new Map();              // id → { resolve, timer }
+let agentSeq = 1;
+export const agentFile = () => process.env.LUMAMAP_AGENT_FILE || path.join(os.homedir(), ".lumamap", "agent.json");
+const isLoopback = (a = "") => a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
+function writeAgentFile(cfg, port) {
+  try {
+    fs.mkdirSync(path.dirname(cfg.file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(cfg.file, JSON.stringify({ url: `http://127.0.0.1:${port}`, port, token: cfg.token, pid: process.pid, at: new Date().toISOString() }, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(cfg.file, 0o600); } catch {}
+  } catch (e) { console.warn("[LumaMap] no se pudo guardar el acceso para agentes:", e.message); }
+}
+/** Manda una herramienta a la app abierta y espera su respuesta. */
+function askApp(tool, args, timeout = 120000) {
+  const app = [...clients].reverse().find(c => c.role === "display" && c.ok && c.local);
+  if (!app) return Promise.resolve({ error: "LumaMap no está abierto en este equipo (abre la app y vuelve a intentarlo)" });
+  const id = agentSeq++;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { agentWaits.delete(id); resolve({ error: "LumaMap no respondió a tiempo" }); }, timeout);
+    agentWaits.set(id, { resolve, timer });
+    sendJSON(app.sock, { type: "agent", id, tool: String(tool), args: args && typeof args === "object" ? args : {} });
+  });
+}
+
 /** Puerto del servidor https (lo fija quien lo arranca). */
 export function setHttpsPort(p) { HTTPS_PORT = Number(p) || 0; }
 
@@ -126,6 +155,12 @@ function handleWsMessage(client, raw) {
     return;
   }
   if (!client.ok) return;
+  // Respuesta de la app a una herramienta de un agente (solo la app de este equipo).
+  if (msg.type === "agentResult" && client.role === "display" && client.local) {
+    const w = agentWaits.get(msg.id);
+    if (w) { clearTimeout(w.timer); agentWaits.delete(msg.id); w.resolve(msg.error ? { error: String(msg.error) } : { result: msg.result }); }
+    return;
+  }
   // Relé: control -> displays; state -> controllers
   if (msg.type === "control") {
     for (const c of clients)
@@ -212,10 +247,28 @@ function safeJoin(baseDir, urlPath) {
  * tls: { cert, key } → servidor https (misma app y mismo WebSocket): lo usa el
  * móvil como cámara, porque los navegadores solo dan la cámara a páginas seguras.
  */
-export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPort = 9129, pin = "", tls = null } = {}) {
+export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPort = 9129, pin = "", tls = null, agent = false } = {}) {
   PIN = String(pin || "");
+  // Puente para agentes de IA (solo en el servidor http de este equipo, nunca en el https del móvil).
+  const AGENT = agent && !tls ? { token: crypto.randomBytes(24).toString("hex"), file: typeof agent === "string" ? agent : agentFile() } : null;
   const handler = (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    if (url.pathname === "/api/agent") {
+      const json = (code, o) => { res.writeHead(code, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }); res.end(JSON.stringify(o)); };
+      if (!AGENT) return json(404, { error: "no disponible" });
+      if (!isLoopback(req.socket.remoteAddress)) return json(403, { error: "solo desde este equipo" });
+      const tok = String(req.headers["x-lumamap-token"] || "");
+      if (tok.length !== AGENT.token.length || !crypto.timingSafeEqual(Buffer.from(tok), Buffer.from(AGENT.token))) return json(401, { error: "token incorrecto" });
+      if (req.method !== "POST") return json(405, { error: "usa POST" });
+      let body = "";
+      req.on("data", c => { body += c; if (body.length > 2_000_000) req.destroy(); });
+      req.on("end", async () => {
+        let m; try { m = JSON.parse(body); } catch { return json(400, { error: "JSON no válido" }); }
+        if (!m || typeof m.tool !== "string") return json(400, { error: "falta «tool»" });
+        json(200, await askApp(m.tool, m.args));
+      });
+      return;
+    }
     if (url.pathname === "/api/ping") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, app: "lumamap", displays: [...clients].filter(c => c.role === "display").length, httpsPort: HTTPS_PORT,
@@ -279,6 +332,7 @@ export function createServer({ port = 8080, host = "0.0.0.0", osc = true, oscPor
     }
   };
   const srv = tls ? https.createServer({ cert: tls.cert, key: tls.key }, handler) : http.createServer(handler);
+  if (AGENT) srv.on("listening", () => writeAgentFile(AGENT, srv.address().port));
   srv.on("upgrade", (req, sock) => {
     if (new URL(req.url, "http://x").pathname === "/ws") onUpgrade(req, sock);
     else sock.destroy();
@@ -334,7 +388,7 @@ export async function startHttps({ want = 8443, pin = "", dataDir = DATA, host =
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const port = Number(process.env.PORT || 8080);
-  const srv = createServer({ port });
+  const srv = createServer({ port, agent: true });
   srv.listen(port, () => {
     console.log(`[LumaMap] backend en http://0.0.0.0:${port}`);
   });

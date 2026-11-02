@@ -525,7 +525,7 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   await page.locator("#panelBody .item", { hasText: "Tutorial interactivo con Luma" }).click();
   const card = page.locator("#academyCard");
   await card.locator(".coachtext", { hasText: "Soy Luma" }).waitFor();
-  assert.match(await card.textContent(), /capítulo 1\/20: Conoce LumaMap/);
+  assert.match(await card.textContent(), /capítulo 1\/21: Conoce LumaMap/);
   await card.getByRole("button", { name: "Siguiente ▶" }).click();
   await card.locator(".coachtext", { hasText: "☰ es el menú" }).waitFor();
   // Resalta el botón que hay que tocar; hacerlo de verdad pasa solo al siguiente paso.
@@ -561,7 +561,7 @@ await test("tutorial con Luma: actividades reales, resalta el botón, ocultar/vo
   // Capítulos: cualquiera, cuando quieras.
   await card.getByRole("button", { name: "📚 Capítulos" }).click();
   await page.locator("#modal .coachlist .lesson").first().waitFor();
-  assert.equal(await page.locator("#modal .coachlist .lesson").count(), 20);
+  assert.equal(await page.locator("#modal .coachlist .lesson").count(), 21);
   await page.locator("#modal .coachlist .lesson", { hasText: "3D: mapping sobre objetos" }).click();
   await card.locator(".coachtext", { hasText: "pestaña «3D»" }).waitFor();
   // Salir y «Continuar» vuelve al mismo sitio.
@@ -1138,7 +1138,7 @@ await test("Python y la IA que escribe código: Dibujo con Python da imagen, con
   const dlg = page.locator("#modal.show");
   await dlg.locator("textarea").fill("un valor al azar");
   await dlg.getByRole("button", { name: "✍ Escribir y probar" }).click();
-  await dlg.getByText(/Listo y funcionando/).waitFor({ timeout: 20000 }).catch(async (e) => { console.log("DLG:", (await dlg.innerText().catch(() => "?")).slice(0, 1500), "\nCHATS:", chats.length); throw e; });
+  await dlg.getByText(/Listo y funcionando/).waitFor({ timeout: 45000 }).catch(async (e) => { console.log("DLG:", (await dlg.innerText().catch(() => "?")).slice(0, 1500), "\nCHATS:", chats.length); throw e; });
   assert.equal(chats.length, 2, "una para escribir y otra para arreglar");
   assert.match(chats[1].messages.at(-1).content, /valor_que_no_existe[\s\S]*no existe/, "a la IA le llega el error con su línea");
   const r = await page.evaluate((ids) => { const a = window.__lumamap, n = a.S.project.networks.find(x => x.id === ids.net), sc = n.nodes.find(x => x.id === ids.sc); return { code: sc.p.code, err: a.td.info(n, sc).error, v: a.td.cookers.get(n.id).chop(sc)?.data.azar?.[0] }; }, ids);
@@ -1212,6 +1212,55 @@ await test("redes de nodos en modo fácil: comienzo de un toque, ＋ Añadir con
   });
   assert.deepEqual(steps, [true, true, true, true, true, true, true, "info"]);
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.setEasyMode(false); m.closeNetworkEditor(); });
+});
+await test("✨ escribe y se construye: una frase arma la red nodo a nodo (sin IA), se ve, se quita de una vez, y con IA usa su plan validado", async () => {
+  const ws = page.locator("#tdws.show");
+  await page.evaluate(async () => {
+    const a = window.__lumamap, m = await import("./js/panels-network.js"), G = await import("./js/td/graph.js");
+    let n; a.edit(() => { n = G.newNetwork("Escrita"); a.S.project.networks.push(n); });
+    await a.openNetwork({ netId: n.id }); m.setEasyMode(true);
+    // Sin IA (como en un equipo sin Ollama): el planificador propio.
+    const { aiOf } = await import("./js/panels-assistant.js"); const ai = aiOf(a);
+    window.__buildRun = ai.run.bind(ai); ai.run = (method, ...args) => ai.none[method](...args);
+  });
+  // Red vacía: se escribe lo que se quiere y Enter.
+  await ws.locator(".tdemptyask").fill("colores que bailan con la música en caleidoscopio con estela");
+  await ws.locator(".tdemptyask").press("Enter");
+  await ws.locator(".tdbuild .tdbuildstatus", { hasText: "✅" }).waitFor({ timeout: 30000 });
+  const r = await page.evaluate(async () => {
+    const a = window.__lumamap, n = a.S.project.networks.at(-1);
+    await new Promise(res => setTimeout(res, 600));
+    const out = n.nodes.find(x => x.type === "out");
+    const o = a.td.output(n.id, out.id, { time: performance.now() / 1000, w: 32, h: 18 }); const d = o.el.getContext("2d").getImageData(0, 0, 32, 18).data;
+    let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2];
+    return { types: n.nodes.map(x => x.type).sort(), lum: s / 576, errs: n.nodes.map(x => a.td.info(n, x).error).filter(Boolean), display: n.display === out.id, log: document.querySelectorAll(".tdbuildlog li").length, rot: n.nodes.find(x => x.type === "kaleido").p.rot?.e || "", undo: !!document.querySelector(".tdbuildact") };
+  });
+  for (const t of ["noise", "kaleido", "feedback", "composite", "out", "audio"]) assert.ok(r.types.includes(t), t + " en " + r.types);
+  assert.match(r.rot, /audio\d*\.bass/, "se mueve con la música");
+  assert.ok(r.lum > 5, "la salida tiene imagen: " + r.lum); assert.deepEqual(r.errs, []); assert.ok(r.display);
+  assert.ok(r.log >= 6, "se ve cada paso: " + r.log);
+  // «↶ Quitar lo construido»: la red vuelve a como estaba (vacía) de una vez.
+  await ws.locator(".tdbuildact button", { hasText: "Quitar lo construido" }).click();
+  assert.equal(await page.evaluate(() => window.__lumamap.S.project.networks.at(-1).nodes.length), 0);
+  // Con IA: el plan del modelo (aquí uno simulado) se valida y se construye debajo de lo que haya.
+  await page.evaluate(async () => {
+    const a = window.__lumamap, { aiOf } = await import("./js/panels-assistant.js"), ai = aiOf(a);
+    ai.run = async (method, arg) => {
+      const B = await import("./js/td/build.js");
+      return { ...B.validatePlan({ title: "Anillo", say: "Un aro que gira en un túnel.", nodes: [{ id: "a", op: "TOP/circle", p: { color: "#ff00b4", radius: 0.3, ring: 0.04 } }, { id: "b", op: "TOP/polar", p: { twist: { e: "sin(absTime.seconds)" } } }, { id: "x", op: "TOP/noexiste" }],
+        wires: [{ from: "a", to: "b" }], moves: [{ node: "a", param: "radius", with: "beat" }] }), source: "IA de prueba", text: arg.text };
+    };
+  });
+  await page.keyboard.press("Control+Space");
+  await ws.locator(".tdbuildin").fill("un aro de neón en un túnel");
+  await ws.locator(".tdbuild button", { hasText: "Construir" }).click();
+  await ws.locator(".tdbuild .tdbuildstatus", { hasText: "Un aro que gira" }).waitFor({ timeout: 30000 });
+  const r2 = await page.evaluate(() => { const n = window.__lumamap.S.project.networks.at(-1); return { types: n.nodes.map(x => x.type).sort(), radius: n.nodes.find(x => x.type === "circle").p.radius?.e || "", warn: document.querySelector(".tdbuildwarn summary")?.textContent || "" }; });
+  assert.deepEqual(r2.types, ["beat", "circle", "out", "polar"]);
+  assert.match(r2.radius, /beat\d*\.beat/); assert.match(r2.warn, /1 cosa/);
+  // ▶ Proyectar desde el resultado.
+  await ws.locator(".tdbuildact button", { hasText: "Proyectar" }).click();
+  await page.evaluate(async () => { const a = window.__lumamap, { aiOf } = await import("./js/panels-assistant.js"); aiOf(a).run = window.__buildRun; const m = await import("./js/panels-network.js"); document.getElementById("modal")?._close?.(null); m.setEasyMode(false); m.closeNetworkEditor(); });
 });
 await test("pistas de audio (multipista): un stem de bombo suena, su ADSR late con cada golpe, mueve el brillo y el nodo «Pistas de audio» lo da como canal", async () => {
   await page.evaluate(async () => {

@@ -1212,6 +1212,7 @@ const menu = {
           `Consejos la primera vez que abres algo nuevo (nodos, señales, Mi panel, efectos de cámara) y lecciones paso a paso · toca para ${tutorialOn() ? "desactivarlo" : "activarlo"}`),
         tutorialOn() ? item("restart", "Volver a ver los consejos", () => { resetTips(); toast("Los consejos saldrán otra vez"); }, "Como la primera vez") : null,
         item("gauge", "Prueba de velocidad", () => A.speedTest(), "Mide este equipo y elige la calidad para que todo vaya fluido"),
+        item("ai", "🤖 Conectar un agente de IA (MCP)", () => import("./agent-connect.js").then(m => m.openAgentConnect(app)), "Claude Code, Cursor o Claude Desktop manejan LumaMap: construyen redes, ponen efectos y miran el resultado"),
         window.LumaDesktop ? item("gauge", "Analizar el equipo y calidad", () => A.hardwareProfile(false), "GPU, CPU, pantallas, cámaras y códecs por hardware") : null,
         app.updateInfo?.canRollback ? item("undo", "Volver a la versión anterior", () => A.rollbackUpdate(), "Restaura la versión instalada antes de la última actualización") : null,
         window.LumaDesktop?.repairInstall ? item("restart", "Reparar instalación", () => A.repairInstall(), "Reinstala esta versión sin tocar tus proyectos") : null,

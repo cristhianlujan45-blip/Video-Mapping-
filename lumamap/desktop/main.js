@@ -617,6 +617,9 @@ ipcMain.handle("remote:info", () => {
       cam: remote.httpsPort ? `https://${a.address}:${remote.httpsPort}/phonecam.html` : "" });
   return { port: remote.port, oscPort: remote.oscPort, httpsPort: remote.httpsPort, pin: remote.pin, urls, error: remote.error };
 });
+// Agentes de IA por MCP (Claude Code, Cursor, Claude Desktop): con qué ejecutar server/mcp.js sin
+// tener Node instalado (este mismo programa en modo Node; lee el .asar sin desempaquetar).
+ipcMain.handle("agent:info", () => ({ command: process.execPath, script: path.join(__dirname, "server", "mcp.js"), env: { ELECTRON_RUN_AS_NODE: "1" }, port: remote.port }));
 // Modo gráfico (ver ANGLE_MODES arriba).
 ipcMain.handle("gpu:status", () => {
   const i = ANGLE_MODES.indexOf(gpuMode);

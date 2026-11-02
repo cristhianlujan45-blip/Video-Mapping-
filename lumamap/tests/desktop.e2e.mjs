@@ -48,11 +48,13 @@ if (process.platform !== "win32") {
 const fakeAdb = path.join(fakeOllamaDir, "adb"), adbState = path.join(fakeOllamaDir, "adb-state.json"), adbLog = path.join(fakeOllamaDir, "adb-log.txt");
 fs.writeFileSync(adbState, JSON.stringify({ devices: [], model: "Redmi Note 15 Pro" })); fs.writeFileSync(adbLog, "");
 if (process.platform !== "win32") fs.writeFileSync(fakeAdb, `#!/bin/sh\nexec "${process.execPath}" "${path.join(here, "fixtures", "fake-adb.mjs")}" "$@"\n`, { mode: 0o755 });
+// Acceso de los agentes de IA (MCP) en una carpeta temporal (no en la del usuario de la CI).
+const agentFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-agent-")), "agent.json");
 const app = await _electron.launch({
   executablePath: electronBin, cwd: desktop,
   args: [path.join(desktop, ".stage"), "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
   env: { ...process.env, PATH: fakeOllamaDir + path.delimiter + process.env.PATH, OLLAMA_HOST: "", FAKE_OLLAMA_STUCK: path.join(fakeOllamaDir, "stuck"),
-    LUMAMAP_PULL_STALL_MS: "1000", LUMAMAP_PULL_RETRY_MS: "100", ANTHROPIC_API_KEY: "",
+    LUMAMAP_PULL_STALL_MS: "1000", LUMAMAP_PULL_RETRY_MS: "100", ANTHROPIC_API_KEY: "", LUMAMAP_AGENT_FILE: agentFile,
     ...(process.platform !== "win32" ? { LUMAMAP_ADB: fakeAdb, FAKE_ADB_STATE: adbState, FAKE_ADB_LOG: adbLog } : {}), LUMAMAP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "lumamap-e2e-")) },
 });
 const win = await app.firstWindow();
@@ -404,6 +406,29 @@ await test("detección automática (RDM): el nodo dice qué luces tiene y la app
   assert.deepEqual(head.ch, ["pan", "panFine", "tilt", "tiltFine", "intensity", "red", "strobe"]);
   assert.deepEqual(par.ch, ["red", "green", "blue", "white"], "sin SLOT_INFO se deduce por tipo y canales");
   assert.equal(par.address, 1); assert.equal(par.src, "effect");
+});
+await test("agente de IA por MCP sin tener Node: el propio LumaMap (modo Node) ejecuta server/mcp.js y maneja la app abierta", async () => {
+  const { spawn } = await import("node:child_process");
+  for (let k = 0; k < 100 && !fs.existsSync(agentFile); k++) await new Promise(r => setTimeout(r, 100));
+  assert.ok(fs.existsSync(agentFile), "el servicio guarda el acceso");
+  const p = spawn(electronBin, [path.join(desktop, ".stage", "server", "mcp.js")], { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", LUMAMAP_AGENT_FILE: agentFile } });
+  let out = "";
+  p.stdout.on("data", d => { out += d; });
+  const send = (o) => p.stdin.write(JSON.stringify(o) + "\n");
+  send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } } });
+  send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+  send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "build_from_text", arguments: { text: "rayas con ondas en espejo", new_network: true } } });
+  for (let k = 0; k < 300 && out.split("\n").filter(Boolean).length < 3; k++) await new Promise(r => setTimeout(r, 100));
+  p.stdin.end();
+  const msgs = Object.fromEntries(out.split("\n").filter(Boolean).map(l => JSON.parse(l)).map(m => [m.id, m]));
+  assert.equal(msgs[1]?.result?.serverInfo?.name, "lumamap", out.slice(0, 300));
+  assert.ok(msgs[2].result.tools.length >= 15);
+  const r = msgs[3].result;
+  assert.ok(!r.isError, r.content?.[0]?.text);
+  const data = JSON.parse(r.content[0].text);
+  assert.ok(data.created.some(n => /pattern/.test(n)) && data.created.some(n => /mirror/.test(n)), data.created);
+  const nets = await win.evaluate(() => window.__lumamap.S.project.networks.map(n => n.nodes.length));
+  assert.ok(nets.some(c => c >= 4), "la red está en la app: " + nets);
 });
 await test("sin errores de JavaScript", () => assert.deepEqual(errors, []));
 

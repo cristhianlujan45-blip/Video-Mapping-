@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld("LumaDesktop", {
   onDmxExit: (cb) => ipcRenderer.on("dmx:exit", (_e, code) => cb(code)),
   /** Mando remoto y OSC: { port, oscPort, pin, urls:[{name,url}] }. */
   remoteInfo: () => ipcRenderer.invoke("remote:info"),
+  /** Cómo conectar un agente de IA por MCP: { command, script, env, port }. */
+  agentInfo: () => ipcRenderer.invoke("agent:info"),
   remoteNewPin: () => ipcRenderer.invoke("remote:newPin"),
   onRemoteReady: (cb) => ipcRenderer.on("remote:ready", () => cb()),
   /** Móvil Android por cable USB como cámara: estado del vigilante (adb) y reintentar. */

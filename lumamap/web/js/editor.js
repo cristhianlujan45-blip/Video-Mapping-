@@ -1918,6 +1918,12 @@ function renderOff(o, now) {
   o.comp.frame(S.project, { layers: sceneLayers(S.project, S.tr, now), time: S.clock, levels: S.levels, view: o.view, master: S.master, blackout: S.blackout, clear: [0, 0, 0, 1], live: S.live });
 }
 
+/** La proyección como imagen (PNG, data URL) de `height` píxeles de alto: para el agente (MCP). */
+app.grabOutput = (height = 360) => {
+  const o = offscreenRenderer(true, height);
+  try { renderOff(o, performance.now()); return o.canvas.toDataURL("image/png"); }
+  finally { o.comp.dispose(); o.r.gl.getExtension("WEBGL_lose_context")?.loseContext(); }
+};
 A.snapshot = () => {
   const o = offscreenRenderer(true);
   renderOff(o, performance.now());
@@ -3540,7 +3546,15 @@ async function connectRemote() {
     onControl: remoteControl,
     onOsc: (m) => oscIn(m.address, m.args),
     // Móviles como cámara (señalización WebRTC y lista de móviles conectados).
-    onMessage: (m) => phoneCams.handle(m),
+    // Órdenes de un agente de IA (Claude Code, Cursor…) por el servidor MCP (server/mcp.js → agent.js).
+    onMessage: (m) => {
+      if (m.type === "agent") {
+        import("./agent.js").then(ag => ag.runTool(app, m.tool, m.args || {}))
+          .then(result => remote.send({ type: "agentResult", id: m.id, result }), e => remote.send({ type: "agentResult", id: m.id, error: String(e?.message || e) }));
+        return;
+      }
+      phoneCams.handle(m);
+    },
     onBinary: (b) => phoneCams.frame(b),
   });
   const phoneCams = startPhoneCams(remote);

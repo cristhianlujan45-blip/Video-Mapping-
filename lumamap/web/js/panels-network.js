@@ -65,6 +65,14 @@ export const easyMode = () => ed.easy;
 export const easyDo = (key, fromId = null) => easyApply(key, fromId);
 export const easyAddOpen = () => openEasyAdd({});
 export const projectNet = () => useOnSurface();
+/** Si el editor está abierto, que enseñe lo que otro (el agente MCP) acaba de cambiar. */
+export function refreshNetworkEditor(netId = null) {
+  if (!ed.open) return;
+  if (netId && nets().some(n => n.id === netId)) ed.netId = netId;
+  buildBar(); renderAll();
+}
+/** «✨ Escribe y se construye» desde fuera (paleta de comandos, asistente). */
+export const openBuildPanel = (text = "", auto = false) => ed.open && openBuilder(text, { auto });
 
 export async function openNetworkEditor(a, { netId = null, nodeId = null } = {}) {
   app = a;
@@ -190,6 +198,7 @@ function buildBar() {
       ...Object.entries(FAMILIES).map(([k, f]) => ({ label: `${f.name} (${OP_LIST.filter(o => o.fam === k).length})`, run: () => openCreate({ fam: k }) })),
       "-",
       { label: "Buscar un operador…", keys: "Tab", run: () => openCreate({}) },
+      { label: "✨ Escribe y se construye…", keys: "Ctrl+Espacio", run: () => openBuilder() },
     ]),
     menu("Ver", () => [
       { label: "Encuadrar todo", keys: "H", run: () => frameAll() },
@@ -230,6 +239,7 @@ function buildBar() {
     ]),
     h("span", { class: "grow" }),
     btn({ label: "🙂 Modo fácil", kind: "small", title: "Lo mismo, sin jerga: tarjetas por lo que quieres hacer y todo se conecta solo", onClick: () => setEasyMode(true) }),
+    btn({ label: "✨ Escribir", kind: "small primary", title: "Escribe y se construye: describe lo que quieres y la red se arma sola (Ctrl+Espacio)", onClick: () => openBuilder() }),
     btn({ label: "＋ Operador", kind: "small primary", title: "Crear un operador (Tab)", onClick: () => openCreate({}) }),
     btn({ label: "▶ Usar en superficie", kind: "small", title: "Proyectar la salida de esta red en una superficie", onClick: () => useOnSurface() }),
     btn({ label: "⚙", kind: "small", title: "Panel de parámetros (P)", onClick: () => toggleParams() }),
@@ -801,7 +811,7 @@ function perfDialog() {
 
 /* ---------------- Ayuda ---------------- */
 function helpKeys() {
-  const K = [["Tab", "Crear operador (buscador)"], ["Clic derecho", "Crear aquí / menú del nodo"], ["Arrastrar ● → ○", "Conectar; soltar en el vacío crea un nodo ya conectado"], ["Supr / Retroceso", "Borrar lo elegido (nodos o cable)"],
+  const K = [["Ctrl+Espacio", "✨ Escribe y se construye (describe lo que quieres)"], ["Tab", "Crear operador (buscador)"], ["Clic derecho", "Crear aquí / menú del nodo"], ["Arrastrar ● → ○", "Conectar; soltar en el vacío crea un nodo ya conectado"], ["Supr / Retroceso", "Borrar lo elegido (nodos o cable)"],
     ["Ctrl+C / X / V / D", "Copiar / cortar / pegar / duplicar"], ["Ctrl+Z / Ctrl+Y", "Deshacer / rehacer"], ["Ctrl+A", "Elegir todo"], ["B", "Bypass (apagar sin borrar)"], ["D", "Ver de fondo (display)"],
     ["H / F", "Encuadrar todo / lo elegido"], ["P", "Panel de parámetros"], ["Flechas", "Mover lo elegido (Mayús: más)"], ["Rueda / pellizcar", "Zoom"], ["Espacio + arrastrar, botón central", "Moverse por la red"],
     ["Doble clic en el nombre", "Renombrar"], ["Doble clic en el fondo", "Crear operador"], ["F11", "Pantalla completa del fondo (actuar)"], ["Esc", "Cerrar menús / volver a LumaMap"]];
@@ -1079,6 +1089,7 @@ function buildEasyBar() {
     h("b", { class: "tdlogo" }, "🔗 Nodos"),
     sel,
     h("span", { class: "tdcrumbs" }),
+    btn({ label: "✨ Escribe y se construye", kind: "primary", title: "Describe lo que quieres y la red se arma sola", onClick: () => openBuilder() }),
     btn({ label: "＋ Añadir", kind: "primary", title: "Añadir una imagen, un efecto, una mezcla, movimiento o 3D", onClick: () => openEasyAdd({}) }),
     btn({ label: "↶ Deshacer", kind: "small", title: "Deshacer (Ctrl+Z)", onClick: () => undo() }),
     btn({ label: "Ver todo", kind: "small", title: "Encuadrar toda la red (H)", onClick: () => frameAll() }),
@@ -1103,7 +1114,12 @@ function easyEmpty() {
   const quick = (emoji, label, desc, keys) => h("button", { class: "tdemptybtn", onclick: () => { for (const k of keys) easyApply(k); } }, h("span", { class: "tdemptyico" }, emoji), h("b", {}, label), h("small", {}, desc));
   return h("div", { class: "tdempty" },
     h("h3", {}, "¿Qué quieres crear?"),
-    h("p", {}, "Los nodos son como piezas que se enchufan: una imagen entra por la izquierda, cada pieza la cambia y lo que sale a la derecha se proyecta."),
+    (() => {
+      const inp = h("input", { class: "text-in tdemptyask", placeholder: "Escríbelo: «colores que bailan con la música en caleidoscopio»", "aria-label": "Describe lo que quieres crear", maxlength: 600 });
+      inp.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter" && inp.value.trim()) openBuilder(inp.value.trim(), { auto: true }); });
+      return h("div", { class: "row tdemptyaskrow" }, inp, btn({ label: "✨ Construir", kind: "primary", onClick: () => openBuilder(inp.value.trim(), { auto: !!inp.value.trim() }) }));
+    })(),
+    h("p", {}, "O empieza con un toque. Los nodos son como piezas que se enchufan: una imagen entra por la izquierda, cada pieza la cambia y lo que sale a la derecha se proyecta."),
     h("div", { class: "tdemptyrow" },
       quick("🌈", "Colores que bailan", "Colores que se mueven con la música", ["colors", "kaleido", "move-music"]),
       quick("📷", "Mi cámara con efecto", "Tu cámara en caleidoscopio", ["camera", "kaleido"]),
@@ -1111,6 +1127,93 @@ function easyEmpty() {
     h("div", { class: "row" },
       btn({ label: "＋ Empezar desde cero", kind: "primary", onClick: () => openEasyAdd({}) }),
       btn({ label: "🎓 Aprender (2 min)", onClick: () => startEasyLesson() })));
+}
+
+/* ---- ✨ Escribe y se construye (td/build.js): una frase → la red se arma sola, nodo a nodo ---- */
+export const BUILD_EXAMPLES = [
+  "Colores que bailan con la música en caleidoscopio",
+  "Mi cámara con bordes de neón y estela",
+  "Un cubo 3D que gira con ruido de colores al golpe",
+  "Texto «HOLA» rojo que late al ritmo",
+  "Partículas que explotan al golpe",
+  "Rayas azules y amarillas con ondas en espejo",
+];
+let building = false;
+/** El panel de «✨ Escribe y se construye». initial: una frase para empezar. auto: construir ya. */
+function openBuilder(initial = "", { auto = false } = {}) {
+  closePop();
+  R.root.querySelector(".tdcreate")?.remove();
+  const ta = h("textarea", { class: "tdbuildin", rows: 3, maxlength: 600, "aria-label": "Qué quieres crear",
+    placeholder: "Describe lo que quieres ver. Por ejemplo: «colores que bailan con la música en caleidoscopio» o «mi cámara con estela de neón»" });
+  ta.value = initial;
+  const status = h("div", { class: "tdbuildstatus", "aria-live": "polite" });
+  const log = h("ol", { class: "tdbuildlog" });
+  const actions = h("div", { class: "row tdbuildact" });
+  const aiTag = h("small", { class: "dim tdbuildai" }, "…");
+  const go = btn({ label: "✨ Construir", kind: "primary", onClick: () => run() });
+  ta.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(); } if (e.key === "Escape") box.remove(); });
+  const box = h("div", { class: "tdcreate tdpop tdbuild center", role: "dialog", "aria-label": "Escribe y se construye" },
+    h("div", { class: "tdcreatehead" }, h("b", {}, "✨ Escribe y se construye"),
+      h("small", {}, "Describe lo que quieres y la red se arma sola, nodo a nodo"),
+      h("button", { class: "tdx", "aria-label": "Cerrar", onclick: () => box.remove() }, "✕")),
+    h("div", { class: "tdbuildbody" }, ta,
+      h("div", { class: "chips tdbuildex" }, ...BUILD_EXAMPLES.map(x => h("button", { class: "chip", onclick: () => { ta.value = x; ta.focus(); } }, x))),
+      h("div", { class: "row" }, go, h("span", { class: "grow" }), aiTag),
+      status, log, actions));
+  R.root.append(box);
+  ta.focus();
+  import("./panels-assistant.js").then(async ({ aiOf }) => {
+    const ai = aiOf(app);
+    try { await ai.refresh?.(); } catch {}
+    const st = ai.statusLine();
+    aiTag.textContent = st.ok ? `IA ${st.mode} · ${st.model || ""}` : "Sin IA: entiende frases sencillas (con IA, cualquier cosa)";
+  }).catch(() => {});
+  async function run() {
+    const text = ta.value.trim();
+    if (!text) { ta.focus(); return; }
+    if (building) return;
+    building = true; go.disabled = true;
+    log.replaceChildren(); actions.replaceChildren();
+    status.textContent = "🤔 Pensando cómo armarlo…";
+    try {
+      const B = await import("./td/build.js");
+      const { aiOf } = await import("./panels-assistant.js");
+      const net = curNet(), parent = curParent();
+      let r;
+      try { r = await aiOf(app).buildNetwork(text, B.netSummary(net)); }
+      catch { r = { ...B.validatePlan(B.planFromText(text)), source: "Sin IA", fallback: true }; }
+      const plan = r.plan;
+      const before = { nodes: JSON.parse(JSON.stringify(net.nodes)), display: net.display };
+      const { steps, ctx } = B.planSteps(net, plan, { origin: B.freeOrigin(net, parent), parent });
+      status.textContent = `🔧 Construyendo${plan.title ? " «" + plan.title + "»" : ""}…`;
+      const fast = steps.length > 30 || matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      for (const st of steps) {
+        app.edit(() => st.run());
+        if (st.kind !== "done") log.append(h("li", {}, st.label));
+        if (st.kind === "node") { const made = Object.values(ctx.created).at(-1); if (made) ed.sel = new Set([made.id]); }
+        renderAll();
+        if (st.kind === "node" && Object.keys(ctx.created).length <= 2) frameAll();
+        if (!fast) await new Promise(res => setTimeout(res, 180));
+      }
+      ed.sel = new Set(Object.values(ctx.created).map(n => n.id));
+      autoLayout();
+      frameAll();
+      const made = Object.keys(ctx.created).length;
+      status.replaceChildren(h("b", {}, `✅ ${made} nodo${made === 1 ? "" : "s"}`), " · ", plan.say || "Listo.",
+        h("small", { class: "dim" }, ` (${r.fallback ? "sin IA" : r.source})`));
+      if (r.warnings?.length) status.append(h("details", { class: "tdbuildwarn" }, h("summary", {}, `${r.warnings.length} cosa${r.warnings.length === 1 ? "" : "s"} que no existían y se quitaron`), h("ul", {}, ...r.warnings.slice(0, 12).map(w => h("li", {}, w)))));
+      actions.append(
+        btn({ label: "▶ Proyectar", kind: "small primary", onClick: () => { box.remove(); useOnSurface(ctx.out?.id || null); } }),
+        btn({ label: "↶ Quitar lo construido", kind: "small", onClick: () => { app.edit(() => { net.nodes = before.nodes; net.display = before.display; }); ed.sel.clear(); renderAll(); log.replaceChildren(); actions.replaceChildren(); status.textContent = "Quitado. Escribe otra cosa."; ta.focus(); } }),
+        btn({ label: "✨ Otra", kind: "small", onClick: () => { ta.select(); ta.focus(); } }));
+      app.lastBuild = { text, plan, created: Object.fromEntries(Object.entries(ctx.created).map(([k, n]) => [k, n.name])), source: r.fallback ? "Sin IA" : r.source };
+    } catch (e) {
+      console.warn("Construir:", e);
+      status.textContent = "No se pudo construir: " + (e.message || e);
+    } finally { building = false; go.disabled = false; }
+  }
+  if (auto && initial) run();
+  return box;
 }
 
 /** «＋ Añadir» del modo fácil: tarjetas por lo que quieres hacer. */
@@ -2002,6 +2105,7 @@ export function handleNetKey(a, e) {
   // El «Teclado» CHOP sigue viendo las teclas aunque el editor se las quede.
   if (e.type === "keydown" && app.td) app.td.keys.add(lk);
   if (e.type === "keyup") { if (k === " ") spaceDown = false; return false; }
+  if (k === " " && ctrl) { openBuilder(); return eat(); }   // ✨ Escribe y se construye
   if (k === " ") { spaceDown = true; return eat(); }
   if (k === "Escape") { if (R.root.querySelector(".tdpop")) { closePop(); return eat(); } if (ed.perform) { togglePerform(); return eat(); } if (ed.pendingFrom) { ed.pendingFrom = null; R.root.classList.remove("connecting"); return eat(); } if (ed.sel.size) { ed.sel.clear(); ed.selWire = null; markSelection(); renderParams(); drawWires(); return eat(); } closeNetworkEditor(); return eat(); }
   if (k === "F11") { togglePerform(); return eat(); }

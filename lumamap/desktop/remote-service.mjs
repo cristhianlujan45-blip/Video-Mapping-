@@ -11,7 +11,8 @@ const pin = process.env.LUMAMAP_PIN || "";
 const httpsWant = Number(process.env.LUMAMAP_HTTPS_PORT || 8443);
 
 function listen(port, tries = 0) {
-  const srv = createServer({ port, osc: true, oscPort, pin });
+  // agent: Claude Code, Cursor… pueden manejar LumaMap por MCP (server/mcp.js; ~/.lumamap/agent.json).
+  const srv = createServer({ port, osc: true, oscPort, pin, agent: true });
   srv.once("error", (e) => {
     if (e.code === "EADDRINUSE" && tries < 20) return listen(port + 1, tries + 1);
     process.parentPort.postMessage({ t: "error", msg: e.message });

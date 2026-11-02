@@ -184,6 +184,18 @@ Transiciones: cut, fade, dissolve, wipe, wipeV, iris, flash, glitch. Responde JS
     return normalizePlan({ ...out, brief: text, source: this.label }, ctx);
   }
   async analyzeImage(img) { return classicVision(img); }
+  /**
+   * «✨ Escribe y se construye»: un plan de red de nodos (td/build.js) a partir de una frase.
+   * El modelo propone; validatePlan quita lo que no existe. Si no sale nada útil, las reglas.
+   */
+  async buildNetwork({ text, summary = "" }) {
+    const B = await import("../td/build.js");
+    const out = await this.ask({ system: B.BUILD_SYSTEM, user: B.buildPrompt(text, summary), schema: B.PLAN_SCHEMA });
+    const r = B.validatePlan(out);
+    const tops = r.plan.nodes.filter(n => n.fam === "TOP" && n.type !== "out");
+    if (r.plan.nodes.length < 2 || !tops.length) throw new AIUnavailable("empty", "La IA no devolvió una red que se pueda usar");
+    return { ...r, source: this.label };
+  }
 }
 
 /** Visión clásica (sin IA): contornos de 4 lados en la imagen (automap.js). */
@@ -212,6 +224,10 @@ export class NoAIProvider extends AIProvider {
   async generateShowPlan(text, ctx) { return planFromRules(text, ctx); }
   async explainNodeError(info) { return { text: explainNodeErrorRules(info), source: this.label }; }
   async writeCode(info) { return { ...templateFor(info.kind, info.request), source: this.label, fallback: true }; }
+  async buildNetwork({ text }) {
+    const B = await import("../td/build.js");
+    return { ...B.validatePlan(B.planFromText(text)), source: this.label, fallback: true };
+  }
 }
 
 /** Explicación sin IA de los errores más comunes de un nodo de la red. */
@@ -481,6 +497,7 @@ export class AIEngine {
   explain(topic) { return this.run("explainFunction", topic); }
   explainNodeError(info) { return this.run("explainNodeError", info); }
   writeCode(info) { return this.run("writeCode", info); }
+  buildNetwork(text, summary = "") { return this.run("buildNetwork", { text, summary }); }
   diagnose(q) { return this.run("diagnoseProblem", this.context(), q); }
   optimize() { return this.run("optimizeProject", this.context()); }
   vision(img) { return this.run("analyzeImage", img); }
