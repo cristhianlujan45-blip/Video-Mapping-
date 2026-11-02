@@ -29,6 +29,7 @@ import { genThumb, animThumb } from "./thumbs.js";
 import { timersSection } from "./panels-timers.js";
 import { controllersSection } from "./panels-controllers.js";
 import { STYLES } from "./renderer.js";
+import { ANALOG_KEYS, PHOSPHOR_TYPES, SLIT_DIRS, FILM_STOCKS } from "./analog.js";
 import { TEXT_ANIMS, listCameras, cameraFacing, setCameraFacing } from "./sources.js";
 import { BODY_MODES, SENSOR_ZONES, bodyTracker } from "./body.js";
 import { PRO_PANELS, PRO_TABS } from "./panels-pro.js";
@@ -756,6 +757,26 @@ const fx = {
         sl("halftone", pct),
         sl("noise", pct),
         sl("blur", pct)),
+      fold("📼 Analógico y película (cine, VHS, tubo, datamosh)", ANALOG_KEYS.some(k => f[k] > 0),
+        hint("Le dan al contenido el aspecto de un soporte real. Van antes que el resto de efectos, así que se combinan con todo. Prueba los de la biblioteca «Analógico y película»."),
+        h("div", { class: "sl-head" }, h("span", { class: "lab" }, "🎞 Película")),
+        sl("film", pct),
+        f.film > 0 ? segmented({ options: FILM_STOCKS, value: f.filmStock || "natural", cols: 3, small: true, onChange: set("filmStock") }) : null,
+        sl("grain", pct), sl("halation", pct), sl("dust", pct), sl("burn", pct),
+        h("div", { class: "sl-head" }, h("span", { class: "lab" }, "📼 Cinta y señal")),
+        sl("vhs", pct), sl("bend", pct),
+        h("div", { class: "sl-head" }, h("span", { class: "lab" }, "📺 Pantalla")),
+        sl("phosphor", pct),
+        f.phosphor > 0 ? h("div", {},
+          segmented({ options: PHOSPHOR_TYPES, value: f.phosphorType || "grille", cols: 3, small: true, onChange: set("phosphorType") }),
+          sl("phosphorSize", (v) => v < 0.34 ? "Finos" : v < 0.67 ? "Medianos" : "Gordos")) : null,
+        sl("lens", pct),
+        h("div", { class: "sl-head" }, h("span", { class: "lab" }, "⏱ Tiempo")),
+        sl("mosh", pct),
+        sl("slit", pct),
+        f.slit > 0 ? segmented({ options: SLIT_DIRS, value: f.slitDir || "down", cols: 3, small: true, onChange: set("slitDir") }) : null,
+        sl("echo", pct), sl("stutter", pct),
+        hint("Datamosh, slit-scan, ecos y congelados recuerdan los fotogramas anteriores: se ven mejor con video o cámara en movimiento.")),
       fold("Movimiento", false,
         sl("zoom", fix(2)),
         sl("rotate", (v) => v + "°"),

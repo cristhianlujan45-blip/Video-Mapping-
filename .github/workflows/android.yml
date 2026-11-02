@@ -54,7 +54,8 @@ jobs:
   # Pruebas de extremo a extremo: navegador (Chromium) y app de escritorio real
   # (Electron) con red de verdad: Art-Net, sACN, búsqueda de nodos, entrada DMX.
   e2e:
-    runs-on: ubuntu-latest
+    # 24.04 fijo: «ubuntu-latest» pasó a 26.04 y Playwright 1.56 no instala su navegador ahí.
+    runs-on: ubuntu-24.04
     timeout-minutes: 65   # la batería del navegador ya pasa de 45 min (redes de nodos: GPU, GLSL MAT, salida por red)
     steps:
       - uses: actions/checkout@v4

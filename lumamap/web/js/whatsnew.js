@@ -7,7 +7,7 @@ import { h, btn, dialog, closeDialog, hint, toast } from "./ui.js";
 import { openExport } from "./panels-export.js";
 
 /** Cambia cuando hay novedades nuevas que enseñar. */
-export const NEWS_REV = "2026-11-02";
+export const NEWS_REV = "2026-11-02-b";
 const SEEN_KEY = "lumamap:newsSeen";
 const store = () => { try { return globalThis.localStorage || null; } catch { return null; } };
 // ¿Ya se había usado LumaMap en este equipo? Se mira al cargar, antes de que la app guarde nada.
@@ -32,6 +32,12 @@ export function goToSection(app, tab, text) {
 export function newsItems(app) {
   const live = (sub) => () => { app.S.liveSub = sub; app.openTab("live"); app.renderPanel(); };
   return [
+    ["📼 Nuevo", [
+      ["Analógico y película", "Cine con 7 caracteres de película, grano, halación, polvo y quemaduras; VHS y «circuito doblado»; pantallas de tubo, arcade, LCD y LED, y la pantalla fotografiada; datamosh, slit-scan, ecos y congelados. 28 efectos listos en la biblioteca.", () => goToSection(app, "fx", "Analógico y película")],
+      ["Pistas de audio con ADSR", "Stems, partes de tu música o una entrada de audio: cada pista late con su envolvente y mueve lo que quieras.", () => goToSection(app, "audio", "Pistas de audio")],
+      ["Mis visuales", "Guarda lo de una superficie con miniatura y cámbialo con un toque, ◀ ▶ o MIDI.", () => goToSection(app, "content", "Mis visuales")],
+      ["Grabar en H.265, HAP y WAV aparte", "Elige el formato, qué pistas suenan y guarda también el audio limpio en .wav. HAP .mov para Resolume al exportar el show.", () => openExport(app)],
+    ]],
     ["🎓 Aprender", [
       ["Tutorial interactivo con Luma", "Una guía con IA te enseña toda la herramienta con actividades: tú lo haces y Luma lo comprueba. Ocultar, saltar, repetir o elegir capítulo cuando quieras; puedes preguntarle lo que sea.", () => app.startTutorial?.()],
     ]],

@@ -374,6 +374,9 @@ export const DEFAULT_FX = () => ({
   style: "none", styleSize: 0.5, styleGlow: 0.5, styleColor: "", styleDetail: 1,   // detalle: 1 normal · 2 HD · 4 4K (celdas ×N)
   // Cámara y recortes
   flipX: false, flipY: false, chromaKey: 0, keyColor: "#00ff00", keySoft: 0.1, lumaKey: 0, lumaSoft: 0.05,
+  // 📼 Analógico y película (analog.js): tiempo, soporte y pantalla
+  mosh: 0, slit: 0, slitDir: "down", echo: 0, stutter: 0,
+  vhs: 0, bend: 0, film: 0, filmStock: "natural", grain: 0, halation: 0, dust: 0, burn: 0, phosphor: 0, phosphorType: "grille", phosphorSize: 0.4, lens: 0,
 });
 
 export const COLORMAPS = [
@@ -454,6 +457,34 @@ P("Retro", "Arcade 8 bits", { pixelate: 0.75, posterize: 4, saturation: 1.5 });
 P("Retro", "Game Boy", { pixelate: 0.7, duotone: 1, duoA: "#0f380f", duoB: "#9bbc0f", posterize: 4 });
 P("Retro", "Cine mudo", { saturation: 0, contrast: 1.4, noise: 0.25, vignette: 1, shake: 0.4 });
 P("Retro", "Synthwave", { duotone: 0.6, duoA: "#2a0050", duoB: "#ff3cac", scanlines: 0.3, border: 0.01, borderColor: "#ff3cac", borderGlow: 1 });
+// 📼 Analógico y película (analog.js)
+P("Analógico y película", "Cine de 35 mm", { film: 0.9, grain: 0.35, halation: 0.45, dust: 0.15, vignette: 0.35 });
+P("Analógico y película", "Súper 8 casero", { film: 1, filmStock: "warm", grain: 0.7, dust: 0.6, burn: 0.45, halation: 0.3, saturation: 1.15, vignette: 0.7, sepia: 0.15 });
+P("Analógico y película", "Copia de cine cálida", { film: 1, filmStock: "warm", halation: 0.6, grain: 0.25, saturation: 1.1 });
+P("Analógico y película", "Película quemada", { film: 0.8, burn: 0.85, dust: 0.5, grain: 0.5 });
+P("Analógico y película", "Cinta VHS gastada", { vhs: 0.9, grain: 0.2, scanlines: 0.25, saturation: 1.15 });
+P("Analógico y película", "VHS de fiesta (tracking)", { vhs: 1, halation: 0.3, scanlines: 0.35, saturation: 1.35 });
+P("Analógico y película", "Monitor de tubo", { phosphor: 0.85, phosphorType: "grille", phosphorSize: 0.4, crt: 0.35, vignette: 0.45, halation: 0.25 });
+P("Analógico y película", "Máquina arcade", { phosphor: 0.9, phosphorType: "slot", phosphorSize: 0.6, crt: 0.5, scanlines: 0.4, saturation: 1.3 });
+P("Analógico y película", "TV de puntos", { phosphor: 0.8, phosphorType: "shadow", phosphorSize: 0.55, crt: 0.45, vhs: 0.3 });
+P("Analógico y película", "Pantalla LCD de cerca", { phosphor: 0.9, phosphorType: "lcd", phosphorSize: 0.75 });
+P("Analógico y película", "Pared de LED gigante", { phosphor: 1, phosphorType: "led", phosphorSize: 0.55, contrast: 1.2, saturation: 1.3 });
+P("Analógico y película", "Datamosh suave", { mosh: 0.55 });
+P("Analógico y película", "Datamosh total", { mosh: 0.95, saturation: 1.2 });
+P("Analógico y película", "Slit-scan líquido", { slit: 0.7, slitDir: "down" });
+P("Analógico y película", "Slit-scan desde el centro", { slit: 0.8, slitDir: "center" });
+P("Analógico y película", "Ecos de movimiento", { echo: 0.7 });
+P("Analógico y película", "Stop-motion (congelados)", { stutter: 0.7, film: 0.4, grain: 0.3 });
+P("Analógico y película", "Video roto en cinta", { mosh: 0.7, vhs: 0.7, stutter: 0.3 });
+P("Analógico y película", "Circuito doblado", { bend: 0.7, vhs: 0.4, saturation: 1.2 });
+P("Analógico y película", "TV sin sintonía", { bend: 1, vhs: 0.8, grain: 0.5, scanlines: 0.4 });
+P("Analógico y película", "Pantalla fotografiada", { phosphor: 0.8, phosphorType: "grille", phosphorSize: 0.5, lens: 0.8, crt: 0.25, halation: 0.25 });
+P("Analógico y película", "Grabado a un monitor LCD", { phosphor: 0.85, phosphorType: "lcd", phosphorSize: 0.45, lens: 0.9 });
+P("Analógico y película", "Cine de acción (naranja y verde azulado)", { film: 1, filmStock: "tealorange", grain: 0.25, halation: 0.35, contrast: 1.1 });
+P("Analógico y película", "Blanqueo de plata", { film: 1, filmStock: "bleach", grain: 0.4, halation: 0.2 });
+P("Analógico y película", "Blanco y negro de cine", { film: 1, filmStock: "bw", grain: 0.55, dust: 0.3, halation: 0.25, vignette: 0.5 });
+P("Analógico y película", "Proceso cruzado", { film: 1, filmStock: "cross", grain: 0.3, saturation: 1.2 });
+P("Analógico y película", "Foto vintage desvaída", { film: 1, filmStock: "faded", grain: 0.35, dust: 0.2, vignette: 0.45 });
 // Glitch
 P("Glitch", "Glitch", { rgbShift: 0.012, noise: 0.25, glitch: 0.4 });
 P("Glitch", "Glitch fuerte", { rgbShift: 0.02, glitch: 1, noise: 0.35, pixelate: 0.2 });

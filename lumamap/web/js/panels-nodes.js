@@ -23,12 +23,13 @@ const FX_GROUPS = [
   ["Color", ["brightness", "contrast", "saturation", "hue", "hueCycle", "gamma", "invert"], "fx"],
   ["Estilo de color", ["colormap", "sepia", "duotone", "posterize", "threshold"], "fx"],
   ["Textura y luz", ["vignette", "scanlines", "crt", "halftone", "noise", "blur"], "fx"],
+  ["Analógico y película", ["film", "filmStock", "grain", "halation", "dust", "burn", "vhs", "bend", "phosphor", "phosphorType", "lens", "mosh", "slit", "echo", "stutter"], "fx"],
   ["Movimiento", ["zoom", "rotate", "spin", "scrollX", "scrollY", "shake"], "fx"],
   ["Distorsión", ["kaleido", "mirror", "tile", "wave", "twirl", "bulge", "ripple", "polar", "pixelate", "glitch", "rgbShift", "chroma"], "fx"],
   ["Cámara y recortes", ["flipX", "flipY", "edges", "sharpen", "emboss", "chromaKey", "lumaKey"], "fx"],
   ["Estroboscopio", ["strobe"], "fx"],
 ];
-const EXTRA_NAMES = { style: "Estilo", invert: "Negativo", colormap: "Mapa de color", mirror: "Espejo", polar: "Túnel polar", flipX: "Espejo selfie", flipY: "Voltear" };
+const EXTRA_NAMES = { filmStock: "Carácter de la película", phosphorType: "Tipo de pantalla", style: "Estilo", invert: "Negativo", colormap: "Mapa de color", mirror: "Espejo", polar: "Túnel polar", flipX: "Espejo selfie", flipY: "Voltear" };
 const fxName = (k) => FX_RANGE[k]?.[0] || EXTRA_NAMES[k] || k;
 const SHAPE_NAMES = { quad: "4 esquinas", poly: "Forma libre", circle: "Círculo", mesh: "Malla" };
 const BLEND_NAMES = { normal: "Normal", add: "Sumar luz", screen: "Trama", multiply: "Multiplicar" };

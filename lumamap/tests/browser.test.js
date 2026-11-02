@@ -1302,6 +1302,59 @@ await test("mis visuales (presets): guardar una superficie con miniatura, cambia
   assert.equal(steps.exported, 2);
   await page.evaluate(() => { localStorage.removeItem("lumamap:visuals"); window.__lumamap.openTab(null); });
 });
+await test("📼 analógico y película: los presets (cine, VHS, tubo, LED, datamosh, slit-scan, ecos…) dibujan sin errores de GPU, cambian la imagen y se eligen en el panel", async () => {
+  const r = await page.evaluate(async () => {
+    const { Renderer } = await import("./js/renderer.js"), M = await import("./js/model.js");
+    const W = 160, H = 90, c = document.createElement("canvas"); c.width = W; c.height = H;
+    const R = new Renderer(c, { preserve: true }), gl = R.gl;
+    const img = document.createElement("canvas"); img.width = 320; img.height = 180; const g = img.getContext("2d");
+    const paint = (t) => { g.fillStyle = "#203080"; g.fillRect(0, 0, 320, 180); g.fillStyle = "#ffd060"; g.fillRect(20, 90, 280, 80); g.fillStyle = "#fff"; g.beginPath(); g.arc(60 + t * 200, 50, 25, 0, 7); g.fill(); };
+    const s = { id: "an1", type: "quad", cols: 2, rows: 2, points: [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: 0, y: H }, { x: W, y: H }], mask: null };
+    const draw = (look, f) => { paint(f / 20); const tex = R.texture("img", img, f); R.begin([0, 0, 0, 1]); R.drawSurface(s, look, { view: { sx: 1, sy: 1, tx: 0, ty: 0 }, time: 1 + f / 20, alpha: 1, tex, levels: { beat: f % 10 ? 0 : 1 }, master: 1 }); };
+    const grab = () => { const px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
+    const base = M.createLook({ type: "media", mediaId: "x" });
+    for (let f = 0; f < 12; f++) draw(base, f);
+    const ref = grab(), out = {};
+    for (const e of M.FX_LIBRARY.filter(x => x.cat === "Analógico y película")) {
+      const look = { ...base, fx: { ...M.DEFAULT_FX(), ...e.fx } };
+      for (let f = 0; f < 12; f++) draw(look, f);
+      const px = grab(); let sum = 0, diff = 0;
+      for (let i = 0; i < px.length; i += 4) { sum += px[i] + px[i + 1] + px[i + 2]; diff += Math.abs(px[i] - ref[i]) + Math.abs(px[i + 1] - ref[i + 1]) + Math.abs(px[i + 2] - ref[i + 2]); }
+      out[e.name] = { mean: sum / (W * H * 3), diff: diff / (W * H * 3), err: gl.getError(), fb: !!gl.getParameter(gl.FRAMEBUFFER_BINDING) };
+    }
+    // Un generador también pasa por la cadena (se dibuja plano en una textura) y lo de después se
+    // sigue dibujando en el lienzo (el estado de WebGL queda como estaba).
+    const gen = M.createLook({ type: "gen", gen: "plasma", color: "#ff3cac", color2: "#00e5ff" });
+    R.begin([0, 0, 0, 1]);
+    R.drawSurface(s, { ...gen, fx: { ...M.DEFAULT_FX(), film: 1, filmStock: "bw", vhs: 0.5 } }, { view: { sx: 1, sy: 1, tx: 0, ty: 0 }, time: 1, alpha: 1, tex: null, levels: null, master: 1 });
+    const s2 = { ...s, id: "an2", points: [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 0, y: 40 }, { x: 40, y: 40 }] };
+    R.drawSurface(s2, M.createLook({ type: "color", color: "#ff0000" }), { view: { sx: 1, sy: 1, tx: 0, ty: 0 }, time: 1, alpha: 1, tex: null, levels: null, master: 1 });
+    const px = new Uint8Array(4), px2 = new Uint8Array(4);
+    gl.readPixels(20, H - 20, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); gl.readPixels(120, 40, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px2);
+    const gray = Math.max(Math.abs(px2[0] - px2[1]), Math.abs(px2[1] - px2[2]));
+    R.analog.dispose(); gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return { out, red: [...px], gray, genLum: px2[0] + px2[1] + px2[2] };
+  });
+  const names = Object.keys(r.out);
+  assert.ok(names.length >= 25, "presets: " + names.length);
+  for (const [n, v] of Object.entries(r.out)) {
+    assert.equal(v.err, 0, n + ": error de WebGL " + v.err);
+    assert.equal(v.fb, false, n + ": deja el lienzo como estaba");
+    assert.ok(v.mean > 12, `${n}: no sale negro (${v.mean.toFixed(1)})`);
+    assert.ok(v.diff > 2, `${n}: cambia la imagen (${v.diff.toFixed(2)})`);
+  }
+  assert.ok(r.red[0] > 200 && r.red[1] < 40, "lo siguiente se dibuja en el lienzo: " + r.red);
+  assert.ok(r.genLum > 40 && r.gray < 25, `el generador sale en blanco y negro de cine (lum ${r.genLum}, color ${r.gray})`);
+  // En el panel Efectos: su sección y la categoría de la biblioteca.
+  await page.evaluate(() => { const a = window.__lumamap; if (!a.S.sel) a.select(a.S.project.surfaces[0].id); a.openTab(null); a.openTab("fx"); });
+  await page.locator("#panelBody .sec", { hasText: "Biblioteca de efectos" }).locator(".chip", { hasText: /^Analógico y película$/ }).click();
+  await page.locator(".fxlib .chip", { hasText: "Cinta VHS gastada" }).first().click();
+  assert.equal(await page.evaluate(() => window.__lumamap.lookSel().fx.vhs), 0.9);
+  await page.locator("#panelBody summary", { hasText: "Analógico y película (cine" }).waitFor();
+  // La biblioteca vuelve a «⭐ Destacadas» (las pruebas siguientes la esperan así).
+  await page.locator("#panelBody .sec", { hasText: "Biblioteca de efectos" }).locator(".chip", { hasText: /Destacadas/ }).first().click();
+  await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.lookSel().fx = { ...a.lookSel().fx, vhs: 0, grain: 0, scanlines: 0, saturation: 1 }; }); });
+});
 await test("grabar en directo: el video lleva el sonido de las pistas elegidas y el audio también aparte en .wav", async () => {
   const { execFileSync } = await import("node:child_process");
   const got = [];

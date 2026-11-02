@@ -58,7 +58,22 @@ export const FX_RANGE = {
   keySoft: ["Suavidad del recorte", 0, 0.5, 0.01, 0.1],
   lumaKey: ["Quitar lo oscuro (luma)", 0, 0.9, 0.01, 0],
   lumaSoft: ["Suavidad de luma", 0, 0.5, 0.01, 0.05],
-  strobe: ["Destellos por segundo", 0, 15, 0.5, 0],};
+  strobe: ["Destellos por segundo", 0, 15, 0.5, 0],
+  // 📼 Analógico y película (analog.js)
+  mosh: ["Datamosh (video roto)", 0, 1, 0.01, 0],
+  slit: ["Slit-scan (tiempo en franjas)", 0, 1, 0.01, 0],
+  echo: ["Ecos de movimiento", 0, 1, 0.01, 0],
+  stutter: ["Congelar fotogramas", 0, 1, 0.01, 0],
+  vhs: ["Cinta VHS", 0, 1, 0.01, 0],
+  bend: ["Circuito doblado (sin sincronía)", 0, 1, 0.01, 0],
+  lens: ["Pantalla fotografiada (lente y cámara)", 0, 1, 0.01, 0],
+  film: ["Película (copia de cine)", 0, 1, 0.01, 0],
+  grain: ["Grano de película", 0, 1, 0.01, 0],
+  halation: ["Halación (halo de cine)", 0, 1, 0.01, 0],
+  dust: ["Polvo y rayones", 0, 1, 0.01, 0],
+  burn: ["Fugas de luz y quemaduras", 0, 1, 0.01, 0],
+  phosphor: ["Pantalla de subpíxeles (tubo, LCD, LED)", 0, 1, 0.01, 0],
+  phosphorSize: ["Tamaño de los subpíxeles", 0, 1, 0.01, 0.4],};
 
 export const SOURCE_NAMES = { midi: "MIDI", osc: "OSC", dmx: "DMX", key: "Teclado", gamepad: "Mando de juego", audio: "Audio", tracking: "Tracking", remote: "Mando web (móvil)" };
 export const MODES = [["absolute", "Absoluto"], ["relative", "Relativo (encoder)"], ["toggle", "Alternar"], ["momentary", "Momentáneo"], ["trigger", "Disparo"]];

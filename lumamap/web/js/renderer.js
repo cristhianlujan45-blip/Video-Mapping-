@@ -7,7 +7,8 @@
 //  · Efectos por superficie en un solo shader: color, RGB split, pixelado,
 //    desenfoque, ruido, caleidoscopio, espejo, ondas, zoom/giro/desplazamiento,
 //    estroboscopio, borde animado (neón, persecución, pulso, arcoíris) y máscara.
-import { GEN_INDEX, repairQuad } from "./model.js";
+import { GEN_INDEX, repairQuad, DEFAULT_FX } from "./model.js";
+import { Analog, analogActive } from "./analog.js";
 import { PRO_MODE_IDS } from "./fx-pro.js";
 import { UNIT_SQUARE, tryHomography, evalMesh, triangulatePolygon, bbox, surfaceUVOutline, surfaceAspect, surfaceCorners } from "./math.js";
 
@@ -1299,6 +1300,8 @@ export function webgl2Supported() {
   try { return !!document.createElement("canvas").getContext("webgl2"); } catch { return false; }
 }
 
+const FLAT_FX = DEFAULT_FX();
+
 export class Renderer {
   /**
    * background: true → el sombreador (muy grande) se compila en segundo plano si la tarjeta
@@ -1351,6 +1354,53 @@ export class Renderer {
     this.meshCache = new Map();  // surfaceId -> {sig, data}
     this.shapeBuf = new Float32Array(MAXP * 2);
     this.maskBuf = new Float32Array(MAXP * 2);
+    this.analog = new Analog(gl);   // 📼 analógico y película (analog.js)
+    this.flats = new Map();         // generadores pasados a textura para esos efectos
+  }
+
+  /**
+   * Dibuja el contenido de una superficie (generador, color, cuerpo) plano en una textura, sin
+   * efectos, para pasarlo por los efectos analógicos. Devuelve { tex, w, h } o null.
+   */
+  flatSource(s, look, o, maxSide = 960) {
+    const gl = this.gl, { aspect } = surfaceAspect(s), M = Math.max(64, Math.min(960, Math.round(maxSide)));
+    const W = Math.max(16, Math.round(aspect >= 1 ? M : M * aspect)), H = Math.max(16, Math.round(aspect >= 1 ? M / aspect : M));
+    // Estado que hay que devolver (antes de crear nada: crear enlaza su framebuffer).
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING), prevVp = gl.getParameter(gl.VIEWPORT), sc = gl.isEnabled(gl.SCISSOR_TEST);
+    let f = this.flats.get(s.id);
+    // Se reutiliza si el tamaño sigue valiendo (la vista y la lupa piden tamaños distintos).
+    const fits = f && Math.abs(f.w / f.h - W / H) < 0.02 && f.w >= W * 0.9 && f.w <= W * 2.2;
+    if (f && !fits) { gl.deleteTexture(f.tex); gl.deleteFramebuffer(f.fb); this.meshCache.delete(f.surf.id); f = null; }
+    if (!f) {
+      const tex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE7);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      // Arriba del contenido = fila 0 de la textura (como una imagen subida).
+      f = { tex, fb, w: W, h: H, surf: { id: "__flat:" + s.id, type: "quad", cols: 2, rows: 2, points: [{ x: 0, y: H }, { x: W, y: H }, { x: 0, y: 0 }, { x: W, y: 0 }], mask: null } };
+      this.flats.set(s.id, f);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f.fb);
+    gl.viewport(0, 0, f.w, f.h);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    // Que ninguna unidad que lee el sombreador tenga la textura en la que se dibuja.
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, null);
+    try {
+      const audio = look.audio?.enabled ? { ...look.audio, target: "none" } : look.audio;
+      this.drawSurface(f.surf, { ...look, fx: FLAT_FX, opacity: 1, blend: "normal", audio, span: null, fit: "stretch" },
+        { view: { sx: 1, sy: 1, tx: 0, ty: 0 }, time: o.time, alpha: 1, tex: o.tex, levels: o.levels, master: 1, flat: true, fbSize: [f.w, f.h] });
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+      gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+      if (sc) gl.enable(gl.SCISSOR_TEST);
+    }
+    return { tex: f.tex, w: f.w, h: f.h };
   }
 
   /** Mayor lado que admite la GPU (texturas y viewport); 8K puede superarlo en móviles. */
@@ -1462,7 +1512,7 @@ export class Renderer {
    */
   drawSurface(s, look, o) {
     const gl = this.gl, L = this.loc, fx = look.fx, src = look.source;
-    const cw = this.canvas.width, ch = this.canvas.height;
+    const cw = o.fbSize?.[0] ?? this.canvas.width, ch = o.fbSize?.[1] ?? this.canvas.height;
     const lv = o.levels || { bass: 0, mid: 0, high: 0, level: 0, beat: 0 };
     const { aspect } = surfaceAspect(s);
 
@@ -1509,6 +1559,18 @@ export class Renderer {
     else if (src.type === "body" && o.tex) srcType = src.bodyMode === "persona" || PRO_MODE_IDS.has(src.bodyMode) ? 1 : 4;
     else if (o.tex) srcType = 1;
     if (srcType === 0 && border <= 0) return;
+    // 📼 Analógico y película: la imagen pasa antes por su cadena (con memoria de fotogramas).
+    if (!o.flat && analogActive(fx)) {
+      const key = `${s.id}|${src.mediaId || src.gen || src.type}|${o.tr?.role ?? ""}`;
+      // Tamaño de la superficie en esta salida: no hace falta más detalle que ese.
+      const sa = surfaceAspect(s), v = o.view || { sx: 1, sy: 1 };
+      const side = Math.ceil(Math.max(sa.w * Math.abs(v.sx || 1), sa.h * Math.abs(v.sy || 1)));
+      if (srcType === 1) o = { ...o, tex: this.analog.process(key, o.tex, fx, o.time, lv, side) };
+      else if (srcType !== 0) {
+        const flat = this.flatSource(s, look, o, side);
+        if (flat) { o = { ...o, tex: this.analog.process(key, flat, fx, o.time, lv, side) }; srcType = 1; look = { ...look, fit: "stretch" }; }
+      }
+    }
 
     gl.uniform1i(L.u_src, srcType);
     if (srcType === 1 || srcType === 4) {
@@ -1610,5 +1672,10 @@ export class Renderer {
     gl.drawArrays(gl.TRIANGLES, 0, data.length / 5);
   }
 
-  forgetSurface(id) { this.meshCache.delete(id); }
+  forgetSurface(id) {
+    this.meshCache.delete(id);
+    this.analog?.forget(id + "|");
+    const f = this.flats?.get(id);
+    if (f) { this.gl.deleteTexture(f.tex); this.gl.deleteFramebuffer(f.fb); this.flats.delete(id); this.meshCache.delete(f.surf.id); }
+  }
 }

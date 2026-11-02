@@ -31,7 +31,7 @@ Comparado función por función con Resolume Arena 7. Lo que faltaba se ha añad
 | Transporte de clip: velocidad, dirección, bucle/una vez/ping-pong, in/out, BPM sync | Panel del video: bucle, una vez, reversa, ida y vuelta, entrada/salida y «al tempo: el tramo dura N golpes» | ✅ nuevo |
 | Mapeo MIDI/OSC/DMX, Learn | Igual (también teclado, mandos y móvil); columnas de la mesa y autopiloto asignables | ✅ |
 | Advanced Output: slices, warping, máscaras, edge blending, varias pantallas | Superficies con esquinas/rejilla, máscaras, bordes suaves, 4 pantallas | ✅ |
-| Efectos y fuentes (generadores) | 137 efectos + 18 estilos + 92 animaciones + 105 shaders ISF (Caricaturas y Anime, Loops 3D techno, Pro 50, plugins virales, cámara reactiva, nube de puntos…) | ✅ |
+| Efectos y fuentes (generadores) | 167 efectos (con 28 de **📼 analógico y película**) + 18 estilos + 92 animaciones + 105 shaders ISF (Caricaturas y Anime, Loops 3D techno, Pro 50, plugins virales, cámara reactiva, nube de puntos…) | ✅ |
 | Shaders ISF (los que acepta Wire) | ISF completo: controles, cámara/video, sonido (FFT y onda), varias pasadas con memoria | ✅ |
 | Plugins FFGL (.dll de Resolume/Juicebar) | **En la app de Windows**: fuentes y efectos FFGL 2.x y 1.5/1.6 de 64 bits (☰ → Plugins → «Plugins FFGL de Resolume») | ✅ nuevo (Windows) |
 | Crossfader A/B, transiciones | Mezclador A/B por superficie (fader y GO) + 8 transiciones de escena | ✅ |
@@ -222,6 +222,22 @@ GPU muestra «no disponible» si Windows no lo expone.
 - Brillo, contraste, saturación, tono, negativo, zoom, rotación, giro continuo,
   desplazamiento, ondas, caleidoscopio, espejos, pixelado, separación RGB,
   desenfoque, ruido y estroboscopio. Opacidad y 4 modos de mezcla.
+- **📼 Analógico y película** (efectos propios de LumaMap, en la GPU, sobre video, cámara, imagen
+  o animaciones; van antes que el resto y se combinan con todo; 28 listos en la biblioteca):
+  · **Película**: curva de copia de cine con 7 caracteres (natural, cálida, naranja y verde
+  azulado, blanqueo de plata, blanco y negro, proceso cruzado, desvaída), vaivén de la ventanilla,
+  parpadeo, **grano**, **halación**, **polvo y rayones**, **fugas de luz y quemaduras** con
+  destellos. · **Cinta y señal**: **VHS** (color corrido hacia la derecha, realce de bordes, banda
+  de tracking, cambio de cabezas, dropouts) y **circuito doblado** (pierde la sincronía y rueda,
+  bandas rasgadas, canales cambiados y en negativo). · **Pantalla**: subpíxeles de **tubo**
+  (rejilla, máscara de puntos, ranuras de arcade), **LCD** y **pared de LED**, nunca más pequeños
+  que un píxel de la salida (sin muaré), y la **pantalla fotografiada** (lente, cámara en mano,
+  bordes desenfocados y reflejo del cristal). · **Tiempo** (recuerdan 48 fotogramas por
+  superficie): **datamosh** (vectores de movimiento por bloques como un códec; los bloques se
+  arrastran nítidos y se limpia solo cada pocos segundos; en cada golpe empuja más), **slit-scan**
+  (5 direcciones), **ecos de movimiento** y **congelar fotogramas** (también al golpe). Todo es
+  determinista: sale igual en todas las salidas y al exportar el show. Se trabaja al tamaño real
+  de la superficie en la salida (rápido incluso sin tarjeta gráfica potente).
 
 **Audio y ritmo**
 - El micrófono analiza graves, medios, agudos y volumen con ganancia automática,
