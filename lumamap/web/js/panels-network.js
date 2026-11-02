@@ -1186,14 +1186,18 @@ function openBuilder(initial = "", { auto = false } = {}) {
       const before = { nodes: JSON.parse(JSON.stringify(net.nodes)), display: net.display };
       const { steps, ctx } = B.planSteps(net, plan, { origin: B.freeOrigin(net, parent), parent });
       status.textContent = `🔧 Construyendo${plan.title ? " «" + plan.title + "»" : ""}…`;
-      const fast = steps.length > 30 || matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      // Nodo a nodo para verlo aparecer; si el equipo va lento (cada paso ya tarda), sin pausas.
+      let fast = steps.length > 30 || matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
       for (const st of steps) {
+        const t0 = performance.now();
         app.edit(() => st.run());
         if (st.kind !== "done") log.append(h("li", {}, st.label));
         if (st.kind === "node") { const made = Object.values(ctx.created).at(-1); if (made) ed.sel = new Set([made.id]); }
         renderAll();
         if (st.kind === "node" && Object.keys(ctx.created).length <= 2) frameAll();
+        if (performance.now() - t0 > 150) fast = true;
         if (!fast) await new Promise(res => setTimeout(res, 180));
+        else await new Promise(res => setTimeout(res, 0));   // que se pinte aunque no espere
       }
       ed.sel = new Set(Object.values(ctx.created).map(n => n.id));
       autoLayout();

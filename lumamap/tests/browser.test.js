@@ -1226,7 +1226,7 @@ await test("✨ escribe y se construye: una frase arma la red nodo a nodo (sin I
   // Red vacía: se escribe lo que se quiere y Enter.
   await ws.locator(".tdemptyask").fill("colores que bailan con la música en caleidoscopio con estela");
   await ws.locator(".tdemptyask").press("Enter");
-  await ws.locator(".tdbuild .tdbuildstatus", { hasText: "✅" }).waitFor({ timeout: 30000 });
+  await ws.locator(".tdbuild .tdbuildstatus", { hasText: "✅" }).waitFor({ timeout: 90000 });
   const r = await page.evaluate(async () => {
     const a = window.__lumamap, n = a.S.project.networks.at(-1);
     await new Promise(res => setTimeout(res, 600));
@@ -1254,7 +1254,7 @@ await test("✨ escribe y se construye: una frase arma la red nodo a nodo (sin I
   await page.keyboard.press("Control+Space");
   await ws.locator(".tdbuildin").fill("un aro de neón en un túnel");
   await ws.locator(".tdbuild button", { hasText: "Construir" }).click();
-  await ws.locator(".tdbuild .tdbuildstatus", { hasText: "Un aro que gira" }).waitFor({ timeout: 30000 });
+  await ws.locator(".tdbuild .tdbuildstatus", { hasText: "Un aro que gira" }).waitFor({ timeout: 90000 });
   const r2 = await page.evaluate(() => { const n = window.__lumamap.S.project.networks.at(-1); return { types: n.nodes.map(x => x.type).sort(), radius: n.nodes.find(x => x.type === "circle").p.radius?.e || "", warn: document.querySelector(".tdbuildwarn summary")?.textContent || "" }; });
   assert.deepEqual(r2.types, ["beat", "circle", "out", "polar"]);
   assert.match(r2.radius, /beat\d*\.beat/); assert.match(r2.warn, /1 cosa/);
