@@ -154,7 +154,7 @@ await test("la IA enseña los nodos (como TouchDesigner) y los efectos de cámar
   const { checkSyntax } = await import("../web/js/td/py.js");
   for (const k of CG.TEMPLATE_KINDS.filter(k => k.startsWith("py"))) for (const name of CG.templatesOf(k)) assert.equal(checkSyntax(CG.templateFor(k, name.toLowerCase()).code), "", k + " · " + name);
   const { LEVELS } = await import("../web/js/ai/academy.js");
-  assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+  assert.deepEqual(LEVELS.map(l => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
   const { searchKnowledge } = await import("../web/js/ai/knowledge.js");
   assert.equal(searchKnowledge("cómo uso la red de nodos")[0].id, "nodos");
   assert.equal(searchKnowledge("desactivar el tutorial")[0].id, "tutorial");

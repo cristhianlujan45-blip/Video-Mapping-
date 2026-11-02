@@ -9,11 +9,15 @@
 //   · panel de parámetros con expresiones (ƒx), enlazar a un canal (🔗), páginas, aprender MIDI/OSC…;
 //   · copiar/pegar/duplicar, deshacer, encuadrar (H, F), mover con el teclado, caja de selección,
 //     zoom con la rueda o pellizcando;
-//   · ejemplos listos y «Usar en una superficie» para proyectarlo.
+//   · ejemplos listos y «Usar en una superficie» para proyectarlo;
+//   · MODO FÁCIL (de serie): sin jerga, «＋ Añadir» con tarjetas por lo que quieres hacer, lo
+//     nuevo se conecta solo en la cadena, un ＋ en cada nodo para el paso siguiente, controles
+//     sencillos con «〰 Mover solo» (música, onda, mano…) y un comienzo guiado (td/easy.js).
 import { h, btn, dialog, closeDialog, toast, hint, prompt, confirmDlg } from "./ui.js";
 import { FAMILIES, OP_LIST, opDef, defOf, searchOps, acceptsInput } from "./td/ops.js";
 import { newNetwork, addNode, connect, disconnect, removeNodes, removeKeepWires, copyNodes, pasteNodes, renameNode, nodeById, nodeByName, freeInput, isExpr, outputsOf, netTime, playNet, pauseNet, seekNet, setNetRate, outFam, childrenOf, descendants, groupIntoBase, ungroupBase, syncReplicators } from "./td/graph.js";
 import { AnimEditor } from "./td/animeditor.js";
+import { EASY_FAMS, EASY_GROUPS, MOVERS, mover, mainParam, moveExpr, isSource } from "./td/easy.js";
 import { codeEditor } from "./td/codeedit.js";
 import { pyConsole, replRun } from "./td/pyapi.js";
 import { setKey, evalChan, uniqueChan } from "./td/anim.js";
@@ -43,6 +47,24 @@ const visible = () => { const net = curNet(); return net ? childrenOf(net, curPa
 /** Crea un nodo en la subred en la que estás. */
 const addHere = (net, fam, type, o = {}) => addNode(net, fam, type, { parent: curParent(), ...o });
 export const networkEditorOpen = () => ed.open;
+/* Modo fácil (de serie) o pro (como TouchDesigner). Se recuerda en este equipo. */
+const EASY_KEY = "lumamap:tdEasy";
+const readEasy = () => { try { return localStorage.getItem(EASY_KEY) !== "0"; } catch { return true; } };
+ed.easy = readEasy();
+/** Pasa el editor al modo fácil (true) o pro (false). */
+export function setEasyMode(on) {
+  ed.easy = !!on;
+  try { localStorage.setItem(EASY_KEY, on ? "1" : "0"); } catch {}
+  if (!ed.open || !R.root) return;
+  R.root.classList.toggle("easy", ed.easy);
+  closePop(); R.root.querySelector(".tdcreate")?.remove();
+  buildBar(); renderAll();
+}
+export const easyMode = () => ed.easy;
+/** Para el tutorial (y las pruebas): hacer lo de una tarjeta, abrir «＋ Añadir», proyectar. */
+export const easyDo = (key, fromId = null) => easyApply(key, fromId);
+export const easyAddOpen = () => openEasyAdd({});
+export const projectNet = () => useOnSurface();
 
 export async function openNetworkEditor(a, { netId = null, nodeId = null } = {}) {
   app = a;
@@ -57,6 +79,8 @@ export async function openNetworkEditor(a, { netId = null, nodeId = null } = {})
   let root = document.getElementById("tdws");
   if (!root) { root = h("div", { id: "tdws", class: "tdws" }); document.body.append(root); }
   root.classList.add("show");
+  ed.easy = readEasy();
+  root.classList.toggle("easy", ed.easy);
   document.body.classList.add("tdopen");
   buildUI(root);
   cancelAnimationFrame(ed.raf);
@@ -124,6 +148,7 @@ function closePopOutside(e) { if (!e.target.closest?.(".tdpop")) closePop(); }
 function closePop() { document.querySelectorAll("#tdws .tdpop").forEach(x => x.remove()); document.removeEventListener("pointerdown", closePopOutside, true); }
 
 function buildBar() {
+  if (ed.easy) return buildEasyBar();
   const net = curNet();
   const sel = h("select", { class: "tdnetsel", title: "Red que estás editando" }, ...nets().map(n => h("option", { value: n.id, selected: n.id === ed.netId }, n.name)));
   sel.onchange = () => { ed.netId = sel.value; ed.sel.clear(); ed.path = []; closeAnim(); buildTimebar(); renderAll(); frameAll(); };
@@ -204,6 +229,7 @@ function buildBar() {
       { label: "🎓 Aprender con Luma (capítulo de redes)", run: () => { closeNetworkEditor(); app.academy ? app.academy.start(19) : app.startTutorial?.(); } },
     ]),
     h("span", { class: "grow" }),
+    btn({ label: "🙂 Modo fácil", kind: "small", title: "Lo mismo, sin jerga: tarjetas por lo que quieres hacer y todo se conecta solo", onClick: () => setEasyMode(true) }),
     btn({ label: "＋ Operador", kind: "small primary", title: "Crear un operador (Tab)", onClick: () => openCreate({}) }),
     btn({ label: "▶ Usar en superficie", kind: "small", title: "Proyectar la salida de esta red en una superficie", onClick: () => useOnSurface() }),
     btn({ label: "⚙", kind: "small", title: "Panel de parámetros (P)", onClick: () => toggleParams() }),
@@ -227,6 +253,8 @@ function renderAll() {
   if (!net) return;
   for (const id of [...ed.sel]) if (!nodeById(net, id)) ed.sel.delete(id);
   R.nodesEl.replaceChildren(...visible().map(nodeEl));
+  R.pane.querySelector(".tdempty")?.remove();
+  if (ed.easy && !visible().length && !curParent()) R.pane.append(easyEmpty());
   drawCrumbs();
   applyView();
   drawWires();
@@ -245,7 +273,9 @@ function nodeEl(n) {
     h("button", { class: `tdflag ${n.bypass ? "on" : ""}`, title: n.bypass ? "Encender (quitar bypass)" : "Apagar sin borrar (bypass)", "aria-label": "Bypass", "data-flag": "bypass" }, "⏻"),
     n.fam === "TOP" ? h("button", { class: `tdflag ${net.display === n.id ? "on" : ""}`, title: "Ver esta imagen de fondo (display)", "aria-label": "Ver de fondo", "data-flag": "display" }, "👁") : null,
     h("button", { class: `tdflag ${n.viewer !== false ? "on" : ""}`, title: "Visor del nodo", "aria-label": "Visor", "data-flag": "viewer" }, "▣"));
-  const head = h("div", { class: "tdnhead" }, h("i", { class: "tdfam" }, FAM_SHORT[n.fam]), h("b", { class: "tdname" }, n.name), flags);
+  const head = ed.easy
+    ? h("div", { class: "tdnhead", title: n.name }, h("i", { class: "tdfam" }, EASY_FAMS[n.fam]?.icon || FAM_SHORT[n.fam]), h("b", { class: "tdname" }, def.label), flags)
+    : h("div", { class: "tdnhead" }, h("i", { class: "tdfam" }, FAM_SHORT[n.fam]), h("b", { class: "tdname" }, n.name), flags);
   let viewer = null;
   if (def.panel) viewer = widgetEl(n);
   else if (ed.viewers && n.viewer !== false) {
@@ -264,6 +294,12 @@ function nodeEl(n) {
   if (out) out.style.top = (IN_Y0 - 7) + "px";
   const foot = h("small", { class: "tdinfo" }, n.comment ? "💬 " + n.comment.slice(0, 26) : def.label);
   el.append(head, viewer || h("div", { class: "tdsp" }), foot, ...ins, out || "");
+  // Modo fácil: un ＋ para añadir el paso siguiente (se conecta solo).
+  if (ed.easy && n.fam === "TOP" && n.type !== "out" && n.type !== "movieout") {
+    const plus = h("button", { class: "tdplus", title: "Añadir el paso siguiente", "aria-label": "Añadir después de " + def.label, "data-plus": "1" }, "＋");
+    plus.style.top = (IN_Y0 + 14) + "px";
+    el.append(plus);
+  }
   return el;
 }
 function summary(n) {
@@ -345,6 +381,8 @@ function onDown(e) {
   const net = curNet(), t = e.target;
   // Al tocar la red, las teclas (F, S…) vuelven a ser de la red y no del visor 3D.
   if (ed.activeV) { ed.activeV.el.classList.remove("active"); ed.activeV = null; }
+  const plus = t.closest(".tdplus");
+  if (plus) { e.stopPropagation(); const id = t.closest(".tdnode").dataset.id; ed.sel = new Set([id]); markSelection(); renderParams(); openEasyAdd({ from: id }); return; }
   const flag = t.closest(".tdflag");
   if (flag) { e.stopPropagation(); const id = t.closest(".tdnode").dataset.id; flagClick(id, flag.dataset.flag); return; }
   const nodeE = t.closest(".tdnode");
@@ -501,7 +539,8 @@ const frameSel = () => frameNodes(visible().filter(n => ed.sel.has(n.id)));
 /* ======================================================================
    Crear operadores (Tab)
    ====================================================================== */
-function openCreate({ fam = "", at = null, screen = null, from = null } = {}) {
+function openCreate({ fam = "", at = null, screen = null, from = null, pro = false } = {}) {
+  if (ed.easy && !pro && !fam) return openEasyAdd({ from });
   closePop();
   R.root.querySelector(".tdcreate")?.remove();
   const net = curNet(), src = from ? nodeById(net, from) : (ed.sel.size === 1 ? nodeById(net, [...ed.sel][0]) : null);
@@ -815,6 +854,7 @@ function netPanel(net) {
         h("div", { class: "tdexamples small" }, ...EXAMPLES.map(ex => h("button", { class: "tdex", onclick: () => loadExample(ex.id) }, h("b", {}, ex.name), h("small", {}, ex.desc))))));
 }
 function nodePanel(net, n) {
+  if (ed.easy) return easyNodePanel(net, n);
   const def = defOf(n), fam = FAMILIES[n.fam];
   const info = h("pre", { class: "tdppinfo" });
   const pages = [...new Set(def.params.filter(q => !q.hidden).map(q => q.page || "Parámetros"))];
@@ -984,6 +1024,13 @@ function paramRow(net, n, q) {
   } }, "ƒx") : null;
   const link = numeric ? h("button", { class: "tdfx", title: "Enlazar a un canal (CHOP): audio, LFO, la mano en la cámara…", "aria-label": "Enlazar " + q.label, onclick: () => bindDialog(net, n, q) }, "🔗") : null;
   const key = numeric && !expr && q.type !== "pulse" ? h("button", { class: "tdfx", title: "Animar con fotogramas clave (◆): pone una clave ahora; cambia el tiempo y el valor para poner más", "aria-label": "Animar " + q.label, onclick: () => animateParam(net, n, q) }, "◆") : null;
+  if (ed.easy) {
+    // Modo fácil: sin fórmulas; un 〰 para que se mueva solo (y, si ya se mueve, lo dice).
+    if (expr && numeric) ctl = h("button", { class: "tdmoving", title: v.e, onclick: () => easyMoveDialog(net, n, q) }, "〰 Se mueve sola · cambiar");
+    const move = numeric && q.type !== "t" && q.type !== "m" ? h("button", { class: "tdfx tdmove", title: "Que se mueva sola (música, onda, mano…)", "aria-label": "Mover solo " + q.label, onclick: () => easyMoveDialog(net, n, q) }, "〰") : null;
+    rowEl.append(lab, h("div", { class: "tdpctl" }, ctl, move));
+    return rowEl;
+  }
   rowEl.append(lab, h("div", { class: "tdpctl" }, ctl, fx, link, key));
   return rowEl;
 }
@@ -1020,6 +1067,199 @@ function bindDialog(net, n, q) {
       h("button", { class: "chip", onclick: () => quick("motion", "amount") }, "🌀 Movimiento en cámara"),
       h("button", { class: "chip", onclick: () => quick("mouse", "tx") }, "🖱 Ratón X")),
     chops.length ? h("h4", {}, "O un canal de un CHOP de la red") : null, listEl) });
+}
+
+/* ======================================================================
+   Modo fácil
+   ====================================================================== */
+function buildEasyBar() {
+  const sel = h("select", { class: "tdnetsel", title: "Red que estás editando" }, ...nets().map(n => h("option", { value: n.id, selected: n.id === ed.netId }, n.name)));
+  sel.onchange = () => { ed.netId = sel.value; ed.sel.clear(); ed.path = []; closeAnim(); buildTimebar(); renderAll(); frameAll(); };
+  R.bar.replaceChildren(
+    h("b", { class: "tdlogo" }, "🔗 Nodos"),
+    sel,
+    h("span", { class: "tdcrumbs" }),
+    btn({ label: "＋ Añadir", kind: "primary", title: "Añadir una imagen, un efecto, una mezcla, movimiento o 3D", onClick: () => openEasyAdd({}) }),
+    btn({ label: "↶ Deshacer", kind: "small", title: "Deshacer (Ctrl+Z)", onClick: () => undo() }),
+    btn({ label: "Ver todo", kind: "small", title: "Encuadrar toda la red (H)", onClick: () => frameAll() }),
+    btn({ label: "▶ Proyectar", kind: "small primary", title: "Llevar el resultado a una superficie", onClick: () => useOnSurface() }),
+    menu("Más", () => [
+      { label: "Ejemplos…", run: () => openExamples() },
+      { label: "Nueva red vacía", run: () => newNet() },
+      { label: "Ordenar los nodos", run: () => autoLayout() },
+      "-",
+      { label: "🎓 Aprender los nodos (2 min)", run: () => startEasyLesson() },
+      { label: "🔧 Modo pro (como TouchDesigner)", run: () => setEasyMode(false) },
+    ]),
+    h("span", { class: "grow" }),
+    btn({ label: "🎓 Aprender", kind: "small", title: "Tutorial interactivo de los nodos", onClick: () => startEasyLesson() }),
+    btn({ label: "🔧 Modo pro", kind: "small", title: "Todas las herramientas, como TouchDesigner (113 operadores, expresiones, subredes…)", onClick: () => setEasyMode(false) }),
+    h("button", { class: "tdclose", title: "Volver a LumaMap (Esc)", "aria-label": "Cerrar el editor de redes", onclick: () => closeNetworkEditor() }, "✕"));
+}
+function startEasyLesson() { closeNetworkEditor(); if (app.academy) app.academy.start(21); else app.startTutorial?.(); }
+
+/** Red vacía: tres comienzos de un toque y el tutorial. */
+function easyEmpty() {
+  const quick = (emoji, label, desc, keys) => h("button", { class: "tdemptybtn", onclick: () => { for (const k of keys) easyApply(k); } }, h("span", { class: "tdemptyico" }, emoji), h("b", {}, label), h("small", {}, desc));
+  return h("div", { class: "tdempty" },
+    h("h3", {}, "¿Qué quieres crear?"),
+    h("p", {}, "Los nodos son como piezas que se enchufan: una imagen entra por la izquierda, cada pieza la cambia y lo que sale a la derecha se proyecta."),
+    h("div", { class: "tdemptyrow" },
+      quick("🌈", "Colores que bailan", "Colores que se mueven con la música", ["colors", "kaleido", "move-music"]),
+      quick("📷", "Mi cámara con efecto", "Tu cámara en caleidoscopio", ["camera", "kaleido"]),
+      quick("🔤", "Texto que late", "Un texto que late al ritmo", ["text", "glow", "move-beat"])),
+    h("div", { class: "row" },
+      btn({ label: "＋ Empezar desde cero", kind: "primary", onClick: () => openEasyAdd({}) }),
+      btn({ label: "🎓 Aprender (2 min)", onClick: () => startEasyLesson() })));
+}
+
+/** «＋ Añadir» del modo fácil: tarjetas por lo que quieres hacer. */
+function openEasyAdd({ from = null } = {}) {
+  closePop();
+  R.root.querySelector(".tdcreate")?.remove();
+  const net = curNet(), src = from ? nodeById(net, from) : (ed.sel.size === 1 ? nodeById(net, [...ed.sel][0]) : null);
+  const box = h("div", { class: "tdcreate tdpop tdeasyadd center", role: "dialog", "aria-label": "Añadir" },
+    h("div", { class: "tdcreatehead" }, h("b", {}, "＋ ¿Qué quieres añadir?"),
+      h("small", {}, src ? `Se conecta solo después de «${defOf(src).label}»` : "Se conecta solo al final de la cadena"),
+      h("button", { class: "tdx", "aria-label": "Cerrar", onclick: () => box.remove() }, "✕")));
+  const body = h("div", { class: "tdeasybody" });
+  for (const g of EASY_GROUPS) {
+    body.append(h("h4", {}, g.title), h("small", { class: "tdeasyhint" }, g.hint),
+      h("div", { class: "tdeasygrid" }, ...g.items.map(it => h("button", { class: "tdeasyitem", "data-key": it.key, title: it.desc, onclick: () => { box.remove(); easyApply(it.key, src?.id); } },
+        h("span", { class: "tdeasyico" }, it.emoji), h("b", {}, it.label), h("small", {}, it.desc)))));
+  }
+  body.append(h("p", { class: "tdeasymore" }, h("button", { class: "linkbtn", onclick: () => { box.remove(); openCreate({ pro: true, from: src?.id || null }); } }, "Ver todos los operadores (113, como TouchDesigner)…")));
+  box.append(body);
+  R.root.append(box);
+}
+
+/** El final de la cadena de imágenes: lo que entra en la Salida, o la última imagen suelta. */
+function chainEnd(net, exclude = null) {
+  const here = visible().filter(n => n.id !== exclude), out = here.find(n => n.fam === "TOP" && n.type === "out");
+  if (out) return nodeById(net, out.in[0]) || null;
+  const tops = here.filter(n => n.fam === "TOP" && !["movieout", "netout"].includes(n.type));
+  return tops.filter(n => !outputsOf(net, n.id).some(o => o.fam === "TOP")).at(-1) || tops.at(-1) || null;
+}
+/** Que haya una Salida al final de la cadena (y que se vea de fondo). */
+function ensureOut(net, last) {
+  let out = visible().find(n => n.fam === "TOP" && n.type === "out");
+  if (!out && last) { out = addHere(net, "TOP", "out", { x: last.x + NW + 70, y: last.y }); connect(net, last.id, out.id, 0); }
+  if (out) net.display = out.id;
+  return out;
+}
+/** Pone `node` justo después de `src`: lo que salía de src (de imagen) ahora sale de node. */
+function insertAfter(net, src, node) {
+  const outs = outputsOf(net, src.id).filter(o => o.fam === "TOP" && o.id !== node.id);
+  for (const o of outs) o.in.forEach((id, k) => { if (id === src.id) o.in[k] = node.id; });
+  connect(net, src.id, node.id, 0);
+}
+/** Una imagen nueva: o entra en la mezcla elegida que espera su segunda imagen, o se suma a lo que hay. */
+function placeSource(net, node, selNode) {
+  const sdef = selNode && defOf(selNode);
+  const free = sdef && selNode.fam === "TOP" ? [...Array(sdef.inputs[1]).keys()].find(k => k > 0 && !selNode.in[k]) : undefined;
+  if (free !== undefined) { connect(net, node.id, selNode.id, free); return `entra en «${sdef.label}»`; }
+  const end = chainEnd(net, node.id);
+  if (!end) { ensureOut(net, node); return "es el principio de la cadena"; }
+  // Ya hay una imagen: se suman las dos (como dos proyectores) antes de la Salida.
+  const mix = addHere(net, "TOP", "add", { x: end.x + NW + 70, y: end.y });
+  insertAfter(net, end, mix);
+  connect(net, node.id, mix.id, 1);
+  return "se suma a la que ya había (Sumar luz)";
+}
+/** Hace lo de una tarjeta (key) con el nodo elegido (fromId) como referencia. */
+function easyApply(key, fromId = null) {
+  const net = curNet(), it = EASY_GROUPS.flatMap(g => g.items).find(i => i.key === key);
+  if (!net || !it) return null;
+  const selNode = fromId ? nodeById(net, fromId) : (ed.sel.size === 1 ? nodeById(net, [...ed.sel][0]) : null);
+  if (it.act === "move") return easyMove(net, selNode, null, it.mover);
+  let node = null, msg = "";
+  app.edit(() => {
+    if (it.act === "3d" || it.act === "particles") {
+      const end = chainEnd(net), y0 = end ? end.y + 200 : 0, x0 = end ? end.x : 0;
+      const cam = visible().find(n => n.type === "camera") || addHere(net, "COMP", "camera", { x: x0, y: y0 + 340, p: { tx: 0, ty: 0.6, tz: 4 } });
+      if (it.act === "3d") {
+        const shape = addHere(net, "SOP", it.shape, { x: x0, y: y0 });
+        const geo = addHere(net, "COMP", "geo", { x: x0 + NW + 70, y: y0, p: { ry: { e: "absTime.seconds * 40" }, rx: 20 } });
+        connect(net, shape.id, geo.id, 0);
+      } else addHere(net, "COMP", "particles", { x: x0 + NW + 70, y: y0, p: { emitter: 2, esize: 0.3, outward: 1, rate: 600 } });
+      node = visible().find(n => n.type === "render") || addHere(net, "TOP", "render", { x: x0 + 2 * (NW + 70), y: y0, p: { camera: cam.name } });
+      msg = outputsOf(net, node.id).length ? "ya está en la red" : placeSource(net, node, selNode);
+      return;
+    }
+    const def = opDef(it.fam, it.type);
+    const pos = selNode ? freeSpot(selNode.x + NW + 70, selNode.y) : centerWorld();
+    node = addHere(net, it.fam, it.type, { x: snap(pos[0]), y: snap(pos[1]), p: { ...(it.p || {}) } });
+    if (it.type === "out" || it.type === "movieout") {
+      const end = selNode && selNode.fam === "TOP" && selNode.id !== node.id ? selNode : chainEnd(net, node.id);
+      if (end) { connect(net, end.id, node.id, 0); if (it.type === "out") net.display = node.id; }
+      msg = end ? `después de «${defOf(end).label}»` : "";
+    } else if (isSource(it)) msg = placeSource(net, node, selNode);
+    else {
+      const src = selNode && selNode.fam === "TOP" && selNode.type !== "out" && selNode.id !== node.id ? selNode : chainEnd(net, node.id);
+      if (src && src.id !== node.id) { insertAfter(net, src, node); ensureOut(net, node); msg = `después de «${defOf(src).label}»`; }
+      else msg = "elige antes una imagen en «1 · Empieza» y se conectará";
+    }
+    void def;
+  });
+  if (!node) return null;
+  ed.sel = new Set([node.id]);
+  easyLayout();
+  toast(`＋ ${it.label}${msg ? " · " + msg : ""}`);
+  return node;
+}
+/** Ordena de izquierda a derecha (la cadena se lee como una frase) sin preguntar. */
+function easyLayout() { autoLayout(); }
+
+/** «Que se mueva sola»: un control (q, o el principal) movido por la música, una onda, la mano… */
+function easyMove(net, node, q, moverKey) {
+  const m = mover(moverKey);
+  node ||= chainEnd(net);
+  if (!node) { toast("Primero añade una imagen o un efecto", "warn"); return null; }
+  q ||= mainParam(node);
+  if (!m || !q) { toast("Este nodo no tiene nada que mover", "warn"); return null; }
+  let c = visible().find(x => x.fam === "CHOP" && x.type === m.type && !x.p.__easyCustom);
+  app.edit(() => {
+    if (!c) c = addHere(net, "CHOP", m.type, { x: node.x, y: node.y + 200, p: { ...(m.p || {}) } });
+    node.p[q.k] = { e: moveExpr(c.name, m.chan, q) };
+  });
+  ed.sel = new Set([node.id]);
+  renderAll();
+  toast(`${m.emoji} «${q.label}» de ${defOf(node).label} se mueve ${m.label.toLowerCase()}`);
+  return c;
+}
+/** El panel 〰 de un control: con qué se mueve solo. */
+function easyMoveDialog(net, n, q) {
+  const cur = isExpr(n.p[q.k]);
+  dialog({ title: `〰 Que «${q.label}» se mueva sola`, content: h("div", {},
+    hint("Elige con qué se mueve. Sin escribir nada: LumaMap pone el resto."),
+    h("div", { class: "tdeasygrid" }, ...MOVERS.map(m => h("button", { class: "tdeasyitem", "data-mover": m.key, onclick: () => { closeDialog(); easyMove(net, n, q, m.key); } },
+      h("span", { class: "tdeasyico" }, m.emoji), h("b", {}, m.label), h("small", {}, m.desc)))),
+    cur ? h("div", { class: "row" }, btn({ label: "✋ Quieto (dejarlo fijo)", onClick: () => { closeDialog(); app.edit(() => { n.p[q.k] = q.def; }); renderAll(); toast(`«${q.label}» vuelve a estar quieto`); } })) : null) });
+}
+/** Panel de un nodo en el modo fácil: lo que hace, sus controles principales y poco más. */
+function easyNodePanel(net, n) {
+  const def = defOf(n), fam = FAMILIES[n.fam];
+  const box = h("div", { class: "tdpp easy" });
+  box.style.setProperty("--fam", fam.color);
+  box.append(h("div", { class: "tdpphead" }, h("i", { class: "tdfam" }, EASY_FAMS[n.fam]?.icon || n.fam), h("b", { class: "tdppname", title: n.name }, def.label),
+    h("button", { class: "tdx", "aria-label": "Cerrar panel", onclick: () => toggleParams() }, "✕")),
+    h("p", { class: "tdppdesc" }, def.desc));
+  box.append(h("div", { class: "row tdppacts" },
+    n.fam === "TOP" && n.type !== "out" ? btn({ label: "＋ Después", kind: "small primary", title: "Añadir el paso siguiente", onClick: () => openEasyAdd({ from: n.id }) }) : null,
+    btn({ label: n.bypass ? "⏻ Encender" : "⏻ Apagar", kind: `small ${n.bypass ? "on" : ""}`, onClick: () => { ed.sel = new Set([n.id]); toggleBypassSel(); } }),
+    n.fam === "TOP" ? btn({ label: "▶ Proyectar esto", kind: "small", onClick: () => useOnSurface(n.id) }) : null,
+    btn({ label: "Quitar", kind: "small danger", title: "Quitarlo dejando la cadena unida", onClick: () => { ed.sel = new Set([n.id]); deleteSel(n.fam === "TOP" && def.inputs[1] > 0); } })));
+  const params = def.params.filter(q => !q.hidden && !["code", "py", "anim", "pulse", "learn", "param"].includes(q.type));
+  const pages = [...new Set(params.map(q => q.page || "Parámetros"))];
+  const main = params.filter(q => (q.page || "Parámetros") === pages[0]);
+  for (const q of main) box.append(paramRow(net, n, q));
+  const rest = params.filter(q => (q.page || "Parámetros") !== pages[0]);
+  if (rest.length) { const more = h("details", { class: "tdpage" }, h("summary", {}, "Más ajustes")); for (const q of rest) more.append(paramRow(net, n, q)); box.append(more); }
+  if (!params.length) box.append(hint(n.type === "out" ? "Esto es lo que sale de la red: pulsa «▶ Proyectar» arriba para verlo en una superficie." : "No tiene controles: deja pasar lo que le entra."));
+  const info = h("pre", { class: "tdppinfo" }), why = btn({ label: "🤖 ¿Qué pasa aquí?", kind: "small", onClick: () => explainError(net, n) });
+  why.style.display = "none";
+  box.append(info, why); box._info = info; box._why = why;
+  return box;
 }
 
 /* ======================================================================
@@ -1765,7 +2005,7 @@ export function handleNetKey(a, e) {
   if (k === " ") { spaceDown = true; return eat(); }
   if (k === "Escape") { if (R.root.querySelector(".tdpop")) { closePop(); return eat(); } if (ed.perform) { togglePerform(); return eat(); } if (ed.pendingFrom) { ed.pendingFrom = null; R.root.classList.remove("connecting"); return eat(); } if (ed.sel.size) { ed.sel.clear(); ed.selWire = null; markSelection(); renderParams(); drawWires(); return eat(); } closeNetworkEditor(); return eat(); }
   if (k === "F11") { togglePerform(); return eat(); }
-  if (k === "Tab") { openCreate({}); return eat(); }
+  if (k === "Tab") { openCreate({ pro: true }); return eat(); }
   if (ctrl && lk === "z") { e.shiftKey ? redo() : undo(); return eat(); }
   if (ctrl && lk === "y") { redo(); return eat(); }
   if (ctrl && lk === "c") { copySel(); return eat(); }

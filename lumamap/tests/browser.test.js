@@ -64,6 +64,9 @@ setOnFail(async (name) => {
 await page.goto(base);
 await page.waitForTimeout(800);
 await page.getByText("Cubo 3D").click();
+// Las pruebas de las redes usan el modo pro (como TouchDesigner); el modo fácil tiene su prueba.
+// (Se marca después de la bienvenida: antes, la app creería que no es la primera vez.)
+await page.evaluate(() => localStorage.setItem("lumamap:tdEasy", "0"));
 // Sin tarjeta gráfica (SwiftShader) la vista previa a resolución completa va a ~5 fps y cada clic
 // de Playwright espera fotogramas: calidad «baja» como la app elige sola en estos equipos (salida igual).
 // Y vista previa a ¼: a ½ el dibujo por software ocupa los 4 núcleos de la CI (~10 fps) y deja sin CPU
@@ -1153,6 +1156,63 @@ await test("Python y la IA que escribe código: Dibujo con Python da imagen, con
   assert.match(g.code, /atan\(p\.y, p\.x\)/); assert.equal(g.err, "");
   await page.evaluate(async () => { document.getElementById("modal")._close?.(); const a = window.__lumamap; const { aiOf } = await import("./js/panels-assistant.js"); aiOf(a).setSettings({ endpoint: "http://localhost:11434", model: "" }); const m = await import("./js/panels-network.js"); m.closeNetworkEditor(); });
 });
+await test("redes de nodos en modo fácil: comienzo de un toque, ＋ Añadir con tarjetas, el ＋ de cada nodo conecta solo, 〰 mover solo y el tutorial (capítulo 21) entero", async () => {
+  const ws = page.locator("#tdws.show");
+  await page.evaluate(async () => {
+    const a = window.__lumamap, m = await import("./js/panels-network.js"), G = await import("./js/td/graph.js");
+    let n; a.edit(() => { n = G.newNetwork("Fácil"); a.S.project.networks.push(n); });
+    await a.openNetwork({ netId: n.id }); m.setEasyMode(true);
+  });
+  // Red vacía: tarjeta de comienzo; «Colores que bailan» monta colores → caleidoscopio → salida, movido por la música.
+  await ws.locator(".tdempty").waitFor();
+  await ws.locator(".tdemptybtn", { hasText: "Colores que bailan" }).click();
+  const chain = () => page.evaluate(() => { const n = window.__lumamap.S.project.networks.at(-1); const by = id => n.nodes.find(x => x.id === id); const out = n.nodes.find(x => x.type === "out"); const r = []; let c = out; while (c) { r.unshift(c.type); c = by(c.in[0]); } return { chain: r, moving: n.nodes.some(x => Object.values(x.p).some(v => v && typeof v === "object" && /audio\d*\.bass/.test(v.e || ""))), display: n.display === out?.id }; });
+  let r = await chain();
+  assert.deepEqual(r.chain, ["noise", "kaleido", "out"]); assert.ok(r.moving, "se mueve con la música"); assert.ok(r.display);
+  // El ＋ del ruido: «Ondas» entra en medio, ya conectado.
+  await ws.locator('.tdnode[data-type="noise"] .tdplus').click();
+  await ws.locator(".tdeasyadd").waitFor();
+  await ws.locator(".tdeasyitem", { hasText: "Ondas" }).click();
+  assert.deepEqual((await chain()).chain, ["noise", "wave", "kaleido", "out"]);
+  // Una segunda imagen se suma sola (Sumar luz) antes de la salida.
+  await ws.locator(".tdbar button", { hasText: "Añadir" }).click();
+  await ws.locator(".tdeasyitem", { hasText: "Círculo" }).click();
+  r = await page.evaluate(() => { const n = window.__lumamap.S.project.networks.at(-1), out = n.nodes.find(x => x.type === "out"), mix = n.nodes.find(x => x.id === out.in[0]); return { mix: mix.type, ins: mix.in.map(id => n.nodes.find(x => x.id === id)?.type) }; });
+  assert.deepEqual(r, { mix: "add", ins: ["kaleido", "circle"] });
+  // Panel fácil: sin ƒx ni ◆; 〰 junto a un control → «Onda suave».
+  await ws.locator('.tdnode[data-type="wave"] .tdname').click();
+  await ws.locator(".tdpp.easy").waitFor();
+  assert.equal(await ws.locator(".tdparams .tdfx", { hasText: "ƒx" }).count(), 0);
+  await ws.locator('.tdparams .tdprow[data-k="amp"] .tdmove').click();
+  await page.locator("#modal.show .tdeasyitem", { hasText: "Onda suave" }).click();
+  assert.ok(await page.evaluate(() => { const w = window.__lumamap.S.project.networks.at(-1).nodes.find(x => x.type === "wave"); return /lfo\d*\.chan1/.test(w.p.amp?.e || ""); }));
+  await ws.locator('.tdparams .tdprow[data-k="amp"] .tdmoving').waitFor();
+  // Se ve: la salida tiene imagen y no hay errores en ningún nodo.
+  const ok = await page.evaluate(async () => { const a = window.__lumamap, n = a.S.project.networks.at(-1); await new Promise(r => setTimeout(r, 500)); const out = n.nodes.find(x => x.type === "out"); const o = a.td.output(n.id, out.id, { time: performance.now() / 1000, w: 32, h: 18 }); const d = o.el.getContext("2d").getImageData(0, 0, 32, 18).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return { lum: s / 576, errs: n.nodes.map(x => a.td.info(n, x).error).filter(Boolean) }; });
+  assert.ok(ok.lum > 5, "la salida tiene imagen: " + ok.lum); assert.deepEqual(ok.errs, []);
+  // Modo pro y vuelta: los nombres de TouchDesigner vuelven.
+  await ws.locator(".tdbar button", { hasText: "Modo pro" }).click();
+  await ws.locator('.tdnode[data-type="wave"] .tdname', { hasText: /^wave\d/ }).waitFor();
+  await ws.locator(".tdbar button", { hasText: "Modo fácil" }).click();
+  // Capítulo 21: cada paso se puede hacer («Hazlo por mí») y se comprueba.
+  const steps = await page.evaluate(async () => {
+    const a = window.__lumamap, { LEVELS } = await import("./js/ai/academy.js"), m = await import("./js/panels-network.js");
+    a.edit(() => { a.S.project.networks = []; for (const sc of a.S.project.scenes) for (const l of Object.values(sc.looks)) if (l.source.type === "net") l.source = { type: "gen", gen: "calib" }; });
+    m.closeNetworkEditor();
+    const L = LEVELS.find(l => l.level === 21), out = [];
+    for (const st of L.steps) {
+      if (st.info) { out.push("info"); continue; }
+      const b = st.start ? st.start(a) : null;
+      if (st.doIt) await st.doIt(a);
+      let ok = false;
+      for (let k = 0; k < 40 && !ok; k++) { ok = !!st.check(a, b); if (!ok) await new Promise(r => setTimeout(r, 100)); }
+      out.push(ok);
+    }
+    return out;
+  });
+  assert.deepEqual(steps, [true, true, true, true, true, true, true, "info"]);
+  await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.setEasyMode(false); m.closeNetworkEditor(); });
+});
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const g = await pctx.newPage();
@@ -1162,7 +1222,7 @@ await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo lo
     await g.goto(base);
     await g.locator("#modal.show").waitFor();
     await g.evaluate(() => document.getElementById("modal")._close("blank"));
-    await g.evaluate(async () => { const a = window.__lumamap; await a.openNetwork(); const G = await import("./js/td/graph.js"); const n = a.S.project.networks[0]; a.edit(() => { G.addNode(n, "TOP", "noise", { x: 0, y: 0 }); G.addNode(n, "TOP", "level", { x: 260, y: 0 }); }); (await import("./js/panels-network.js"))._edForTests.sel.clear(); a.closeNetwork(); await a.openNetwork(); });
+    await g.evaluate(async () => { localStorage.setItem("lumamap:tdEasy", "0"); const a = window.__lumamap; await a.openNetwork(); const G = await import("./js/td/graph.js"); const n = a.S.project.networks[0]; a.edit(() => { G.addNode(n, "TOP", "noise", { x: 0, y: 0 }); G.addNode(n, "TOP", "level", { x: 260, y: 0 }); }); (await import("./js/panels-network.js"))._edForTests.sel.clear(); a.closeNetwork(); await a.openNetwork(); });
     const ws = g.locator("#tdws.show");
     await ws.locator('.tdnode[data-type="level"]').waitFor();
     // Primer toque en la salida: la red pasa a «conectando». Con la CPU de la CI llena, un toque

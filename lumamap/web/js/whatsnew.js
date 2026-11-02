@@ -7,7 +7,7 @@ import { h, btn, dialog, closeDialog, hint, toast } from "./ui.js";
 import { openExport } from "./panels-export.js";
 
 /** Cambia cuando hay novedades nuevas que enseñar. */
-export const NEWS_REV = "2026-10-19";
+export const NEWS_REV = "2026-11-02";
 const SEEN_KEY = "lumamap:newsSeen";
 const store = () => { try { return globalThis.localStorage || null; } catch { return null; } };
 // ¿Ya se había usado LumaMap en este equipo? Se mira al cargar, antes de que la app guarde nada.
@@ -39,6 +39,7 @@ export function newsItems(app) {
       ["Editor de redes de nodos", "Programa como en TouchDesigner: más de 110 operadores (imagen TOP, señales CHOP, geometría SOP, objetos 3D, materiales, texto y tablas), cables, expresiones, feedback, tu propio GLSL, instancias 3D y mover objetos 3D con la mano delante de la cámara. Con ejemplos.", () => app.openNetwork()],
       ["Redes pro: 3D, curvas y subredes", "Visor flotante con gizmo para mover, girar y escalar objetos 3D y la cámara; fotogramas clave ◆ con editor de curvas y línea de tiempo; subredes (Ctrl+G), replicador, panel de control propio, partículas, modelos 3D de archivo, audio de un archivo, MIDI/OSC In, grabar video y ventana a un proyector.", () => app.openNetwork()],
       ["Python y la IA que escribe código", "Script CHOP, Script TOP y DAT Execute en un Python propio y seguro, con editor de código (colores, números de línea, error marcado) y consola (Alt+T). «🤖 Escribir con IA» te hace el código, lo prueba y lo arregla si falla.", () => app.openNetwork()],
+      ["Nodos fáciles", "El editor de nodos empieza en modo fácil: «＋ Añadir» con tarjetas por lo que quieres hacer, todo se conecta solo, un ＋ en cada nodo para el paso siguiente y «〰» para que cualquier control se mueva con la música, una onda o la mano. Con su tutorial (2 minutos). «🔧 Modo pro» = todo TouchDesigner.", () => app.openNetwork()],
       ["Partículas en la GPU y GLSL MAT", "Partículas → «⚡ Calcular en la GPU»: hasta un millón, con los mismos controles. Y el material GLSL: escribe cómo se ve un objeto 3D (y cómo se deforma) con tu propio shader.", () => app.openNetwork()],
       ["Salida por red desde los nodos", "Pon una «Salida por red» detrás de cualquier imagen de la red: sale por su canal MJPEG para OBS, vMix o TouchDesigner («📋 Dirección para OBS»).", () => app.openNetwork()],
       ["Cadena de cada superficie", "La vista simple: fuente → señales → efectos → forma → mezcla → salida. Toca un nodo para abrirlo.", () => app.openNodes()],

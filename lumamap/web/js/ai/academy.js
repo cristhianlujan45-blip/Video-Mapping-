@@ -160,7 +160,7 @@ async function tdDo(app, fn) {
   if (net) app.edit(() => fn(G, net));
 }
 LEVELS.push(
-  { level: 19, title: "Redes como TouchDesigner", steps: [
+  { level: 19, title: "Redes como TouchDesigner", mode: "pro", steps: [
     { text: "Las redes son como TouchDesigner: conectas operadores (nodos) y la imagen va pasando de uno a otro. Toca «Nodos» arriba para abrir el editor de redes.", target: '#top [data-act="nodes"]', check: () => netOpen(), doIt: (app) => app.openNetwork?.() },
     { text: "Pulsa «＋ Operador» (o la tecla Tab) y crea un «Ruido» de la familia TOP (imágenes).", target: { sel: "#tdws .tdbar button", text: "Operador" }, check: (app) => allNodes(app).some(n => n.fam === "TOP" && n.type === "noise"),
       doIt: (app) => tdDo(app, (G, net) => G.addNode(net, "TOP", "noise", { x: 0, y: 0 })) },
@@ -173,7 +173,7 @@ LEVELS.push(
   ] },
 );
 LEVELS.push(
-  { level: 20, title: "Redes pro: 3D, animación y subredes", steps: [
+  { level: 20, title: "Redes pro: 3D, animación y subredes", mode: "pro", steps: [
     { text: "Abre el editor de redes con «Nodos» (arriba).", target: '#top [data-act="nodes"]', check: () => netOpen(), doIt: (app) => app.openNetwork?.() },
     { text: "Crea una «Caja» de la familia SOP (Tab → «caja»): se crean solos su Objeto 3D, una cámara y un Render 3D.", check: (app) => allNodes(app).some(n => n.type === "geo") && allNodes(app).some(n => n.type === "render"),
       doIt: (app) => tdDo(app, (G, net) => { const b = G.addNode(net, "SOP", "box", { x: 0, y: 300 }); const g = G.addNode(net, "COMP", "geo", { x: 230, y: 300 }); G.connect(net, b.id, g.id, 0); if (!net.nodes.some(n => n.type === "camera")) G.addNode(net, "COMP", "camera", { x: 230, y: 470 }); if (!net.nodes.some(n => n.type === "render")) G.addNode(net, "TOP", "render", { x: 460, y: 300 }); }) },
@@ -188,8 +188,31 @@ LEVELS.push(
     { text: "¡Eres pro! Prueba también: Partículas, Modelo 3D (archivo) con tus .glb/.obj, Audio de un archivo, Grabar video, Ventana a un proyector y el Panel de control con deslizadores y botones (Red → Panel de control).", info: true },
   ] },
 );
+// Nodos fáciles: lo mismo que TouchDesigner sin jerga (modo fácil del editor de redes).
+const easy = () => import("../panels-network.js");
+const nodesOf = (app, type) => allNodes(app).filter(n => n.type === type);
+// ¿Llega la imagen de `a` hasta `b` siguiendo los cables?
+const feeds = (net, aId, bId, seen = new Set()) => { if (aId === bId) return true; if (seen.has(bId)) return false; seen.add(bId); const b = net.nodes.find(n => n.id === bId); return !!b && b.in.some(id => id && feeds(net, aId, id, seen)); };
+const toOut = (app, type) => allNodes(app).some(n => n.type === type && n.net.nodes.some(o => o.type === "out" && o.fam === "TOP" && feeds(n.net, n.id, o.id)));
+LEVELS.push(
+  { level: 21, title: "Nodos fáciles (como TouchDesigner, sin complicaciones)", mode: "easy", steps: [
+    { text: "Los nodos son piezas que se enchufan: una imagen entra por la izquierda, cada pieza la cambia y lo de la derecha se proyecta. Toca «Nodos» arriba.", target: '#top [data-act="nodes"]', check: () => netOpen(), doIt: (app) => app.openNetwork?.() },
+    { text: "Estás en el modo fácil: botones grandes y todo se conecta solo. Pulsa «＋ Añadir».", target: { sel: "#tdws .tdbar button", text: "Añadir" }, check: (app) => !!document.querySelector("#tdws .tdeasyadd") || toOut(app, "noise"), doIt: async () => (await easy()).easyAddOpen() },
+    { text: "Elige «🌈 Colores que se mueven»: es la imagen con la que empieza la cadena (sale sola su «Salida»).", target: { sel: "#tdws .tdeasyitem", text: "Colores que se mueven" }, check: (app) => toOut(app, "noise"), doIt: async () => { document.querySelector("#tdws .tdeasyadd")?.remove(); (await easy()).easyDo("colors"); } },
+    { text: "Toca el ＋ azul que hay a la derecha del nodo de colores y elige «❄ Caleidoscopio»: se pone en medio, ya conectado.", target: "#tdws .tdplus", check: (app) => allNodes(app).some(k => k.type === "kaleido" && k.in.some(id => k.net.nodes.find(x => x.id === id)?.type === "noise")) && toOut(app, "kaleido"),
+      doIt: async (app) => { document.querySelector("#tdws .tdeasyadd")?.remove(); (await easy()).easyDo("kaleido", nodesOf(app, "noise")[0]?.id || null); } },
+    { text: "Toca el Caleidoscopio y, a la derecha, mueve el deslizador «Partes»: cambia en directo.", target: '#tdws .tdnode[data-type="kaleido"]',
+      start: (app) => ({ v: nodesOf(app, "kaleido").map(k => k.p.segments).join() }), check: (app, b) => nodesOf(app, "kaleido").map(k => k.p.segments).join() !== b.v,
+      doIt: (app) => tdDo(app, (G, net) => { const k = net.nodes.find(n => n.type === "kaleido"); if (k) k.p.segments = 9; }) },
+    { text: "Ahora que se mueva solo: pulsa 〰 al lado de «Giro» y elige «🎵 Con la música». Sin fórmulas.", target: "#tdws .tdmove", check: (app) => allNodes(app).some(n => Object.values(n.p).some(v => v && typeof v === "object" && /audio\d*\./.test(v.e || ""))),
+      doIt: async (app) => { const k = nodesOf(app, "kaleido")[0]; if (k) (await easy()).easyDo("move-music", k.id); } },
+    { text: "Pulsa «▶ Proyectar» arriba: el resultado sale en una superficie (y en el proyector).", target: { sel: "#tdws .tdbar button", text: "Proyectar" }, check: (app) => app.S.project.scenes.some(sc => Object.values(sc.looks).some(l => l.source?.type === "net")),
+      doIt: async () => (await easy()).projectNet() },
+    { text: "¡Ya sabes usar los nodos! Sigue añadiendo con ＋: mezclas, 3D, partículas, tu cámara… Cuando quieras todo el poder de TouchDesigner (expresiones, subredes, Python), pulsa «🔧 Modo pro»: el capítulo 19 te lo enseña.", info: true },
+  ] },
+);
 /** El curso completo, en el orden recomendado (cada número es un capítulo de LEVELS). */
-export const COURSE = [13, 1, 14, 2, 3, 4, 15, 10, 16, 6, 7, 11, 19, 20, 12, 9, 8, 17, 5, 18];
+export const COURSE = [13, 1, 14, 2, 3, 4, 15, 10, 16, 6, 7, 11, 21, 19, 20, 12, 9, 8, 17, 5, 18];
 
 const KEY = "lumamap:academy", CUR = "lumamap:academyCur";
 export class Academy {
@@ -207,6 +230,8 @@ export class Academy {
     const L = LEVELS.find(l => l.level === level);
     if (!L) return;
     this.cur = { level, i: Math.max(0, Math.min(L.steps.length - 1, i)), base: null };
+    // Los capítulos de nodos ponen el editor en su modo (fácil o pro como TouchDesigner).
+    if (L.mode && typeof document !== "undefined") import("../panels-network.js").then(m => m.setEasyMode(L.mode === "easy")).catch(() => {});
     this.finished = 0; this.hidden = false; this.doneFlash = false;
     this.enter();
     clearInterval(this.timer);

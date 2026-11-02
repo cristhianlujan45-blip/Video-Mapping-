@@ -1072,3 +1072,34 @@ body.tdopen #modal{z-index:80;}
 body.tdopen #toast{z-index:85;}
 body.tdopen #notices{z-index:81;}
 .tdaisteps{display:flex;flex-direction:column;gap:4px;margin-top:8px;font-size:13.5px;}
+
+/* ---- Editor de redes: modo fácil ---- */
+.tdws.easy .tdnode .tdname{font-size:13px;}
+.tdplus{position:absolute;right:-14px;width:26px;height:26px;border-radius:50%;background:var(--acc);color:#001018;font-weight:800;font-size:17px;line-height:26px;text-align:center;box-shadow:0 2px 8px #0008;z-index:2;}
+.tdplus:hover{transform:scale(1.12);}
+.tdeasyadd{width:720px;max-height:min(80vh,640px);}
+.tdeasybody{overflow-y:auto;padding-right:4px;}
+.tdeasybody h4{margin:10px 0 0;font-size:14px;}
+.tdeasyhint{display:block;margin-bottom:6px;}
+.tdeasygrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;}
+.tdeasyitem{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;gap:0 8px;align-items:center;text-align:left;padding:9px 10px;border-radius:12px;background:var(--bg3);border:1px solid var(--line);min-height:var(--tap);}
+.tdeasyitem:hover,.tdeasyitem:focus-visible{border-color:var(--acc);background:var(--bg4);}
+.tdeasyico{grid-row:1 / span 2;font-size:24px;line-height:1;}
+.tdeasyitem b{font-size:14px;}
+.tdeasyitem small{font-size:11px;line-height:1.25;}
+.tdeasymore{margin:12px 0 4px;text-align:center;}
+.tdempty{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(640px,calc(100% - 24px));padding:20px;border-radius:18px;background:var(--bg2);border:1px solid var(--line);box-shadow:0 10px 40px #0009;display:flex;flex-direction:column;gap:12px;z-index:3;}
+.tdempty h3{font-size:20px;}
+.tdempty p{color:var(--dim);font-size:14px;}
+.tdemptyrow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.tdemptybtn{display:flex;flex-direction:column;gap:4px;align-items:flex-start;text-align:left;padding:12px;border-radius:14px;background:var(--bg3);border:1px solid var(--line);}
+.tdemptybtn:hover{border-color:var(--acc);}
+.tdemptyico{font-size:30px;}
+.tdmoving{flex:1;text-align:left;padding:6px 10px;border-radius:10px;background:color-mix(in srgb,var(--acc) 15%,transparent);border:1px solid var(--acc);font-size:13px;}
+.tdmove{font-size:16px;}
+.tdpp.easy .tdppname{font-size:16px;}
+@media (max-width: 640px){
+  .tdemptyrow{grid-template-columns:1fr;}
+  .tdeasygrid{grid-template-columns:1fr 1fr;}
+}
+.linkbtn{color:var(--acc);text-decoration:underline;padding:6px;}
