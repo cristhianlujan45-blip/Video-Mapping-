@@ -16,7 +16,8 @@ export function signalsSection(app) {
   const S = app.S;
   const lfos = () => S.project.settings.lfos;
   const color = (id) => LCOLS[Math.max(0, lfos().findIndex(l => l.id === id)) % LCOLS.length];
-  const nameOf = (l) => `${describe(app, l.param)?.name || l.param} · ${SHAPE_NAME[l.shape] || l.shape}`;
+  const trackName = (shape) => { const t = S.project.settings.tracks?.list.find(x => "track:" + x.id === shape); return t ? "🎚 " + t.name : "🎚 pista"; };
+  const nameOf = (l) => `${describe(app, l.param)?.name || l.param} · ${SHAPE_NAME[l.shape] || (String(l.shape).startsWith("track:") ? trackName(l.shape) : l.shape)}`;
 
   const cv = h("canvas", { class: "sigmon", width: 720, height: 200, style: { width: "100%", height: "150px", background: "#0b0b12", borderRadius: "10px", display: "block" } });
   const legend = h("div", { class: "chips sigleg" });

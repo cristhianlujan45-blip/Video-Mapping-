@@ -335,6 +335,9 @@ chop("animation", "Animación (fotogramas clave)", "Curvas con fotogramas clave 
 chop("audio", "Audio (niveles)", "El sonido que entra (micrófono o la canción): graves, medios, agudos, volumen y golpe (Audio Analysis CHOP).", [0, 0],
   [f("gain", "Ganancia", 1, 0, 5)],
   ({ p, env }) => { const L = env.levels || {}; const g = p.gain; return many([["bass", (L.bass || 0) * g], ["mid", (L.mid || 0) * g], ["high", (L.high || 0) * g], ["level", (L.level || 0) * g], ["beat", L.beat || 0], ["bpm", L.bpm || env.bpm || 120]]); });
+chop("tracks", "Pistas de audio (multipista)", "Una señal por cada pista de Audio → Pistas (bombo, bajo, voz… o tus stems), ya con su envolvente ADSR: cada una mueve una cosa distinta. Los canales se llaman como las pistas.", [0, 0],
+  [f("gain", "Ganancia", 1, 0, 5)],
+  ({ p, env }) => { const T = env.levels?.trackNames || {}; const pairs = Object.entries(T).map(([n, v]) => [n, (+v || 0) * p.gain]); return pairs.length ? many(pairs) : many([["pista", 0]]); })
 chop("audiofile", "Audio de un archivo", "Una canción o sonido de tu PC (.mp3, .wav, .ogg…): suena y da graves, medios, agudos, volumen, golpe y su posición (Audio File In CHOP). Va sincronizado en el editor y en las salidas.", [0, 0],
   [{ k: "audio", label: "Archivo de audio", type: "audiofile", def: "" }, t("play", "Sonando", 1), t("sound", "Se oye (por los altavoces)", 1), f("volume", "Volumen", 0.8, 0, 1),
     m("sync", "Tiempo", [[0, "Libre, en bucle (igual en todas las ventanas)"], [1, "Sigue la línea de tiempo de la red"]]), f("gain", "Ganancia del análisis", 1, 0, 5), i("bands", "Bandas de espectro (0 = no)", 0, 0, 256)],

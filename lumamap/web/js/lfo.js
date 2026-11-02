@@ -7,7 +7,9 @@
 export const LFO_SHAPES = [["sine", "〜 Onda"], ["triangle", "△ Triángulo"], ["saw", "⟋ Sierra"], ["square", "⊓ Pulso"], ["random", "⁂ Azar"],
   ["noise", "≈ Ruido suave"], ["hit", "💥 Golpe que se apaga"], ["randbeat", "🎲 Azar en cada golpe"]];
 export const SOUND_SHAPES = [["bass", "🔊 Graves"], ["mid", "🎸 Medios"], ["high", "✨ Agudos"], ["level", "🎚 Volumen"]];
-export const isSoundShape = (s) => SOUND_SHAPES.some(x => x[0] === s);
+// Una pista de audio (multipista, tracks.js): «track:<id>».
+export const isTrackShape = (s) => /^track:[\w-]{1,40}$/.test(String(s || ""));
+export const isSoundShape = (s) => SOUND_SHAPES.some(x => x[0] === s) || isTrackShape(s);
 export const LFO_BEATS = [[0.25, "¼"], [0.5, "½"], [1, "1"], [2, "2"], [4, "4"], [8, "8"], [16, "16"], [32, "32"]];
 const SHAPES = new Set([...LFO_SHAPES, ...SOUND_SHAPES].map(s => s[0]));
 
@@ -20,7 +22,7 @@ export function normalizeLfos(list) {
   const num = (v, d, a, b) => Number.isFinite(+v) ? Math.max(a, Math.min(b, +v)) : d;
   return list.filter(l => l && typeof l.param === "string" && l.param).slice(0, 200).map(l => ({
     id: String(l.id || newLfo("").id), param: l.param.slice(0, 200),
-    shape: SHAPES.has(l.shape) ? l.shape : "sine", beats: num(l.beats, 4, 0.0625, 64),
+    shape: SHAPES.has(l.shape) || isTrackShape(l.shape) ? l.shape : "sine", beats: num(l.beats, 4, 0.0625, 64),
     lo: num(l.lo, 0, 0, 1), hi: num(l.hi, 1, 0, 1), on: l.on !== false,
     smooth: num(l.smooth, 0, 0, 1), gain: num(l.gain, 1, 0.25, 4),
   }));
@@ -50,6 +52,7 @@ export function shapeAt(shape, cycles) {
 
 /** Valor 0..1 de una señal que sigue el sonido (graves, medios, agudos o volumen). */
 export function soundAt(shape, levels = {}, gain = 1) {
+  if (isTrackShape(shape)) return Math.max(0, Math.min(1, (+levels.tracks?.[shape.slice(6)] || 0) * gain));
   const v = shape === "bass" ? levels.bass : shape === "mid" ? levels.mid : shape === "high" ? levels.high : (levels.level ?? Math.max(levels.bass || 0, levels.mid || 0, levels.high || 0));
   return Math.max(0, Math.min(1, (+v || 0) * gain));
 }

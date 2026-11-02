@@ -15,6 +15,7 @@ import { tutorialOn, setTutorial, resetTips } from "./tutorial.js";
 import { ffglControls } from "./panels-ffgl.js";
 import { vjSection } from "./panels-vj.js";
 import { signalsSection } from "./panels-signals.js";
+import { tracksSection } from "./panels-tracks.js";
 import { myPanelSection } from "./panels-mypanel.js";
 import { deckSection } from "./panels-deck.js";
 import { openPhoneCam } from "./panels-phonecam.js";
@@ -992,6 +993,7 @@ const audio = {
         hint("Sin micrófono: toca TAP 4 veces al ritmo. «1» marca el primer tiempo del compás. ½× y 2× corrigen si va al doble o a la mitad."),
         slider({ label: "Sincronía (adelanto de la imagen)", min: -150, max: 250, step: 5, value: au.offset, def: 60, fmt: (v) => v + " ms", onInput: (v) => au.setOffset(v) }),
         hint("Si los destellos llegan tarde respecto al sonido, sube este valor; si llegan antes, bájalo.")),
+      tracksSection(app),
       signalsSection(app));
 
     const s = app.surf();

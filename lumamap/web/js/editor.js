@@ -3,6 +3,7 @@
 // archivos, audio, MIDI y bucle de render. Los paneles están en panels.js.
 import * as M from "./model.js";
 import * as Store from "./store.js";
+import { TrackEngine } from "./tracks.js";
 import { History } from "./history.js";
 import { Renderer, webgl2Supported } from "./renderer.js";
 import { Compositor, sceneLayers, deckB } from "./compose.js";
@@ -3082,6 +3083,7 @@ function tick(now) {
   fpsAvg = fpsAvg * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
   if (S.playing) S.clock += dt;
   S.levels = audio.update(now);
+  if (S.project.settings.tracks?.list.length) { S.levels.tracks = app.tracks.update(now); S.levels.trackNames = app.tracks.byName; }
   vj?.frame({ ...S.levels, live: audio.active }, now);
   // Audio como fuente del motor de parámetros (solo si hay mapeos de audio).
   if (S.project.settings.control.mappings.some(m => m.src === "audio" && m.enabled !== false)) for (const k of ["bass", "mid", "high", "level", "beat"]) params.input({ src: "audio", key: k, v: Math.max(0, Math.min(1, S.levels[k] || 0)) });
@@ -3611,6 +3613,12 @@ async function init() {
   app.compositor = () => comp;   // pruebas: lo que dibujó cada fuente
   link = new Link("editor", onLinkMsg);
   audio = new AudioEngine();
+  // Pistas de audio (multipista): cada parte de la música, su señal con ADSR.
+  app.tracks = new TrackEngine({
+    project: () => S.project,
+    media: async (id) => (await Store.getMedia(id))?.blob || null,
+    masterBins: () => audio.analyser && audio.bins ? { bins: audio.bins, sampleRate: audio.ctx?.sampleRate || 44100 } : null,
+  });
   params = app.params = new ParamEngine(app);
   // Mandos de juego: cada uno es un dispositivo propio (Mando 1, Mando 2…).
   pads = app.pads = new GamepadHub((ev) => params.input(ev), { learning: () => !!params.learning });

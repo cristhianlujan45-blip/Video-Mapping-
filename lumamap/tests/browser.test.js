@@ -1213,6 +1213,53 @@ await test("redes de nodos en modo fácil: comienzo de un toque, ＋ Añadir con
   assert.deepEqual(steps, [true, true, true, true, true, true, true, "info"]);
   await page.evaluate(async () => { const m = await import("./js/panels-network.js"); m.setEasyMode(false); m.closeNetworkEditor(); });
 });
+await test("pistas de audio (multipista): un stem de bombo suena, su ADSR late con cada golpe, mueve el brillo y el nodo «Pistas de audio» lo da como canal", async () => {
+  await page.evaluate(async () => {
+    const a = window.__lumamap, Store = await import("./js/store.js");
+    // Un stem de 4 s: un golpe grave (60 Hz) cada medio segundo.
+    const sr = 22050, len = sr * 4, buf = new ArrayBuffer(44 + len * 2), dv = new DataView(buf);
+    const w4 = (o, t) => { for (let k = 0; k < 4; k++) dv.setUint8(o + k, t.charCodeAt(k)); };
+    w4(0, "RIFF"); dv.setUint32(4, 36 + len * 2, true); w4(8, "WAVE"); w4(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w4(36, "data"); dv.setUint32(40, len * 2, true);
+    for (let k = 0; k < len; k++) { const t = k / sr, ph = t % 0.5, env = ph < 0.15 ? Math.exp(-ph * 25) : 0; dv.setInt16(44 + k * 2, Math.sin(2 * Math.PI * 60 * t) * env * 30000, true); }
+    await Store.putMedia({ id: "mediaKickStem", name: "kick.wav", kind: "audio", blob: new Blob([buf], { type: "audio/wav" }), size: buf.byteLength });
+    a.edit(() => { a.S.project.media.push({ id: "mediaKickStem", name: "kick.wav", kind: "audio", size: buf.byteLength }); });
+    a.openTab("audio");
+  });
+  // La sección y una pista de archivo con ese stem (el botón «Cargar stems» abre el selector de archivos).
+  await page.locator("#panelBody .sec h3", { hasText: "Pistas de audio" }).waitFor();
+  const id = await page.evaluate(async () => {
+    const a = window.__lumamap, { newTrack } = await import("./js/tracks.js");
+    let t; a.edit(() => { t = newTrack("file", { name: "Bombo", media: "mediaKickStem", attack: 0, decay: 0.15, sustain: 0, release: 0.1, threshold: 0.3 }); a.S.project.settings.tracks.list.push(t); });
+    a.renderPanel();
+    return t.id;
+  });
+  const card = page.locator("#panelBody details.trk", { hasText: "Bombo" });
+  await card.evaluate(d => { d.open = true; });
+  // ¿Qué mueve? → «Brillo» de la superficie seleccionada.
+  await card.getByRole("button", { name: "＋ Que mueva…" }).click();
+  await page.locator("#modal.show input.text-in").last().fill("brillo");
+  await page.locator("#modal.show .trk-targets .chip").first().click();
+  await page.locator("#panelBody .trk-transport").getByRole("button", { name: /Reproducir las pistas/ }).click();
+  const r = await page.evaluate(async (id) => {
+    const a = window.__lumamap, vals = [], seen = { max: 0, min: 1 };
+    for (let k = 0; k < 60; k++) { await new Promise(r => setTimeout(r, 50)); const v = a.S.levels.tracks?.[id] ?? 0; seen.max = Math.max(seen.max, v); seen.min = Math.min(seen.min, v); vals.push(v); }
+    const lfo = a.S.project.settings.lfos.find(l => l.shape === "track:" + id);
+    // El nodo CHOP «Pistas de audio» da un canal «bombo».
+    const G = await import("./js/td/graph.js"); let n, c;
+    a.edit(() => { n = G.newNetwork("Pistas"); a.S.project.networks.push(n); c = G.addNode(n, "CHOP", "tracks"); });
+    await a.ensureTd?.(); let ch = null;
+    for (let k = 0; k < 20 && !ch; k++) { a.td.ensureFrame(performance.now() / 1000 + k, a.S.levels); ch = a.td.cookers.get(n.id)?.chop(c)?.names; await new Promise(r => setTimeout(r, 50)); }
+    a.edit(() => { a.S.project.networks.splice(a.S.project.networks.indexOf(n), 1); });
+    a.tracks.stop();
+    return { ...seen, lfo: lfo && { param: lfo.param }, pos: a.tracks.duration, err: a.tracks.err[id] || "", ch };
+  }, id);
+  assert.equal(r.err, "");
+  assert.ok(r.pos > 3.9 && r.pos < 4.1, "el stem dura 4 s: " + r.pos);
+  assert.ok(r.max > 0.7, "late con el bombo: máx " + r.max); assert.ok(r.min < 0.2, "y vuelve a bajar: mín " + r.min);
+  assert.ok(r.lfo && /brightness|master/.test(r.lfo.param), "mueve el brillo: " + JSON.stringify(r.lfo));
+  assert.deepEqual(r.ch, ["bombo"]);
+  await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.S.project.settings.tracks.list = []; a.S.project.settings.lfos = a.S.project.settings.lfos.filter(l => !l.shape.startsWith("track:")); }); a.openTab(null); });
+});
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const g = await pctx.newPage();

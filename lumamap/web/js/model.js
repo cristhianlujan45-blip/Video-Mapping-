@@ -8,6 +8,7 @@
 // como en los media servers profesionales. Funciona en navegador y en Node.
 import { gridFromCorners, regularPolygon, starPolygon } from "./math.js";
 import { normalizeLfos } from "./lfo.js";
+import { normalizeTracks } from "./tracks.js";
 import { normalizePanel } from "./mypanel.js";
 import { defaultDeck, normalizeDeck } from "./deck.js";
 import { DEFAULT_PLAY, normalizePlay } from "./transport.js";
@@ -794,6 +795,7 @@ export function defaultSettings() {
     vj: { style: "techno", intensity: 0.7, variety: false, recolor: true, palette: null, clips: [] },
     // «Animar al ritmo»: parámetros que suben y bajan solos con el tempo (lfo.js).
     lfos: [],
+    tracks: { list: [], loop: true },
     panel: [],
     // Mesa de clips (como la cuadrícula de Resolume): filas = superficies (deck.js).
     deck: defaultDeck(),
@@ -1046,6 +1048,7 @@ export function normalizeProject(json) {
     interactive: normalizeInteractive(st.interactive),
     vj: { ...D.vj, ...(st.vj || {}), clips: Array.isArray(st.vj?.clips) ? st.vj.clips.slice(0, 300) : [] },
     lfos: normalizeLfos(st.lfos),
+    tracks: normalizeTracks(st.tracks),
     panel: normalizePanel(st.panel),
     deck: normalizeDeck(st.deck),
   };
