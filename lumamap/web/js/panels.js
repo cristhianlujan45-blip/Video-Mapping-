@@ -16,6 +16,7 @@ import { ffglControls } from "./panels-ffgl.js";
 import { vjSection } from "./panels-vj.js";
 import { signalsSection } from "./panels-signals.js";
 import { tracksSection } from "./panels-tracks.js";
+import { visualsSection } from "./panels-visuals.js";
 import { myPanelSection } from "./panels-mypanel.js";
 import { deckSection } from "./panels-deck.js";
 import { openPhoneCam } from "./panels-phonecam.js";
@@ -509,6 +510,7 @@ const content = {
         }
         A.setSource({ type: id });
       } }));
+    wrap.append(visualsSection(app));
     if (src.type === "projector3d") {
       wrap.append(section("Proyector 3D", hint("Esta superficie muestra lo que ve el proyector virtual: colócala a pantalla completa en la salida de ese proyector."),
         h("div", { class: "chips" }, ...projs.map(p => h("button", { class: `chip ${src.projectorId === p.id ? "on" : ""}`, onclick: () => A.setSource({ projectorId: p.id }) }, p.name)))));

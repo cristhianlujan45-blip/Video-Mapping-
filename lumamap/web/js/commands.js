@@ -83,6 +83,9 @@ export function buildCommands(app) {
   add("En vivo", "goAll", "GO: fundir todas las pantallas a lo siguiente", () => A.goAll(), { keys: "Enter", ic: "play" });
   add("En vivo", "randomAll", "Todas las pantallas al azar", () => A.randomAll(), { keys: "Shift+Enter", ic: "shuffle" });
   add("En vivo", "randomSel", "Siguiente al azar en la superficie", () => S.sel && A.randomNext(S.sel), { keys: "Z", ic: "shuffle", needsSel: true });
+  add("En vivo", "visualNext", "Mis visuales: siguiente (en la superficie)", () => A.visualStep?.(1), { ic: "play" });
+  add("En vivo", "visualPrev", "Mis visuales: anterior", () => A.visualStep?.(-1), { ic: "play" });
+  add("En vivo", "visualSave", "Mis visuales: guardar lo de esta superficie", () => A.visualSave?.(), { ic: "plus", needsSel: true });
   add("En vivo", "goSel", "GO en la superficie seleccionada", () => S.sel && A.go(S.sel), { keys: "X", ic: "play", needsSel: true });
   add("Proyección", "here", "Usar esta pantalla como proyector", () => A.projectHere(!S.projecting), { keys: "P", ic: "fit" });
   add("Proyección", "guides", "Guías en el proyector", A.toggleGuides, { keys: "G", ic: "grid" });

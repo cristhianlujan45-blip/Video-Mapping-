@@ -1260,6 +1260,48 @@ await test("pistas de audio (multipista): un stem de bombo suena, su ADSR late c
   assert.deepEqual(r.ch, ["bombo"]);
   await page.evaluate(() => { const a = window.__lumamap; a.edit(() => { a.S.project.settings.tracks.list = []; a.S.project.settings.lfos = a.S.project.settings.lfos.filter(l => !l.shape.startsWith("track:")); }); a.openTab(null); });
 });
+await test("mis visuales (presets): guardar una superficie con miniatura, cambiarla, ponerla con un toque (con lo que se mueve solo), ◀ ▶ y exportar", async () => {
+  const r0 = await page.evaluate(async () => {
+    const a = window.__lumamap, A = a.actions;
+    localStorage.removeItem("lumamap:visuals");
+    A.addShape("rect");
+    const s = a.surf();
+    A.setSource({ type: "gen", gen: "plasma" });
+    a.edit(() => { a.lookSel().fx.kaleido = 6; a.S.project.settings.lfos.push({ id: "lfoVisTest", param: `surf/${s.id}/fx/zoom`, shape: "sine", beats: 4, lo: 0.2, hi: 0.8, on: true, smooth: 0, gain: 1 }); });
+    await new Promise(r => setTimeout(r, 300));
+    const v = await A.visualSave("Plasma caleido", "Pruebas");
+    // Se cambia todo…
+    A.setSource({ type: "color", color: "#ff0000" });
+    a.edit(() => { a.lookSel().fx.kaleido = 0; a.S.project.settings.lfos = a.S.project.settings.lfos.filter(l => l.id !== "lfoVisTest"); });
+    a.openTab("content");
+    return { id: v?.id, thumb: v?.thumb?.length || 0, sid: s.id };
+  });
+  assert.ok(r0.id, "guardado"); assert.ok(r0.thumb > 500, "con miniatura de verdad: " + r0.thumb);
+  // …y un toque en su tarjeta lo devuelve (contenido, efectos y lo que se movía solo).
+  const card = page.locator(`#panelBody .viscard[data-vis="${r0.id}"]`);
+  await card.waitFor();
+  await card.click();
+  const r = await page.evaluate((sid) => { const a = window.__lumamap, l = a.lookSel(); return { gen: l.source.gen, type: l.source.type, k: l.fx.kaleido, lfo: a.S.project.settings.lfos.filter(x => x.param === `surf/${sid}/fx/zoom`).map(x => [x.shape, x.lo, x.hi]) }; }, r0.sid);
+  assert.deepEqual(r, { gen: "plasma", type: "gen", k: 6, lfo: [["sine", 0.2, 0.8]] });
+  // ◀ ▶ y por MIDI/teclado (acción global): con dos visuales va y vuelve.
+  const steps = await page.evaluate(async () => {
+    const a = window.__lumamap, A = a.actions;
+    A.setSource({ type: "color", color: "#00ff00" });
+    const v2 = await A.visualSave("Verde", "Pruebas");
+    const seen = [];
+    for (let k = 0; k < 3; k++) { A.visualStep(1); seen.push(a.lookSel().source.type); }
+    const { describe } = await import("./js/params.js");
+    describe(a, "global/visualPrev")?.set?.(1);
+    seen.push(a.lookSel().source.type);
+    const Vis = await import("./js/visuals.js");
+    const json = Vis.exportVisuals(Vis.loadVisuals());
+    return { seen, exported: Vis.importVisuals(json, []).length, v2: !!v2 };
+  });
+  assert.ok(steps.v2);
+  assert.equal(new Set(steps.seen.slice(0, 3)).size, 2, "alterna entre los dos: " + steps.seen);
+  assert.equal(steps.exported, 2);
+  await page.evaluate(() => { localStorage.removeItem("lumamap:visuals"); window.__lumamap.openTab(null); });
+});
 await test("redes de nodos en el teléfono: tocar la salida y luego otro nodo los conecta; el panel de parámetros va abajo", async () => {
   const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const g = await pctx.newPage();

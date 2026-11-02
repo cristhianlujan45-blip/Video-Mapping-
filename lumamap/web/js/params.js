@@ -90,6 +90,8 @@ const GLOBAL = {
   goAll: ["GO: fundir todas a lo siguiente", "trigger", 0, 1, 0, null, (a) => a.actions.goAll()],
   randomAll: ["Todas al azar", "trigger", 0, 1, 0, null, (a) => a.actions.randomAll()],
   tap: ["TAP tempo", "trigger", 0, 1, 0, null, (a) => a.actions.tap()],
+  visualNext: ["Mis visuales: siguiente", "trigger", 0, 1, 0, null, (a) => a.actions.visualStep?.(1)],
+  visualPrev: ["Mis visuales: anterior", "trigger", 0, 1, 0, null, (a) => a.actions.visualStep?.(-1)],
   bpm: ["Tempo (BPM)", "float", 40, 240, 120, (a) => a.S.project.settings.bpm || 120, (a, v) => a.actions.setBpm(Math.round(v * 10) / 10)],
   liveFade: ["Duración del fundido (s)", "float", 0, 8, 2, (a) => a.S.liveFade, (a, v) => { a.S.liveFade = v; }],
   react: ["Modo ritmo", "bool", 0, 1, 0, (a) => a.S.project.settings.react.enabled, (a, v) => { if (!!v !== a.S.project.settings.react.enabled) a.actions.toggleReact(); }],

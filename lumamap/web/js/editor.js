@@ -4,6 +4,7 @@
 import * as M from "./model.js";
 import * as Store from "./store.js";
 import { TrackEngine } from "./tracks.js";
+import * as Vis from "./visuals.js";
 import { History } from "./history.js";
 import { Renderer, webgl2Supported } from "./renderer.js";
 import { Compositor, sceneLayers, deckB } from "./compose.js";
@@ -3166,6 +3167,7 @@ function tick(now) {
   // Luces: el video alimenta los pixel maps y los fixtures (muestreo en la GPU).
   dmx.tick(now, { project: RP.project, layers, time: S.clock, levels: S.levels, master: RP.master });
   if (!document.hidden && !S.previewSkip) { drawOverlay(v, view); drawCompare(ovCtx(), v, DPR()); drawLoupe(v, view); }
+  if (thumbReqs.length && !S.previewSkip) for (const r of thumbReqs.splice(0)) r.resolve(captureSurface(r.s, v));
   params.tickFeedback(now);
   if (S.netOut) S.netOut.tick(now);   // salida por red: un fotograma cuando toca
   // Protección de la tarjeta: con shaders en pantalla, tirones muy largos → menos resolución antes de que Windows la reinicie.
@@ -3342,6 +3344,62 @@ function dmxHit(p) {
  * bordes, máscara). Nunca aparece al dibujar ni al trazar a mano: el trazo debe
  * ser directo, sin nada alrededor del cursor.
  */
+/* ---- «🎛 Mis visuales»: guardar y poner presets de una superficie ---- */
+const thumbReqs = [];
+/** Miniatura (192×108, JPEG) de lo que se ve en una superficie: se toma justo después de dibujar. */
+function captureSurface(s, v) {
+  try {
+    const b = bbox(s.points), pk = previewK(), W = 192, H = 108;
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const g = c.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+    const x = (b.x * v.sx + v.tx) * pk, y = (b.y * v.sy + v.ty) * pk, w = Math.max(1, b.w * v.sx * pk), h = Math.max(1, b.h * v.sy * pk);
+    const k = Math.min(W / w, H / h);
+    g.drawImage($("#gl"), x, y, w, h, (W - w * k) / 2, (H - h * k) / 2, w * k, h * k);
+    return c.toDataURL("image/jpeg", 0.72);
+  } catch { return ""; }
+}
+const thumbOf = (s) => new Promise((resolve) => { thumbReqs.push({ s, resolve }); setTimeout(() => resolve(""), 1500); });
+let visCurrent = null;
+A.visuals = () => Vis.loadVisuals();
+/** Guarda lo de la superficie elegida (contenido, efectos y lo que se mueve solo) como un visual. */
+A.visualSave = async (name = "", folder = "") => {
+  const s = surf(), look = lookSel();
+  if (!s || !look) { toast("Elige antes una superficie", "warn"); return null; }
+  const thumb = await thumbOf(s);
+  const list = Vis.loadVisuals();
+  const v = Vis.makeVisual({ look, surfId: s.id, lfos: S.project.settings.lfos, name: name || `${s.name} ${new Date().toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}`, folder: folder || "General", thumb,
+    mediaName: (id) => S.project.media.find(m => m.id === id)?.name || "" });
+  try { Vis.saveVisuals([v, ...list]); } catch (e) { toast(e.message, "err"); return null; }
+  visCurrent = v.id;
+  toast(`🎛 Guardado en «${v.folder}»: ${v.name}`);
+  return v;
+};
+/** Pone un visual en una superficie (la elegida si no se dice), sustituyendo lo que se movía solo en ella. */
+A.visualApply = (id, sid = S.sel) => {
+  const v = Vis.loadVisuals().find(x => x.id === id), s = S.project.surfaces.find(x => x.id === sid);
+  if (!v || !s) { toast(!s ? "Elige antes una superficie" : "Ese visual ya no existe", "warn"); return false; }
+  const missing = v.look.source?.mediaId && !S.project.media.some(m => m.id === v.look.source.mediaId);
+  app.edit(() => {
+    const sc = scene(), base = sc.looks[s.id] || M.createLook();
+    const plan = Vis.applyPlan(v, s.id, base);
+    sc.looks[s.id] = plan.look;
+    const mine = new RegExp(`^surf/(?:${s.id}|sel)/`);
+    S.project.settings.lfos = [...S.project.settings.lfos.filter(l => !(mine.test(l.param) && (s.id === S.sel || !l.param.startsWith("surf/sel/")))), ...plan.lfos];
+  });
+  visCurrent = v.id;
+  toast(missing ? `🎛 ${v.name} · falta su video (${v.media[0] || "no está en este proyecto"})` : `🎛 ${v.name}`, missing ? "warn" : "");
+  return true;
+};
+/** Siguiente / anterior visual (en la carpeta del actual), en la superficie elegida. */
+A.visualStep = (dir = 1) => {
+  const list = Vis.loadVisuals(), cur = list.find(v => v.id === visCurrent);
+  const nx = Vis.stepVisual(list, visCurrent, dir, cur?.folder || "");
+  if (!nx) { toast("Aún no tienes visuales guardados (Contenido → 🎛 Mis visuales)", "warn"); return; }
+  if (!S.sel && S.project.surfaces[0]) select(S.project.surfaces[0].id);
+  A.visualApply(nx.id);
+};
+app.visualCurrent = () => visCurrent;
+
 function drawLoupe(v) {
   const lp = $("#loupe");
   const active = G && G.at && ["point", "edge", "draftPoint", "mask"].includes(G.type) && pointers.size === 1 && S.mode !== "draw";

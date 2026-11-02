@@ -1127,3 +1127,13 @@ body.tdopen #notices{z-index:81;}
 .trk-targets h4{margin:8px 0 4px;font-size:13px;}
 .chipx{margin-left:6px;opacity:.7;} .chipx:hover{opacity:1;}
 .warnline{color:var(--warn);font-size:13px;}
+
+/* ---- Mis visuales (presets) ---- */
+.visuals>summary{list-style:none;cursor:pointer;} .visuals>summary::-webkit-details-marker{display:none;}
+.visbody{display:flex;flex-direction:column;gap:8px;}
+.visgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
+.viscard{position:relative;display:flex;flex-direction:column;gap:2px;text-align:left;padding:5px;border-radius:12px;background:var(--bg3);border:2px solid transparent;}
+.viscard.on{border-color:var(--acc);}
+.viscard img,.visnothumb{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#000;display:flex;align-items:center;justify-content:center;font-size:26px;}
+.viscard b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.vismore{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;background:#000a;text-align:center;line-height:24px;font-weight:700;}
